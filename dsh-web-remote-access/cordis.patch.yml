@@ -1,0 +1,64 @@
+# dsh-web-remote-access bundle patch: remote Web access with NO access token.
+# Applied after the dsh-base and dsh-web-app layers. Rows here override the
+# web-app rows by id; replacements mount this bundle's forked plugins under
+# new ids. The webStartup service contract is preserved, so the web-app rows
+# that read it keep working.
+
+# The web-app startup row rejects --host 0.0.0.0; replace it with this
+# bundle's startup fork, which serves the same `webStartup` service plus
+# `openBrowser` (from --no-open) and allows an all-interfaces bind.
+- id: web-startup
+  disabled: true
+
+# The stock webserver binds loopback behavior unchanged; replace it with the
+# forked implementation that provides the same ctx.webServer contract and
+# presents /api requests as loopback so the full UI works from a LAN browser.
+- id: webserver
+  disabled: true
+
+# web-app's URL line is fine but the fork prints the same bind-dependent
+# line; the model-visible surface context (web-surface prompt and
+# DSH_WEB_URL bash variable) stays mounted. openBrowser is passed through
+# from the startup so `--no-open` suppresses the browser handoff.
+- id: web-runtime
+  config:
+    openBrowser: !!js ctx.webStartup.openBrowser
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: !!js ctx.webStartup.trustedHosts
+
+- insert:
+    - id: web-remote-startup
+      name: '@studyzy/dsh-web-remote-access/startup'
+
+    - id: webserver-gated
+      name: '@studyzy/dsh-web-remote-access/webserver'
+      inject: [webStartup]
+      config:
+        host: !!js ctx.webStartup.host ?? '127.0.0.1'
+        port: !!js ctx.webStartup.port ?? 3080
+
+    - id: web-remote-url
+      name: '@studyzy/dsh-web-remote-access/url'
+      inject: [webStartup, webServer]
+      config:
+        printUrl: true
+
+    # Insecure-origin polyfill: crypto.randomUUID is secure-context-only and
+    # undefined over plain HTTP on a LAN IP; the tap injects a getRandomValues
+    # fallback into the served index so client bundles (RPC ids, attachments)
+    # do not throw — which also keeps the WebSocket readiness handshake alive.
+    - id: web-remote-polyfill
+      name: '@studyzy/dsh-web-remote-access/polyfill'
+      inject: [webServer]
+
+    # Remote-access settings: the host half registers /api/remote-access/status
+    # (bind info, access URLs, scan-to-open QR); the client half registers the
+    # "远程访问" settings page. The bare-package row is the loader entry that
+    # carries the dsh.client declaration, so the browser composes lib/client.js.
+    - id: web-remote-settings-api
+      name: '@studyzy/dsh-web-remote-access/settings-api'
+      inject: [webServer, webStartup]
+
+    - id: web-remote-settings-ui
+      name: '@studyzy/dsh-web-remote-access'
