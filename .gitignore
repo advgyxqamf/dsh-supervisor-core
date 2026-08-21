@@ -7,3 +7,6 @@ build/
 *.log
 .dsh/
 .memory/
+# Tauri 构建产物（~1GB，禁止入库）
+src-tauri/target/
+dsh-supervisor/src-tauri/target/
