@@ -1,6 +1,8 @@
 node_modules/
 .DS_Store
 dist/
+!dsh-supervisor/src/domain/dist/
+!src/domain/dist/
 build/
 .next/
 .venv/
