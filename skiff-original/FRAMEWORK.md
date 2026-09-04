@@ -49,3 +49,26 @@ src/
 - 状态语义色：primary / success(+bg) / warning(+bg) / destructive / careful(+bg) / status-ok(-soft/-ring) / status-error(-ring) / status-brand(-ring)。
 - 页面禁止硬编码色值/字号；字号只走 text-xs..2xl；状态点 = 呼吸光晕双层；状态徽标 = Pill 语义色。
 - 构建：`npm run build` → dist/（supervisor.html + assets/）；多页已移除（单入口）。
+
+---
+
+## 4. 工程治理（2026-09-05 追加）
+
+### 4.1 代码分包（P1）
+- 7 个功能页面经 React.lazy 按需分包（SupervisorApp.tsx），配 Suspense（PageFallback）+ PageErrorBoundary（chunk 加载失败/页面异常白屏兜底，提供刷新入口）。
+- 构建效果：主 vendor+entry 拆双 chunk，各页面独立 chunk（RouterPage~7.5K/LanPage~11K gzip），首屏不再含全部页面代码。
+
+### 4.2 UI 基件（U1）
+- 新增 Select / AlertDialog（radix-ui 令牌化，barrel 已导出），PluginsPage / RouterPage 的 4 处裸 <select> 已迁移；
+- 原生 confirm() 保留（同步确认语义在单 WebView 场景可接受；AlertDialog 已备好，后续按需替换）。
+
+### 4.3 质量门禁
+- scripts：typecheck（tsc --noEmit）/ lint（eslint src）/ test（vitest run）/ verify（四者串联）。
+- ESLint：flat config + @babel/eslint-parser（preset-typescript + preset-react，字符串引用）。
+  **原因（2026-09 定案）**：项目 TypeScript 7.0（preview 标 latest）与 typescript-eslint peer 上限 <6.1 冲突且运行时硬拒 TS7 —— eslint 侧放弃类型规则，纯类型由 tsc strict + noUnusedLocals 承担。
+- 单元测试：vitest（node env）+ vi.stubGlobal fetch 注入；覆盖 polling 事件合并去重 / in-flight 守卫、client 错误归一化与超时信号装配。
+
+### 4.4 版本控制
+- skiff-original 整体入外层 git 仓（2026-09-05，commit 3f87482）；dist/ node_modules/ 不入库。
+- ui-react/ 为 dsh-supervisor 侧 gitignore 的构建镜像（release.sh 生成），不入库。
+
