@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
@@ -23,10 +27,24 @@
     "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/plugin-syntax-jsx": "^8.0.1",
+    "@babel/preset-react": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
+    "@eslint/js": "^10.0.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@typescript-eslint/parser": "^8.69.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^17.12.0",
+    "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
-    "vite": "^8.2.2"
+    "typescript-eslint": "^8.69.0",
+    "typescript6": "npm:typescript@^6.0.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
   }
 }

@@ -47,7 +47,7 @@ async function http<T>(method: string, path: string, body?: unknown, opts?: Http
     res = await fetch(BASE + path, init);
   } catch (e) {
     if (e instanceof DOMException && e.name === "TimeoutError") {
-      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s）：${path}`);
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)}s）：${path}`, { cause: e });
     }
     throw e;
   } finally {

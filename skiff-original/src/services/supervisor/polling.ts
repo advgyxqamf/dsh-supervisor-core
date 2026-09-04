@@ -118,10 +118,22 @@ export const supervisorStore = {
       void syncAll();
     }, 2000);
   },
-  stop() { if (timer) clearInterval(timer); timer = null; started = false; },
+  stop() {
+    if (timer) clearInterval(timer);
+    timer = null; started = false;
+    // 卸载后彻底清场：事件保留（宿主重挂载时可续看），但复位运行态守卫标记
+    busy = false; eventsBusy = false;
+  },
   /** 任意写操作后立即同步一次（操作 → 同步 → 渲染） */
   refresh() {
     void refreshEvents();
     void syncAll();
+  },
+  /** 测试专用：清空快照与订阅（仅在 vitest 中调用） */
+  _resetForTest() {
+    listeners.clear();
+    snap = empty();
+    busy = false; eventsBusy = false; started = false;
+    if (timer) clearInterval(timer); timer = null;
   },
 };

@@ -468,7 +468,7 @@ function AccountRow({ a, p, busy, onAction }: { a: ProviderAccount; p: RouterPro
     : limitKind === "banned" ? "账号被封禁" : null;
   const stats = formatCount(a.requests || 0) + " 次 · " + formatCount(a.totalTokens || 0) + " tok";
   const [quotaOpen, setQuotaOpen] = useState(false);
-  let actionBtn: React.ReactNode = null;
+  let actionBtn: React.ReactNode;
   if (status === "review") {
     actionBtn = (
       <>

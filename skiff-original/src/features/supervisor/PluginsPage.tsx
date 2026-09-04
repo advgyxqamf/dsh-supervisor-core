@@ -254,7 +254,8 @@ function InstalledTab() {
     // 更新后这些插件不再是待更新项 → 从 updatable 移除（按钮回归「检查更新」态）
     setUpdatable((prev) => { const n = new Map(prev); for (const x of names) n.delete(x); return n; });
     await run("upd-sel", async () => {
-      for (const n of names) { try { await supervisorApi.pluginUpdate(n); } catch {} }
+      // 单个插件提交失败不阻断批量：失败项会留在任务中心/由用户重试
+for (const n of names) { try { await supervisorApi.pluginUpdate(n); } catch { /* 单点失败跳过 */ } }
     }, { success: "已提交 " + names.length + " 个插件的更新任务", refresh: false, onDone: () => void load() });
   }
   async function uninstallSelected() {
@@ -262,7 +263,7 @@ function InstalledTab() {
     if (!confirm("将卸载所选 " + names.length + " 个插件：\n" + names.join("\n") + "\n\n确定继续？")) return;
     setSelected(new Set());
     await run("uni-sel", async () => {
-      for (const n of names) { try { await supervisorApi.pluginUninstall(n); } catch {} }
+      for (const n of names) { try { await supervisorApi.pluginUninstall(n); } catch { /* 单点失败跳过 */ } }
     }, { success: "已提交 " + names.length + " 个插件的卸载任务", refresh: false, onDone: () => void load() });
   }
   /** 批量停止（停用当前启用的所选插件） */
@@ -270,7 +271,7 @@ function InstalledTab() {
     const names = stopSel.map((p) => p.name);
     setSelected(new Set());
     await run("stop-sel", async () => {
-      for (const n of names) { try { await supervisorApi.pluginDisable(n); } catch {} }
+      for (const n of names) { try { await supervisorApi.pluginDisable(n); } catch { /* 单点失败跳过 */ } }
     }, { success: "已停止 " + names.length + " 个插件", refresh: false, onDone: () => void load() });
   }
   /** 批量启动（启用当前停用的所选插件） */
@@ -278,7 +279,7 @@ function InstalledTab() {
     const names = startSel.map((p) => p.name);
     setSelected(new Set());
     await run("start-sel", async () => {
-      for (const n of names) { try { await supervisorApi.pluginEnable(n); } catch {} }
+      for (const n of names) { try { await supervisorApi.pluginEnable(n); } catch { /* 单点失败跳过 */ } }
     }, { success: "已启动 " + names.length + " 个插件", refresh: false, onDone: () => void load() });
   }
 
