@@ -1,0 +1,51 @@
+# dsh-supervisor 控制面板（React UI）— 架构文档
+
+> 单产品：dsh-supervisor 控制面板（原 skiff-original 清理工具 App 已整体删除，2026-09-02）。
+> 技术栈：React 19 + TypeScript 7 + Vite 8（Rolldown）+ Tailwind 4 + Radix UI + lucide-react + sonner + next-themes。
+> 宿主：由 dsh-supervisor 内核 HTTP API（127.0.0.1:3100）同源托管（GET / → supervisor.html → React 入口）。
+
+---
+
+## 1. 目录结构（全部源文件）
+
+```
+src/
+  main-supervisor.tsx         入口（唯一）：ReactDOM → AppProviders → SupervisorApp
+  app/providers.tsx           ThemeProvider(next-themes) + Toaster（无 i18n、无宿主注入）
+  framework/                  业务无关、可复用（无 Tauri/i18n 依赖）
+    theme/                    tokens.css（设计令牌 :root/.dark + @theme inline）· shell.css · fonts.css（Inter/Noto SC）· scrollbar.css
+    ui/                       15 个 Radix+CVA 基件（Button/Badge/Dialog/Input/...，barrel index.ts）
+    layout/                   AppShell/AppLayout/AppSidebar/Toolbar/ContentArea/StatusBar/Page/ScrollArea
+    hooks/                    useAsync（通用）
+    utils.ts                  cn（clsx+tailwind-merge）· waitForNextFrame · formatDateTime
+    format.ts                 formatSize / formatCount / formatTime / formatDate
+  features/supervisor/        业务页面（只依赖 framework + services/supervisor）
+    SupervisorApp.tsx         壳：AppSidebar(7 域) + Toolbar + ContentArea + StatusBar
+    nav.ts                    导航配置 + 阶段/任务/事件元数据（阶段 tone、友好文案）
+    widgets.tsx               标准展示基件（ToneDot/Pill/Card/CardTitle/Metric/DetailRow/QuotaBar/...）
+    OverviewPage.tsx          控制面板（状态/版本/升级/事件日志）
+    InstancesPage.tsx         实例管理（沙箱实例增删启停/守护/版本检测/升级）
+    RouterPage.tsx            智能路由（路由启停/用量/供应商/账号额度/激活）
+    TasksPage.tsx             任务中心（统一安装/升级/卸载/更新任务历史）
+    PluginsPage.tsx           插件商店（市场浏览/搜索/已装管理/启停/卸载）
+    LanPage.tsx               远程控制（LAN 代理 + FRP 公网穿透）
+    SettingsPage.tsx          设置（自启/局域网访问/版本环境/镜像源）
+  services/supervisor/        数据层（唯一直接 fetch 的模块）
+    types.ts                  全量领域类型（对齐 HTTP API 实契约）
+    client.ts                 同源 HTTP 客户端（GET/POST 全端点）
+    polling.ts                运行态轮询中心（2s 快照：/status /instances /lan-access /lan/frp /router/status /router/providers + /events 增量）
+    index.ts                  useSupervisorData hook（useSyncExternalStore）
+```
+
+## 2. 数据流
+
+- **服务端**：dsh-supervisor `src/presentation/api.js`（127.0.0.1:3100）——HTML 由 `ui-react`（发布）/ `../skiff-original/dist`（开发）解析；API 同源。
+- **前端轮询**：`polling.ts` 每 2s 并行拉运行态 + 增量事件（after=seq），写入不可变快照并广播；
+  页面经 `useSupervisorData()` 订阅渲染；写操作经 `supervisorApi.*` → `store.refresh()` 立即同步。
+- **UI 文案**：硬编码中文（单一语言产品）。设计令牌定义浅/深主题，暗色经 `next-themes` 跟随系统切换。
+
+## 3. 令牌与规范要点（详见 src/framework/theme/tokens.css）
+
+- 状态语义色：primary / success(+bg) / warning(+bg) / destructive / careful(+bg) / status-ok(-soft/-ring) / status-error(-ring) / status-brand(-ring)。
+- 页面禁止硬编码色值/字号；字号只走 text-xs..2xl；状态点 = 呼吸光晕双层；状态徽标 = Pill 语义色。
+- 构建：`npm run build` → dist/（supervisor.html + assets/）；多页已移除（单入口）。
