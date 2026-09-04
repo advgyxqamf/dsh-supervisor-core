@@ -78,10 +78,12 @@ export function PortPanel({ providers = [] }: { providers?: RouterProvider[] }) 
                 </div>
                 <div className="flex justify-end"><Pill tone={roleTone(r.role, r.owner)}>{resolveOwner(r, providers)}</Pill></div>
                 <div className="flex justify-end">
-                  {r.active ? (
+                  {r.active === true ? (
                     <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-status-ok"><CircleDot className="size-3" />激活</span>
-                  ) : (
+                  ) : r.active === false ? (
                     <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground"><CircleDot className="size-3 opacity-50" />停用</span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground"><CircleDot className="size-3 opacity-40" />状态未知</span>
                   )}
                 </div>
               </div>
