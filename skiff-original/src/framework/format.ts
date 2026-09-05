@@ -22,28 +22,3 @@ export function formatSize(size: number) {
   return `${size} B`;
 }
 
-export function formatCount(value: number, locale = "zh-CN") {
-  return value.toLocaleString(locale);
-}
-
-export function formatTime(value: Date, locale = "zh-CN") {
-  return value.toLocaleTimeString(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-export function formatDate(
-  value: number | null,
-  locale = "zh-CN",
-  emptyLabel = "Unknown time",
-) {
-  if (!value) {
-    return emptyLabel;
-  }
-
-  return new Date(value * 1000).toLocaleDateString(locale, {
-    month: "2-digit",
-    day: "2-digit",
-  });
-}

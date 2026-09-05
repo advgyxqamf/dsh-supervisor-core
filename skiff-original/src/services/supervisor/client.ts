@@ -9,10 +9,10 @@
  * ============================================================================
  */
 import type {
-  AccessKeyResult, AccessKeyStatus, AutostartStatus, DshEnvStatus, EnvStatus, EventsPage, FrpStatus, GenericOk,
+  AccessKeyResult, AccessKeyStatus, AutostartStatus, EnvStatus, EventsPage, FrpStatus, GenericOk,
   GuardVersion, InstancesResponse, InstalledPluginsResponse, LanAccessResponse,
-  LanPanelStatus, LifecycleModuleId, LifecycleResponse, MarketResponse, NodeLtsStatus, PluginInstallStatus, PluginUpdatesResponse,
-  PortsResponse, ProvidersResponse, ProxyUpdateStatus, RegistryInfo, RouterStatus,
+  LanPanelStatus, LifecycleModuleId, MarketResponse, NodeLtsStatus, PluginUpdatesResponse,
+  PortsResponse, ProvidersResponse, RegistryInfo, RouterStatus,
   SelfUpdateStatus, SupervisorStatus, TasksResponse,
 } from "./types";
 
@@ -83,14 +83,10 @@ export const supervisorApi = {
   providers: () => get<ProvidersResponse>("/router/providers"),
   tasks: () => get<TasksResponse>("/tasks"),
   ports: () => get<PortsResponse>("/ports"),
-  nativeStatus: () => get<GenericOk & { installed: boolean; version?: string; upgrade?: unknown; versionInfo?: unknown }>("/native/status"),
-
   // ── 统一生命周期（2026-09 归一化：模块启停/状态单一控制路径 /lifecycle/{id}/…，
   //    取代分散的 /start|/stop|/router/start|/router/stop —— 后端语义等价且 daemon 监督感知）──
-  lifecycleStatus: () => get<LifecycleResponse>("/lifecycle/status"),
   lifecycleStart: (id: LifecycleModuleId) => post<GenericOk & { ok?: boolean }>("/lifecycle/" + id + "/start"),
   lifecycleStop: (id: LifecycleModuleId) => post<GenericOk & { ok?: boolean }>("/lifecycle/" + id + "/stop"),
-  lifecycleRestart: (id: LifecycleModuleId) => post<GenericOk & { ok?: boolean }>("/lifecycle/" + id + "/restart"),
 
   // ── native DSH ──
   nativeCheckUpdate: () => post<GenericOk>("/native/check-update"),
@@ -109,7 +105,6 @@ export const supervisorApi = {
   instanceOpenWeb: (id: string) => post<GenericOk & { url?: string }>("/instances/open-web", { id }),
   instanceCheckUpdate: (id: string) => post<GenericOk & { updateAvailable?: boolean; latest?: string; installed?: string }>("/instances/check-update", { id }),
   instanceUpgrade: (id: string) => post<GenericOk>("/instances/upgrade", { id }),
-  instanceUpgradeStatus: (id: string) => post<GenericOk & { state?: string; step?: string; error?: string }>("/instances/upgrade/status", { id }),
 
   // ── router（模块启停已并入 /lifecycle/router/…；下方为供应商/账号管理端点）──
   providerAdd: (p: { name?: string; presetId?: string; kind?: string; appId?: string; keys?: string[] }) =>
@@ -132,7 +127,6 @@ export const supervisorApi = {
   proxyLoginWait: (timeoutMs: number) => post<GenericOk & { apiKey?: string }>("/router/proxy/login/wait", { timeoutMs }, { timeoutMs: Math.max(LONG_TIMEOUT_MS, timeoutMs + 30_000) }),
   proxyUpdateCheck: () => post<GenericOk>("/router/proxy/update/check"),
   proxyUpdateApply: (appId: string) => post<GenericOk>("/router/proxy/update/apply", { appId }),
-  proxyUpdateStatus: (appId: string) => get<ProxyUpdateStatus>(qs("/router/proxy/update/status", { appId })),
 
   // ── plugins ──
   market: (force = false) => get<MarketResponse>("/plugins/market" + (force ? "?refresh=1" : "")),
@@ -143,7 +137,6 @@ export const supervisorApi = {
   pluginDisable: (name: string) => post<GenericOk>("/plugins/disable", { name, target: "all" }),
   pluginUpdate: (name: string) => post<GenericOk & { jobId?: string }>("/plugins/update", { name, target: "all" }),
   pluginUninstall: (name: string) => post<GenericOk & { jobId?: string }>("/plugins/uninstall", { name, target: "all" }),
-  pluginInstallStatus: (job: string) => get<PluginInstallStatus>(qs("/plugins/install-status", { job })),
 
   // ── lan / frp ──
   frpSettings: (s: { serverAddr: string; serverPort: number; authToken: string }) =>
@@ -166,6 +159,5 @@ export const supervisorApi = {
   guardVersion: () => get<GuardVersion>("/guard/version"),
   guardVersionCheck: () => post<GuardVersion & { ok?: boolean }>("/guard/version/check"),
   envStatus: () => get<EnvStatus>("/env/status"),
-  envDsh: () => get<DshEnvStatus>("/env/dsh"),
   nodeLts: () => get<NodeLtsStatus>("/env/node-lts"),
 };

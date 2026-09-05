@@ -10,7 +10,7 @@
 import { supervisorApi } from "./client";
 import type {
   EventsPage, FrpStatus, InstancesResponse, LanAccessResponse,
-  PortsResponse, ProvidersResponse, RouterStatus, SupervisorStatus, TasksResponse,
+  PortsResponse, ProvidersResponse, RouterStatus, SupervisorStatus,
 } from "./types";
 
 export interface SupervisorSnapshot {
@@ -22,10 +22,8 @@ export interface SupervisorSnapshot {
   providers: ProvidersResponse | null;
   /** 端口注册表快照（R4 修复：从 PortPanel 独立 5s 轮询收敛进统一心跳） */
   ports: PortsResponse | null;
-  tasks: TasksResponse | null;
   events: EventsPage["events"];
   eventsSeq: number;
-  lastSyncAt: number;
   error: string | null;
   online: boolean;
 }
@@ -33,8 +31,8 @@ export interface SupervisorSnapshot {
 function empty(): SupervisorSnapshot {
   return {
     status: null, instances: null, lan: null, frp: null,
-    router: null, providers: null, ports: null, tasks: null,
-    events: [], eventsSeq: 0, lastSyncAt: 0, error: null, online: false,
+    router: null, providers: null, ports: null,
+    events: [], eventsSeq: 0, error: null, online: false,
   };
 }
 
@@ -67,7 +65,7 @@ async function syncAll() {
     const online = !!status;
     // R4 修复：心跳不再附带 /tasks —— snap.tasks 无消费者（TasksPage 自管本地 state + 手动刷新），
     // 每 2s 白拉一次低频任务列表属于无效网络开销。
-    setPartial({ status, instances, lan, frp, router, providers, ports, online, lastSyncAt: Date.now(), error: null });
+    setPartial({ status, instances, lan, frp, router, providers, ports, online, error: null });
   } catch (e) {
     setPartial({ online: false, error: String(e) });
   } finally {

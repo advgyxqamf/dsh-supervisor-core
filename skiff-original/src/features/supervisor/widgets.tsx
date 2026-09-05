@@ -83,34 +83,6 @@ export function Metric({ icon, label, value, mono = false, warn = false, classNa
   );
 }
 
-/** 普通文字行（label 左 / value 右） */
-export function DetailRow({ label, children }: { label: ReactNode; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-      <span className="text-xs leading-tight text-muted-foreground">{label}</span>
-      <div className="min-w-0 text-sm font-semibold leading-tight text-foreground">{children}</div>
-    </div>
-  );
-}
-
-/** 圆环/线性用量进度条（win-bar 语义化） */
-export function QuotaBar({ percent, label, note }: { percent: number; label: string; note?: ReactNode }) {
-  const p = Math.min(100, Math.max(0, Math.round(percent)));
-  const tone: Tone = p >= 90 ? "err" : p >= 70 ? "warn" : "ok";
-  const fill = tone === "err" ? "bg-destructive"
-    : tone === "warn" ? "bg-warning"
-    : "bg-success";
-  return (
-    <div className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-2">
-      <span className="truncate text-xs text-muted-foreground">{label}</span>
-      <div className="h-1.5 min-w-0 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", fill)} style={{ width: p + "%" }} />
-      </div>
-      <span className="min-w-[56px] text-right text-xs tabular-nums leading-tight text-muted-foreground">{note ?? p + "%"}</span>
-    </div>
-  );
-}
-
 /** 用量框（对齐清理记录三框：label+icon 上 / 主值下，白底描边小框并排）。
  *  危险态(≥100/rate-limited)主值用 destructive；否则正常色。 */
 export function QuotaBox({ icon, label, value, note, danger = false }: {
