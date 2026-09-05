@@ -1,8 +1,8 @@
 node_modules/
 .DS_Store
 dist/
-!dsh-supervisor/src/domain/dist/
-!src/domain/dist/
+!dsh-supervisor/src/domains/dist/
+!dsh-supervisor/src/domains/dist/*
 build/
 .next/
 .venv/
@@ -12,3 +12,4 @@ build/
 # Tauri 构建产物（~1GB，禁止入库）
 src-tauri/target/
 dsh-supervisor/src-tauri/target/
+
