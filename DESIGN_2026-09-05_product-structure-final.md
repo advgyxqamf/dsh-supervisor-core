@@ -4,7 +4,8 @@
 ## 0. 文档定位
 
 从产品认知出发，把"系统该长什么样"定稿：三层结构（守卫/功能域/公共机制）、目标目录、搬迁清单、执行顺序。
-目的：先立结构认知，再论代码迁移。API 出口保持单一文件，不在此轮拆。
+目的：先立结构认知，再论代码迁移。
+**执行状态（2026-09-06）：M1（guard/）→M2a/b（platform/ + platform/os/）→M3（router/relay → domains/）→M4（instance/plugin/dist → domains/）→M5（API 拆分 src/api/ 按域分文件）全部落地，测试 26 套件全绿（EXIT=0）。**
 
 ---
 ## 1. 产品认知（定稿）
@@ -30,7 +31,7 @@ DSH 综合管理平台 = 【生命周期守卫】 + 【多功能域】 + 【公�
 - 守卫机制件（lifecycle/monitor/guardian）归守卫类，不进公共机制。
 - 公共机制只放真正的通用设施（镜像源/安装执行器/端口/令牌/事件/任务/日志/配置/版本/fs 等）。
 - 对外发布策略（scripts/*.sh 打包/发布/生成 manifest）= 封装期策略，不是产品内功能，不参与运行时。
-- API 出口：presentation/api.js 保持单一文件不动，待功能增多后再评估拆分。
+- API 出口：presentation/api.js 已于 M5 拆分——src/api/ 目录（index 网关：门卫+静态托管+按域分派；tasks/lifecycle/native/guard/router/plugins/dist/instances/relay 各域文件）。
 
 ---
 ## 2. 逻辑结构（三层）
@@ -68,8 +69,9 @@ src/
 │  ├─ registry.js       # 镜像源管理
 │  ├─ installer.js      # 安装执行器 runNpmInstall
 │  ├─ token / events / tasks / logs / config / version / fs
-├─ presentation/
-│  └─ api.js           # HTTP 出口（保持单一文件，本轮不动）
+├─ api/                  # HTTP 出口（M5 按域拆文件，index 组装）
+│  ├─ index.js           # 网关：门卫 + 静态托管 + 按前缀分派
+│  └─ {tasks,lifecycle,native,guard,router,plugins,dist,instances,relay}.js
 
 ---
 ## 4. 当前结构 → 目标 搬迁清单
@@ -84,7 +86,7 @@ src/
 | 6 | domain/dist 的自更新/运行时升级部分 | domains/dist（保留） | 保留 | 低 |
 | 7 | domain/plugin + pluginmarket | domains/plugin/（含市场） | 基本保留 | 低 |
 | 8 | domain/token + infra/* | platform/（真公共） | 移动 | 中 |
-| 9 | presentation/api.js | 保留单一文件 | 不动 | 低 |
+| 9 | presentation/api.js | src/api/（index 网关 + 按域文件） | M5 已拆 | 低（纯搬移） |
 | 10 | scripts/*.sh + verify-versions | 产品外 | 不动 | 低 |
 
 ---
@@ -120,6 +122,6 @@ src/
 ---
 ## 7. 明确不做（防过度）
 - 不改任何域内部业务逻辑（router 切换/账号、relay 隧道/frp、实例 watchdog 细节）。
-- present/api.js 保持单一文件，不拆。
+- src/api/ 按域拆文件（M5 已落地）；supervisor.js 保持 src/ 顶层。
 - 对外发布策略（scripts/*.sh）不进产品运行时。
 - 守卫不把域内业务（反代实例/账号）收进统一状态机（黑盒边界）；只收 daemon 级 + 聚合健康。

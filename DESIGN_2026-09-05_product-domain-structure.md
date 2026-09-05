@@ -1,5 +1,7 @@
 # 产品认知 → 目标目录结构 定稿（2026-09-05 二轮讨论）
 
+> **执行状态（2026-09-06）**：M1（guard/）→M2a/b（platform/ + platform/os/）→M3（domains/router + domains/relay）→M4（domains/instance/plugin/dist）→M5（API → src/api/ 按域拆文件）已全部落地，26 套件全绿。
+
 ## 1. 第一性：域 = 功能
 
 - **域就是一个功能模块**；有的功能有完整独立生命周期（router/relay/instance，底层配服务），
