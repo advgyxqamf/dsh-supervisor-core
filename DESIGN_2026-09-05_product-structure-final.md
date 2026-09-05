@@ -6,6 +6,7 @@
 从产品认知出发，把"系统该长什么样"定稿：三层结构（守卫/功能域/公共机制）、目标目录、搬迁清单、执行顺序。
 目的：先立结构认知，再论代码迁移。
 **执行状态（2026-09-06）：M1（guard/）→M2a/b（platform/ + platform/os/）→M3（router/relay → domains/）→M4（instance/plugin/dist → domains/）→M5（API 拆分 src/api/ 按域分文件）全部落地，测试 26 套件全绿（EXIT=0）。**
+M4 后原生（native）短期留守 domain/native；**2026-09-06 收编定稿**：原生 DSH 迁入 `src/domains/instance/native/`，作为实例域内 `domain:'native'`（main）特殊实例——与沙箱实例（`domain:'sandbox'`）统一经实例域出口查看/操作（/instances 的 main 条目含版本/更新/升级委托；软件安装/升级/卸载仍走 NativeManager 自洽状态机），/native/* API 保留为同源兼容壳。
 
 ---
 ## 1. 产品认知（定稿）
