@@ -107,7 +107,11 @@ export function LanPage() {
                   <Switch
                     checked={it.remoteEnabled ?? false}
                     disabled={!running}
-                    onCheckedChange={(v) => void run(it.id, () => supervisorApi.instanceUpdate(it.id, { remoteEnabled: v }), { success: v ? "已开启远程控制" : "已关闭远程控制" })}
+                    onCheckedChange={(v) => void run(it.id, () => (
+                      it.domain === "native"
+                        ? supervisorApi.nativeSettings({ remoteEnabled: v }) // 概念清分：main 设置走主干 /native/settings
+                        : supervisorApi.instanceUpdate(it.id, { remoteEnabled: v })
+                    ), { success: v ? "已开启远程控制" : "已关闭远程控制" })}
                   />
                 </div>
               </div>

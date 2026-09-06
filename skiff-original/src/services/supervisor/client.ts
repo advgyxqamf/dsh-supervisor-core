@@ -93,6 +93,9 @@ export const supervisorApi = {
   nativeInstall: () => post<GenericOk>("/native/install"),
   nativeUpgrade: (version?: string) => post<GenericOk>("/native/upgrade", version ? { version } : {}),
   nativeUninstall: () => post<GenericOk>("/native/uninstall"),
+  // 原生主干(main)设置（概念清分：main 设置不走 /instances 沙箱域，统一 /native/settings）
+  nativeSettings: (patch: { guardian?: boolean; remoteEnabled?: boolean; frpEnabled?: boolean; frpRemotePort?: number }) =>
+    post<GenericOk>("/native/settings", patch),
 
   // ── instances ──
   instanceAdd: (p: { name: string; port: number; command?: string[]; memoryMax?: string; cpuQuota?: string }) =>
