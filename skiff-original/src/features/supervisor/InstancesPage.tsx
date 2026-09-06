@@ -32,7 +32,9 @@ export function InstancesPage({ onRegisterActions }: { onRegisterActions?: (a: {
   const [fMem, setFMem] = useState("4G");
   const [fCpu, setFCpu] = useState("150%");
 
-  const items = (snap.instances?.instances ?? []).filter((i) => i.domain === "sandbox");
+  // 概念清分：后端 /instances 已把沙箱与原生拆分——instances[] 即沙箱（原生主干在 native 字段，
+  // 由 Overview 主干卡呈现）。此处不再需要 domain 过滤。
+  const items = snap.instances?.instances ?? [];
 
   // 顶部 Toolbar 动作注册（对齐原版：页面动作按钮渲染在置顶行，点击打开本页 dialog）
   useEffect(() => {

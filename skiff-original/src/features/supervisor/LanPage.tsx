@@ -18,7 +18,11 @@ import { cn } from "../../framework/utils";
 export function LanPage() {
   const { snap } = useSupervisorData();
   const { busy, run } = useSupervisorAction();
-  const instances = snap.instances?.instances ?? [];
+  // 远程控制是横切能力：主干(main, native 字段)与沙箱(instances[])都是可远程的受管 DSH。
+  const instances = [
+    ...(snap.instances?.native ? [snap.instances.native] : []),
+    ...(snap.instances?.instances ?? []),
+  ];
   const lanItems = snap.lan?.items ?? [];
   const addr = (snap.lan?.addresses ?? [])[0] || "";
   const frp = snap.frp;

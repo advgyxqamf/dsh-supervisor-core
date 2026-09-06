@@ -35,7 +35,7 @@ export function OverviewPage() {
   const upg = s?.upgrade;
   const phaseMeta = SUP_PHASE_META[s?.phase ?? ""] ?? { label: s?.phase || "未知", tone: "off" as const };
 
-  const nativeInst = (snap.instances?.instances ?? []).find((i) => i.domain === "native");
+  // 概念清分：原生主干不是沙箱实例列表成员——openWeb 固定目标 main（服务端仅打开浏览器，无沙箱语义）
   const running = Boolean(s?.dshPid);
   const upgradeRunning = upg?.state === "running";
 
@@ -46,8 +46,7 @@ export function OverviewPage() {
     await run("dsh", () => (running ? supervisorApi.lifecycleStop("dsh") : supervisorApi.lifecycleStart("dsh")), { success: running ? "正在停止 DSH…" : "正在启动 DSH…" });
   }
   async function openWeb() {
-    const id = nativeInst?.id ?? "main";
-    await run("web", () => supervisorApi.instanceOpenWeb(id));
+    await run("web", () => supervisorApi.instanceOpenWeb("main"));
   }
   async function checkUpdate() {
     // 检测完成后即时反馈：已是最新 / 发现新版（后端返回 updateAvailable + latest）

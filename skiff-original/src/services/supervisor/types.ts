@@ -148,7 +148,12 @@ export interface SupervisorInstance {
   lanUrl?: string | null;
   lanRunning?: boolean;
 }
-export interface InstancesResponse { instances: SupervisorInstance[]; }
+/** /instances 响应（概念清分）：instances[] 仅沙箱（管理对象）；native 为原生主干 main 的只读条目
+ *  （横切视图如远程控制取用；其生命周期/升级不属沙箱 API——启停走 /lifecycle/dsh/*，安装/升级走 /native/*）。 */
+export interface InstancesResponse {
+  instances: SupervisorInstance[];
+  native?: SupervisorInstance | null;
+}
 
 // ── /lan-access + /lan/frp ──────────────────────────────
 export interface LanItem {
