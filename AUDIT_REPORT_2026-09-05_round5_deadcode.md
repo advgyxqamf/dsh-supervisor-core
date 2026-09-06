@@ -4,6 +4,7 @@
 > 方法：6 路并行子系统审计 + 逐项源码级交叉验证（全仓引用计数/import 链/API 面/构建产物反证/ctl-facade 动态转发语义）。
 > 基准：AUDIT_REPORT_2026-09-03_round4.md 遗留项逐条复核 + 全量扫描当前树新引入死代码。
 > 全程只读，未修改任何源文件。
+> **⚠️ 2026-09-06 更名/布局补注**：本文写作时的前端源码目录 `skiff-original/` 已于 2026-09-06 迁至 `dsh-supervisor/ui/`（`git mv`，历史 100% 保留）。文内所有 "skiff-original" 均指该前端源码目录，现路径为 `dsh-supervisor/ui/`；`ui-react/` 仍为构建产物镜像（release.sh 从 `ui/` 构建）。
 
 ---
 

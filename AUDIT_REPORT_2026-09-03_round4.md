@@ -3,6 +3,7 @@
 > 审计范围：`/home/bowen/develop/plus` 下的 dsh-supervisor（Node 守卫核心 + Rust Tauri 壳）与 skiff-original（React 面板源码）。
 > 审计方式：**逐文件直读**（src 全量 ~48 文件 + bin + ui-react 镜像 + skiff-original/src 全量 + src-tauri/src + test + scripts），辅以跨模块 grep 实证、node --check 全量语法检查、npm test 全链实测。
 > 审计时间：2026-09-03。**纯只读审计，未修改任何源文件**（仅新建本报告文件）。
+> **⚠️ 2026-09-06 更名/布局补注**：本文写作时的前端源码目录 `skiff-original/` 已于 2026-09-06 迁至 `dsh-supervisor/ui/`（`git mv`，历史 100% 保留）。文内所有 "skiff-original" 均指该前端源码目录，现路径为 `dsh-supervisor/ui/`；`ui-react/` 仍为构建产物镜像（release.sh 从 `ui/` 构建）。
 
 ## 0. 执行摘要（TL;DR）
 
