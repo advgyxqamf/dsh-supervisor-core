@@ -122,4 +122,17 @@ export const EVENT_LABELS: Record<string, string> = {
   plugin_update_done: "插件更新完成", plugin_update_job_failed: "插件更新失败",
   plugin_uninstall_started: "插件卸载开始", plugin_uninstall_done: "插件卸载完成",
   plugin_uninstall_job_failed: "插件卸载失败",
+  // 守卫/远端/反代扩展类型（穿透审计后补齐，与后端发射全集对齐）
+  access_key_changed: "访问密钥变更", adopt_token_reclaim_started: "令牌回收重建",
+  autostart_changed: "自启变更", dist_registry_selected: "分发源选定",
+  guard_self_update_applied: "守卫自更新", guardian_action: "守护接管动作",
+  lan_binding_lost: "远程绑定丢失", lan_cookie_exchanged: "远程会话刷新",
+  lan_cookie_failed: "远程会话失败", lan_daemon_started: "远程守护启动",
+  lan_daemon_stopped: "远程守护停止", lan_dsh_token_updated: "远程令牌更新",
+  lan_panel_changed: "远程面板变更", main_meta_migrated: "元数据迁移",
+  main_port_adopted: "主端口接管", orphan_audit: "孤儿实例审计",
+  proxy_instance_hang_restart: "反代挂起重启", proxy_instance_log: "反代日志",
+  proxy_instance_start_port_busy: "反代端口占用", proxy_instance_survivor_reclaimed: "残留反代回收",
+  router_daemon_started: "中转守护启动", router_daemon_stopped: "中转守护停止",
+  router_daemon_supervised: "中转守护接管", shadow_dsh_action: "影子状态同步",
 };
