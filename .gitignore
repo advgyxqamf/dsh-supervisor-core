@@ -13,3 +13,8 @@ build/
 src-tauri/target/
 dsh-supervisor/src-tauri/target/
 
+# 根目录本地审计/过程文档（保留本地，不入库）
+dsh-supervisor-AUDIT-REPORT.md
+dsh-supervisor-REPAIR-PLAN.md
+
+
