@@ -149,7 +149,14 @@ async function main() {
   const list2 = await ctlCall('POST', { method: 'list', args: [] });
   const ids2 = ((list2.value && list2.value.items) || []).map((x) => x.id);
   check('ctl list 只剩 it-a', ids2.length === 1 && ids2[0] === 'it-a', ids2);
-  check('令牌注入后 A relay 仍代理', (await proxy()).code === 200);
+  // 令牌注入后 A relay 仍代理：daemon 每 2s tick reconcile，it-b 移除可能触发 it-a relay 短暂重建——
+  // 轮询等待代理恢复（≤6s），容忍重建窗口（Windows CI 实测需此容忍，2026-09-10）
+  let tokProxyOk = false;
+  for (let i = 0; i < 20; i++) {
+    if ((await proxy()).code === 200) { tokProxyOk = true; break; }
+    await sleep(300);
+  }
+  check('令牌注入后 A relay 仍代理', tokProxyOk);
 
   // ── 优雅退出 ──
   child.kill('SIGTERM');
