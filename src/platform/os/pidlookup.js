@@ -67,6 +67,16 @@ function macFind(port) {
 }
 
 function winFind(port) {
+  // 优先 PowerShell Get-NetTCPConnection（实时、无 netstat 的 LISTENING 可见滞后）——
+  // Windows CI 实证（2026-09）：relay 对刚启动的目标用 netstat -ano 反查 pid 有秒级滞后，
+  // 导致守护误判目标未运行、relay 迟迟不建（lan-daemon-test 非确定性失败根因）。
+  try {
+    const ps = "(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -eq " + port + " }).OwningProcess | Select-Object -First 1";
+    const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 3000 });
+    const pid = Number(String(out).trim());
+    if (Number.isInteger(pid) && pid > 0) return pid;
+  } catch {}
+  // 兜底：netstat -ano 解析 LISTENING 行
   try {
     // netstat 输出例：TCP  127.0.0.1:41000  0.0.0.0:0  LISTENING  12345
     const out = execFileSync('netstat', ['-ano'], { encoding: 'utf8', timeout: 3000 });

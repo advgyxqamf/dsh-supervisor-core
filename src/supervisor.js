@@ -427,7 +427,7 @@ class Supervisor {
       const lrt = this._ensureLanRuntime(true);
       if (this.logger && this.logger.info) this.logger.info('[lan] L3b 模式：lan-daemon ' + (lrt.mode === 'daemon' ? ('已就绪 pid=' + (lrt.spawned || '(既有)')) : ('未就绪 mode=' + lrt.mode)));
     } else {
-      this.lan.reconcile();
+      this.lan.reconcile().catch(() => {});
       this.lan.syncFrpc();
     }
     // 沙箱实例监督（R3 C3-4b）：并入唯一心跳 sandbox-instance adapter（heartbeat 逐实例
@@ -2223,7 +2223,7 @@ class Supervisor {
       // 远程代理自动对账（每 tick 幂等）：实例重启/恢复后自动重接 relay——
       // 开关开启时只要目标活着反代即通（不再依赖前端拉取触发）
       // L3b：reconcile 由 lan-daemon 每 2s 执行（守卫只写状态，不本地建 relay）
-      if (!this.lanDaemonEnabled()) { try { this.lan.reconcile(); } catch {} }
+      if (!this.lanDaemonEnabled()) { try { this.lan.reconcile().catch(()=>{}); } catch {} }
       this.writeState();
     } catch (e) {
       this.logger.error('tick error: ' + ((e && e.stack) || e));

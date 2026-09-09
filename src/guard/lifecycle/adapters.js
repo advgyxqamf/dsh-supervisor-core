@@ -55,7 +55,7 @@ function registerAll(mgr, deps) {
       kind: 'lan',
       name: '远程控制',
       logger,
-      start: async () => { try { lan.reconcile(); lan.syncFrpc(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } },
+      start: async () => { try { lan.reconcile().catch(()=>{}); lan.syncFrpc(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } },
       // 守卫 shutdown 时同样不停 LAN（L3b：relay 由独立 lan-daemon 承载；守卫内 LanManager 为 dry/门面）
       stop: async () => {
         if (deps && deps.supervisor && deps.supervisor._stopping) return { ok: true, already: true, reason: 'guard-shutdown 不停 lan' };

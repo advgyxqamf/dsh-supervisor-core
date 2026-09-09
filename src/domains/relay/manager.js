@@ -7,7 +7,6 @@
 
 const os = require('node:os');
 const monitor = require('../../guard/monitor/index');
-const pidlook = require('../../platform/os/pidlookup');
 const ports = require('../../guard/lifecycle/ports').shared;
 const { FrpManager } = require('./frpmgr');
 
@@ -62,13 +61,13 @@ class LanManager {
   }
 
   list() {
-    this.reconcile(); // 对账：剔除孤儿/陈旧远程代理，保证与当前实例远程状态一致
+    this.reconcile().catch(() => {}); // 对账异步执行：剔除孤儿/陈旧代理（不阻塞 list 响应）
     const addresses = this.localAddresses();
     const insts = this._allManaged();
     const remoteInsts = insts.filter((x) => x.remoteEnabled);
-    // 幂等自愈：remoteEnabled=true 且实例在跑的实例 → 异步补建代理（未跑则不建，恢复后由 reconcile 自动接）
+    // 幂等自愈：remoteEnabled 实例 → 异步补建代理（未跑/不可达由 syncProxy 内 TCP 裁决跳过，幂等无副作用）
     for (const inst of remoteInsts) {
-      if (!this.lanInstances.some((p) => p.dshPort === inst.port) && monitor.probeInstance(inst).running) {
+      if (!this.lanInstances.some((p) => p.dshPort === inst.port)) {
         this._syncProxyQueued(inst).catch((e) => this.logger.warn && this.logger.warn('syncProxy failed: ' + e.message));
       }
     }
@@ -179,7 +178,7 @@ class LanManager {
    *   - relay 运行 = 目标存活：实例重启/端口短暂 down → 暂停 relay（保留注册与 wanPort）；
    *     实例恢复 → 自动重新 listen（同一 wanPort，无端口重建竞争，绝不出现「开关开着但代理未就绪」）；
    *   - 孤儿注册（实例已删）→ 移除。 */
-  reconcile() {
+  async reconcile() {
     try {
       const insts = this._allManaged();
       let removed = false;
@@ -199,7 +198,8 @@ class LanManager {
         } else {
           kept.push(proxy);
           // relay 运行 = 目标存活：up → 确保在监听（含实例恢复后自动重接）；down → 暂停（保留注册）
-          const targetAlive = monitor.probeInstance(inst).running;
+          // 2026-09-10：改 TCP 可达判定（跨平台），弃同步 netstat/pidlookup（Windows 可见滞后）
+          const targetAlive = await this.targetReachable(inst);
           if (targetAlive && !(this._lanServers && this._lanServers[proxy.id])) {
             if (!proxy.wanPort) {
               // wanPort 被清（监听失败迁移）：重新分配进入串行队列（防 null 空转）
@@ -217,9 +217,9 @@ class LanManager {
         this.syncFrpc();
         if (this.logger && this.logger.info) this.logger.info('reconcile lan proxies: removed disabled/stale (' + kept.length + ' kept)');
       }
-      // 确保 remoteEnabled=true 且实例在跑的实例都有代理注册（新开开关/新实例；串行防竞态）
+      // 确保 remoteEnabled=true 的实例都有代理注册（新开开关/新实例；串行防竞态；可达性由 syncProxy TCP 裁决）
       for (const inst of insts) {
-        if (inst.remoteEnabled && !this.lanInstances.some((p) => p.dshPort === inst.port) && monitor.probeInstance(inst).running) {
+        if (inst.remoteEnabled && !this.lanInstances.some((p) => p.dshPort === inst.port)) {
           this._syncProxyQueued(inst).catch((e) => this.logger.warn && this.logger.warn('reconcile syncProxy ' + inst.id + ': ' + e.message));
         }
       }
@@ -238,6 +238,16 @@ class LanManager {
       if (this.events) this.events.append('lan_instance_removed', { id: instId });
       this.syncFrpc();
     }
+  }
+
+  /** 目标实例是否可达（TCP 直连探测，跨平台可靠；不依赖 Windows netstat/pidlookup 的可见滞后）。
+   *  2026-09-10 修复 lan-daemon-test 非确定性失败根因：Windows netstat -ano 对新建监听端口
+   *  LISTENING 可见性滞后秒级 → 同步 probeInstance 误判 running=false → relay 迟建/不建。
+   *  改走 TCP 连接探测（portListening），语义=“目标在跑”，与平台无关。 */
+  async targetReachable(inst) {
+    if (!inst || !inst.port) return false;
+    const host = inst.host || '127.0.0.1';
+    return monitor.isPortListening(host, inst.port, 600);
   }
 
   /** 串行执行 syncProxy（队列）：防并发竞态——isTaken/allocate 是异步，并发调用会同时通过检查拿到同一 wanPort。 */
@@ -260,8 +270,8 @@ class LanManager {
         if (!srv) this._startLanServer(existing);
         return;
       }
-      // 目标必须真的在监听（实例在跑），否则代理无意义且会白占端口
-      if (!monitor.probeInstance(inst).running) return;
+      // 目标必须真的在监听（TCP 可达，跨平台判定），否则代理无意义且会白占端口
+      if (!(await this.targetReachable(inst))) return;
       // ── 确定性槽位仲裁（2026-09 架构定稿，docs/port-architecture.md）──
       //  一个入口负责：byOwner 复用 → 槽位被旧代占则 cmdline 回收+等待 → main 偏好 40000 → 段内最小空闲；
       //  外部长期占用 → 显式 conflict（不静默跳号，reconcile 下轮重试由事件暴露）。

@@ -124,7 +124,7 @@ function main() {
   const tick = () => {
     try {
       const changed = reload();
-      lan.reconcile();
+      lan.reconcile().catch((e) => logger.warn && logger.warn('[lan-daemon] reconcile: ' + ((e && e.stack) || e))); // async（TCP 可达判定）
       if (changed || changedLast) {
         try { lan.syncFrpc(); } catch {}
       }
