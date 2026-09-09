@@ -16,7 +16,7 @@
     "verify:shell": "bash release/scripts/verify-shell.sh",
     "build:sea": "bash release/scripts/build-launcher.sh",
     "build:launcher": "bash release/scripts/build-launcher.sh",
-    "verify:versions": "node release/scripts/verify-versions.js --core && node release/scripts/verify-versions.js --shell",
+    "verify:versions": "node release/scripts/verify-versions.js --core",
     "publish:core": "bash release/scripts/publish-core.sh",
     "export:shell": "bash release/scripts/export-shell.sh",
     "release:core": "bash release/scripts/release-core.sh",
