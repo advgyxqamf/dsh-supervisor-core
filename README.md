@@ -43,10 +43,10 @@ xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
 
 按产品方向（私有 GitHub 存源码 + 公开 npm 发布**内核构建物**热更新 + 壳开源引流），内核以 **SEA 单文件二进制** 而非 .js 源码发布：
 
-- **构建**：`npm run build:sea`（`release/scripts/build-sea.sh`）→ esbuild CJS bundle → `node --experimental-sea-config`（`useCodeCache` 生成 **V8 字节码**）→ postject 注入 → 自举冒烟。
+- **构建**：`npm run build:sea`（`release/scripts/build-sea.sh`）→ esbuild CJS bundle → `node --experimental-sea-config`（`useCodeCache` 生成 **V8 字节码**；**darwin 平台禁用 code cache**——mac arm64 上 SEA code-cache 启动 segfault，降级纯 JS 快照换取可运行）→ postject 注入 → 自举冒烟。
 - **产物**：`dist/sea/dsh-supervisor-<ver>-<platform>-<arch>`（文件名带版本，整包发布可辨识）。本机（Linux x64）验证：`self-check` → `guardVersion=0.10.0`，冒烟 OK。
 - **版本自包含**：esbuild `--define:__DSH_VERSION__` 编译期注入版本常量，SEA 二进制任意 cwd（分发后）自报正确版本——版本规范见 [DESIGN.md §16](DESIGN.md)；提升走 `release/scripts/bump.sh`（一处改三处）。
-- **闭源性质**：字节码构建物 ≠ 源码；`strings` 无 `class *` 明文（函数体为 V8 code cache），仅字符串常量池可见。知悉其为**非绝对防逆向**口径，仅提高阅读门槛。
+- **闭源性质**：非 darwin 构建物为字节码（`useCodeCache`），`strings` 无 `class *` 明文（函数体为 V8 code cache），仅字符串常量池可见；**darwin 构建物为纯 JS 快照（源码可读）**——darwin 闭源口径弱于其它平台。知悉其为**非绝对防逆向**口径，仅提高阅读门槛。
 - **平台命名**：npm 内核子包按平台分（`@scope/dsh-core-linux-x64` / `darwin-arm64` / `darwin-x64` / `win-x64`；`process.platform` 的 `win32` 需映射 `win`）。各平台产物在对应平台机器或 CI 矩阵构建（无交叉编译）。
 - **验证**：构建脚本自带冒烟——SEA 二进制直接执行 `self-check`（guardVersion/node/platform 三段自检）。
 - **许可**：内核 **UNLICENSED**（闭源构建物，主 `package.json`/`LICENSE` 声明）；壳 **MIT**（`src-tauri/LICENSE`）。

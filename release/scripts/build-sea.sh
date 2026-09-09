@@ -19,11 +19,19 @@ echo "[1/6] esbuild 打包 bin…"
 npx --yes esbuild bin/dsh-supervisor --bundle --platform=node --format=cjs --outfile="$OUT/bundle.cjs" --define:__DSH_VERSION__="\"$VER\"" >/dev/null
 
 echo "[2/6] sea-config…"
+# useCodeCache：V8 字节码缓存。已知在 macOS arm64 上 SEA self-check 启动会 Segmentation fault（Node
+# issue #47168 类，mac arm64 + code cache 组合不稳定）；Linux/Windows 正常。darwin 降级纯 JS 快照
+# （源码明文，非字节码混淆）换取可运行；其余平台保留字节码混淆。
+SEA_USE_CODECACHE="true"
+if [ "$(node -p "process.platform")" = "darwin" ]; then
+  SEA_USE_CODECACHE="false"
+  echo "[build-sea] darwin 平台：禁用 useCodeCache（mac arm64 SEA code-cache segfault 规避）"
+fi
 cat > "$OUT/sea-config.json" <<EOF
 {
   "main": "bundle.cjs",
   "output": "prep.blob",
-  "useCodeCache": true,
+  "useCodeCache": $SEA_USE_CODECACHE,
   "disableExperimentalSEAWarning": true
 }
 EOF
