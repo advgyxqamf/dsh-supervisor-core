@@ -60,7 +60,7 @@ function seedInstall(dirName, versions) {
     if (u === '/manifest.json') { s.writeHead(200, { 'Content-Type': 'application/json' }); s.end(JSON.stringify(serve.manifest)); return; }
     if (u === '/blob') { s.writeHead(200); s.end(fs.readFileSync(serve.blob)); return; }
     if (u === '/-/ping') { s.writeHead(200); s.end('{}'); return; } // npm registry 可达性探测
-    if (u.includes('dsh-core-linux-x64')) { s.writeHead(200, { 'Content-Type': 'application/json' }); s.end(JSON.stringify({ 'dist-tags': servePkg.tags, versions: servePkg.versions })); return; }
+    if (u.includes('dsh-core-')) { s.writeHead(200, { 'Content-Type': 'application/json' }); s.end(JSON.stringify({ 'dist-tags': servePkg.tags, versions: servePkg.versions })); return; }
     s.writeHead(404); s.end('nf');
   });
   await new Promise((r) => server.listen(39230, '127.0.0.1', r));
