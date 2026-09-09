@@ -351,9 +351,15 @@ process.on('SIGTERM', () => { killSpawnedSync(); process.exit(143); });
     await new Promise((res) => setTimeout(res, 600));
     check('R12b 前置：进程存活、台账为空', pidlook.isAlive(pid) && p._terminatingPids.size === 0, 'alive=' + pidlook.isAlive(pid));
     p.stopInstance(inst); // SIGTERM → 被 stub 忽略
-    check('R12c stopInstance 后进程仍在（TERM 被忽略，前提）', pidlook.isAlive(pid), 'alive=' + pidlook.isAlive(pid));
+    // Windows 无 POSIX 信号语义：process.kill(pid,'SIGTERM') 实际等同强杀（TerminateProcess），
+    // stub 的 process.on('SIGTERM') handler 不生效 → 进程被直接终止。产品 waitAllStopped 杀净的
+    // 行为在 Windows 上同样正确，仅"SIGTERM 被忽略"前提不存在——断言按平台区分。
+    const winNoSig = process.platform === 'win32';
+    check('R12c stopInstance 后进程处理（POSIX：仍在=TERM 被忽略；Windows：已终止=无 SIGTERM 语义）',
+      winNoSig ? !pidlook.isAlive(pid) : pidlook.isAlive(pid), 'alive=' + pidlook.isAlive(pid));
     check('R12d pid 已入停服台账', p._terminatingPids.has(pid), '');
-    const statOf = (pid) => { try { const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'); const i = st.lastIndexOf(') '); return i >= 0 ? st[i + 2] : '?'; } catch { return 'GONE'; } };
+    // /proc 仅 Linux 有；Windows/macOS 无 zombie 概念（无回收滞后）→ 进程死即算死，statOf 恒 'GONE'
+    const statOf = (pid) => { if (process.platform !== 'linux') return 'GONE'; try { const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'); const i = st.lastIndexOf(') '); return i >= 0 ? st[i + 2] : '?'; } catch { return 'GONE'; } };
     const okW = await p.waitAllStopped(3000); // unref SIGKILL(1.5s) 或本方法超时兜底
     // zombie 亦视为已死（SIGKILL 已投递、端口/stdio 已释放，仅待父进程回收）
     check('R12e waitAllStopped 后进程已死或已投递 SIGKILL（不留活孤儿）', okW === true && (!pidlook.isAlive(pid) || statOf(pid) === 'Z'), 'alive=' + pidlook.isAlive(pid) + ' stat=' + statOf(pid));
