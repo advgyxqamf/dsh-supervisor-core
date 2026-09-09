@@ -49,6 +49,12 @@ cp -r "$ROOT/ui-react" "$OUT/ui-react"
 echo "[4/6] postject 注入…"
 chmod u+w "$BIN"
 npx --yes postject "$BIN" NODE_SEA_BLOB "$OUT/prep.blob" --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
+# macOS 强制代码签名（arm64 尤其）：postject 注入会破坏原 node 签名，未重新签名即运行
+# → 系统以 SIGSEGV 杀进程（Node SEA 官方文档要求 mac 注入后 codesign，adhoc 即可）。
+if [ "$(node -p "process.platform")" = "darwin" ]; then
+  echo "[4.5/6] darwin 平台 codesign --sign -（adhoc，postject 后必需）…"
+  codesign --sign - "$BIN" || { echo "冒烟失败：darwin codesign 失败"; exit 1; }
+fi
 
 echo "[5/6] 冒烟：self-check + --version + fresh-HOME daemon + UI 服务断言"
 "$BIN" self-check
