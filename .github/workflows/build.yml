@@ -59,20 +59,18 @@ jobs:
             bash release/scripts/ci-core.sh
           fi
 
-      - name: Upload artifacts（仅内核 SEA）
+      - name: Upload artifacts（内核 launcher 构建物）
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
-            dist/sea/*.bin
-            dist/sea/*.zip
-            dist/sea/*.sha256
-            dist/sea/README.md
+            dist/launcher/**
+            dist/launcher/README.md
 
-      - name: Attach to GitHub Release（仅内核 SEA）
+      - name: Attach to GitHub Release（内核 launcher 构建物）
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/sea/*
+          files: dist/launcher/**
           generate_release_notes: true
 
   # ---- 前端门禁（Phase 2：一源双出口的 verify；独立 job 单平台跑一次，避免矩阵重复）----
