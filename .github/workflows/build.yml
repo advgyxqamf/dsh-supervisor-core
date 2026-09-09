@@ -10,6 +10,8 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write   # softprops/action-gh-release 挂 Release + 上传 launcher 资产需 GITHUB_TOKEN contents:write
     strategy:
       fail-fast: false
       matrix:
