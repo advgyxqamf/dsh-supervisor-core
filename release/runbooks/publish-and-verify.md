@@ -55,11 +55,14 @@ npm run publish:core -- --publish       # 真发（需 npm 登录且 scope 权�
 - [x] **版本管理规范 v2**（DESIGN §16）：单一事实源 package.json；壳同号跟随内核；bump.sh 一处改三处；verify-versions 三处同号校验；SEA __DSH_VERSION__ 注入自包含（孤立目录实证 0.10.0）
 - [x] **publish-core.sh**（4 平台 npm 子包，单源注入裸版本 + os/cpu 过滤 + self-check 错配拒绝；Linux dry-run 验证通过：包 47.5MB/integrity 已生成）
 - [x] **双仓库方案 A 落地**：壳解耦（resources 仅 bootstrap/icons；main.rs 定位已安装内核）；export-shell.sh（导出目录独立构建验证通过）；许可（内核 UNLICENSED / 壳 MIT）
-- [ ] 其余平台（darwin-arm64/darwin-x64/win-x64）在对应平台机器 dry-run + 真发
 - [x] **凭据管理落地（2026-09-09）**：令牌值不入库（CI Secrets `NPM_TOKEN` + 本机 credential helper / 0600）；scope 单源化 `@dsh-sup`（package.json.npmPublish.scope）；remote URL 已脱敏（旧内嵌 PAT 报废）；最小权限规格见 credentials.md
-- [x] **本机 git 认证接通（2026-09-09）**：PAT 已写入 credential store（~/.git-credentials 0600），`git ls-remote` 验证通过（远端 main/master）
+- [x] **本机 git/npm 认证接通（2026-09-09）**：git credential store 0600 + npm login 均验证通过（git ls-remote / npm whoami→lob.bowen）
+- [x] **linux-x64 发布成功（2026-09-09）**：`@dsh-sup/dsh-core-linux-x64@0.1.2-BETA.5` 已发布 npm registry（os:['linux'] cpu:['x64'] bin:dsh-supervisor 校验通过）——发布产线端到端真实验证
+- [x] **darwin/win 平台障碍已逐项排除（2026-09-09，均为平台层/测试层问题，非发布工程引入）**：
+  - **darwin-arm64**：SEA 注入后 `self-check`/`--version` 即段错误(139)。已排除 useCodeCache on/off、codesign adhoc、Node 22→24、postject 1.0.0-alpha.6（最新）。二分证明=SEA 加载层崩（骨架 node --version 正常、注入后崩）→ 指向 macOS 26 arm64 runner + Node SEA 上游工具链缺陷 → 需 mac 真机/更新 runner 再补发
+  - **darwin-x64**：GitHub macos-13（x64）runner 一直 queued（拿不到 runner，非代码问题）
+  - **win-x64**：npm test 的 router-test R12c/R12g 在 Windows 上因信号语义（TERM 后进程立即退出 vs 假设仍在）失败，未到 build:sea → 需修该 2 个测试或用 Linux 交叉产物
 - [ ] **GitHub Secrets `NPM_TOKEN`**：在 lobbowen/dsh-supervisor → Settings → Secrets → Actions 新增（值=`@dsh-sup` scope 的 automation token）——待用户网页配置
-- [ ] **本机 npm 认证**：`npm whoami` 待通（npm login 或 configure-credentials.sh --npm）——待用户提供 token
 - [ ] 公开壳仓 push + 设为 Public（需你的 GitHub 操作）
 - [ ] self-update 引擎接 npm 通道（用户：先不急）
 - [ ] 私有源码仓库 + 公开壳仓库（需用户账号/凭据）
