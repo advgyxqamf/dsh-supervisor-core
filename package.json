@@ -13,8 +13,6 @@
     "test:plugin-change-restart": "node test/plugin-change-restart-test.js",
     "test:api-contract": "node test/api-contract-test.js",
     "release:guard": "bash release/scripts/release.sh",
-    "verify:shell": "bash release/scripts/verify-shell.sh",
-    "build:sea": "bash release/scripts/build-launcher.sh",
     "build:launcher": "bash release/scripts/build-launcher.sh",
     "verify:versions": "node release/scripts/verify-versions.js --core",
     "publish:core": "bash release/scripts/publish-core.sh",
