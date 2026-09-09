@@ -19,6 +19,11 @@ mkdir -p "$OUT_REL"
 OUT="$(cd "$OUT_REL" && pwd)"
 PLAT="$(node -p "process.platform")"
 ARCH="$(node -p "process.arch")"
+# 平台/架构覆盖（2026-09）：launcher 为架构无关纯 JS 产物，仅 npm os/cpu 元数据区分平台。
+# GitHub macos-14 现为 arm64（无 Intel runner）——darwin-x64 包可在任意 macOS runner 用
+# DSH_PLATFORM/DSH_ARCH 覆盖构建（产物相同，仅包名/元数据不同）。
+PLAT="${DSH_PLATFORM_OVERRIDE:-$PLAT}"
+ARCH="${DSH_ARCH_OVERRIDE:-$ARCH}"
 
 echo "[0/5] 前端统一构建（release/scripts/build-ui.sh）…"
 bash "$ROOT/release/scripts/build-ui.sh"

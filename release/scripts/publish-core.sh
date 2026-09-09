@@ -28,6 +28,10 @@ esac; shift; done
 # ---- 平台识别与产物定位 ----
 PLAT="$(node -p "process.platform")"   # linux | darwin | win32
 ARCH="$(node -p "process.arch")"       # x64 | arm64
+# 平台/架构覆盖（2026-09）：launcher 架构无关，GitHub macos-14 现为 arm64——用
+# DSH_PLATFORM_OVERRIDE/DSH_ARCH_OVERRIDE 在任意 runner 产指定平台包（元数据 os/cpu 区分）。
+PLAT="${DSH_PLATFORM_OVERRIDE:-$PLAT}"
+ARCH="${DSH_ARCH_OVERRIDE:-$ARCH}"
 case "$PLAT" in linux) OS_TAG=linux;; darwin) OS_TAG=darwin;; win32) OS_TAG=win;;
   *) echo "不支持的平台: $PLAT"; exit 1;; esac
 case "$ARCH" in x64|arm64) ;; *) echo "不支持的架构: $ARCH （子包仅 x64/arm64）"; exit 1;; esac

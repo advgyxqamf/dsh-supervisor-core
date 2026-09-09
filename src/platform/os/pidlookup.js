@@ -165,9 +165,11 @@ function isDshCmdline(pid) {
 /**
  * 平台兼容的「按命令行模式匹配进程」：返回 [{pid, cmdline}]。
  * 修复（2026-09）：原多处用 Linux 专属 `pgrep -af <pat>`，在 macOS 的 pgrep（BSD 系）上
- *  -a 选项不存在 → 命令报错被 try/catch 吞掉 → 匹配恒空 → 端口再推导/旧代回收在 mac 静默失效。
- *  现统一走本函数：Linux 用 pgrep -af（兼容）；macOS 用 pgrep -f（仅回 pid）+ ps 补 cmdline；
- *  Windows 无 pgrep → 返回空（pm 侧走 wmic/ps 分支，不依赖本路径）。
+ *  -a 选项不存在 → 命令报错被 try/catch 吞掉 → 匹配恒空 → 端口再推导/旧代回收在 mac 静默失效；
+ *  Windows 上更无 pgrep 命令。现统一走本函数：
+ *  - Linux   用 pgrep -af（兼容）；
+ *  - macOS   用 pgrep -f（仅回 pid）+ ps 补 cmdline；
+ *  - Windows 用 Win32_Process 查询（ProcessId + CommandLine，同 frpmgr 平台分支）。
  *  pattern 按子串匹配命令行（与旧 pgrep -af 的 "匹配完整命令行" 语义一致，非正则）。
  */
 function pgrepList(pattern) {
@@ -187,7 +189,23 @@ function pgrepList(pattern) {
       }
       return out;
     }
-    // Linux（含 -a 支持）；Windows 走 wmic/ps 专用分支，此处返回空
+    if (isWindows) {
+      // Windows 无 pgrep：走 Win32_Process 查询（含 CommandLine），按子串匹配
+      const ps = "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
+      const j = ex('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 8000 }).toString();
+      let arr = [];
+      try { arr = JSON.parse(j); if (!Array.isArray(arr)) arr = [arr]; } catch {}
+      for (const it of arr) {
+        if (!it || !it.ProcessId) continue;
+        const pid = Number(it.ProcessId);
+        if (!Number.isInteger(pid) || pid <= 0) continue;
+        const cmd = String(it.CommandLine || '');
+        if (!cmd.includes(pattern)) continue;
+        out.push({ pid, cmdline: cmd });
+      }
+      return out;
+    }
+    // Linux（含 -a 支持）
     const res = ex('pgrep', ['-af', String(pattern)], { encoding: 'utf8', timeout: 3000 }).toString();
     for (const line of res.split(/\r?\n/)) {
       const m = /^(\d+)\s+([\s\S]*)$/.exec(line.trim());
