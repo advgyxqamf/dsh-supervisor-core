@@ -104,7 +104,7 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   //    绝不端口重建竞争）。原断言预期「代理被清理」与 reconcile 语义矛盾（过时断言），修正如下。
   mockOk.kill('SIGTERM');
   await new Promise((r) => setTimeout(r, 800));
-  lan.reconcile();
+  await lan.reconcile(); // async（内部 TCP 可达判定），需等待其完成后再断言 relay 状态
   const proxyAfter = lan.lanInstances.find((p) => p.dshPort === okPort);
   check('目标停止后代理暂停（注册保留、relay 停止，恢复后自动重接）', !!proxyAfter && !(lan._lanServers && lan._lanServers[proxyAfter.id]), JSON.stringify(proxyAfter && proxyAfter.wanPort));
   check('main 代理保留（目标仍在监听）', !!lan.lanInstances.find((p) => p.dshPort === targetPort));
