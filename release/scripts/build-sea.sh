@@ -41,11 +41,28 @@ echo "[3/6] 复制 Node 骨架 + 携带 ui-react…"
 PLAT="$(node -p "process.platform")"
 ARCH="$(node -p "process.arch")"
 BIN="$OUT/dsh-supervisor-$VER-$PLAT-$ARCH"
-cp "$(command -v node)" "$BIN" && chmod 755 "$BIN"
+NODE_BIN="$(command -v node)"
+cp "$NODE_BIN" "$BIN" && chmod 755 "$BIN"
+echo "[3/6] node 骨架来源: $NODE_BIN ($(node -p "process.platform+'/'+process.arch+' node@'+process.version.slice(1)"))"
 # darwin 预注入冒烟：定位崩溃源（注入前骨架是否可运行 vs postject 注入后崩）。
 if [ "$(node -p "process.platform")" = "darwin" ]; then
-  echo "[3.5/6] darwin 预注入冒烟（node 骨架 --version）…"
-  "$BIN" --version || { echo "冒烟失败：darwin node 骨架本身不可运行（注入前即崩）"; exit 1; }
+  echo "[3.5/6] darwin 平台 SEA 工具链诊断 …"
+  echo "  (A) blob 大小: $(wc -c < "$OUT/prep.blob" 2>/dev/null || echo '无') 字节"
+  echo "  (B) 骨架架构: $(file -b "$BIN" 2>/dev/null | head -1)"
+  echo "  (C) node 与骨架是否同文件: $([ "$(dirname "$NODE_BIN")/$(basename "$NODE_BIN")" = "$(readlink -f "$NODE_BIN")" ] && echo 'same' || echo "node=$NODE_BIN / 骨架=$(readlink -f "$BIN")")"
+  # 最小 SEA 冒烟：验证 runner 的 node 能否产/跑任意 SEA（隔离"平台 SEA 能力" vs "本项目 blob"）
+  local tmpdir="$(mktemp -d)"
+  echo 'console.log("seamincheck-ok")' > "$tmpdir/mini.cjs"
+  cat > "$tmpdir/mini.json" <<EOF
+{ "main": "$tmpdir/mini.cjs", "output": "$tmpdir/mini.blob", "useCodeCache": false, "disableExperimentalSEAWarning": true }
+EOF
+  (cd "$tmpdir" && node --experimental-sea-config mini.json) 2>&1 | tail -1
+  cp "$NODE_BIN" "$tmpdir/mini" && chmod 755 "$tmpdir/mini"
+  npx --yes postject "$tmpdir/mini" NODE_SEA_BLOB "$tmpdir/mini.blob" --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 2>&1 | tail -1
+  codesign --force --sign - "$tmpdir/mini" 2>&1 | tail -1
+  echo "  (E) 最小 SEA 运行: $($tmpdir/mini 2>&1 | head -1)"
+  rm -rf "$tmpdir"
+  echo "[3.5/6] —— 若（E）也崩/非 ok ⇒ 本 runner Node SEA 工具链问题（非项目代码）；若（E）ok ⇒ 指向本项目 blob/注入层"
 fi
 # 先清后拷，避免在既有 dist/sea/ui-react 上累积出 ui-react/ui-react 双重嵌套
 rm -rf "$OUT/ui-react"
