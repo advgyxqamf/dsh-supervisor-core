@@ -220,11 +220,9 @@ class FrpManager {
           for (const it of arr) if (it && it.ProcessId && String(it.CommandLine || '').includes(pat)) out.push({ pid: Number(it.ProcessId), cmdline: it.CommandLine });
         }
       } else {
-        const pg = execFileSync('pgrep', ['-af', pat], { encoding: 'utf8', timeout: 3000 }).toString();
-        for (const line of pg.split('\n')) {
-          const m = /^(\d+)\s+([\s\S]*)$/.exec(line.trim());
-          if (m) out.push({ pid: Number(m[1]), cmdline: m[2] });
-        }
+        // 非 Windows：统一走 pidlookup.pgrepList（mac 的 pgrep 无 -a 选项，Linux 有）
+        const pidlook = require('../../platform/os/pidlookup');
+        for (const m of pidlook.pgrepList(pat)) out.push({ pid: m.pid, cmdline: m.cmdline });
       }
     } catch {}
     return out;

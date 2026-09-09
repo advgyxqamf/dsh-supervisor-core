@@ -3015,29 +3015,24 @@ class Supervisor {
     const bins = [];
     const cmd = this.config.command || [];
     if (typeof cmd[1] === 'string' && cmd[1]) bins.push(cmd[1]);
-    const { execFileSync } = require('node:child_process');
-    let candidates = [];
-    try {
-      const out = execFileSync('pgrep', ['-af', 'dsh'], { encoding: 'utf8', timeout: 3000 }).toString();
-      for (const line of out.split(/\r?\n/)) {
-        const m = /^(\d+)\s+(.*)$/.exec(line.trim());
-        if (!m) continue;
-        const pid = Number(m[1]);
-        if (pid === process.pid) continue;
-        const c = m[2];
-        if (c.indexOf('/instances/') >= 0) continue; // 排除沙箱实例 dsh-web@inst-*
-        // 精确归属：cmdline 必须含本守卫配置的启动 bin；isDshCmdline 兜底仅用于
-        // "config bin 缺失（手动标准安装）"且 cmdline 带 ' web' 子命令特征的场景——
-        // 绝不把同机其它 dsh 实例误认作受管目标（宽匹配曾把监管端口劫持到生产实例端口）。
-        const binMatch = bins.some((b) => b && c.indexOf(b) >= 0);
-        const genericDsh = !bins.length && pidlook.isDshCmdline(pid) && /(^|\s)web(\s|$)/.test(c);
-        const owned = binMatch || genericDsh;
-        if (!owned) continue;
-        // 复用 config.extractPortFromCommand（同一解析实现，消除 config/supervisor 双份）
-        const port = extractPortFromCommand(c.split(' '));
-        if (port) candidates.push({ pid, port, cmdline: c.slice(0, 120) });
-      }
-    } catch {}
+    const candidates = [];
+    const matches = pidlook.pgrepList('dsh');
+    for (const m of matches) {
+      const pid = m.pid;
+      if (pid === process.pid) continue;
+      const c = m.cmdline;
+      if (c.indexOf('/instances/') >= 0) continue; // 排除沙箱实例 dsh-web@inst-*
+      // 精确归属：cmdline 必须含本守卫配置的启动 bin；isDshCmdline 兜底仅用于
+      // "config bin 缺失（手动标准安装）"且 cmdline 带 ' web' 子命令特征的场景——
+      // 绝不把同机其它 dsh 实例误认作受管目标（宽匹配曾把监管端口劫持到生产实例端口）。
+      const binMatch = bins.some((b) => b && c.indexOf(b) >= 0);
+      const genericDsh = !bins.length && pidlook.isDshCmdline(pid) && /(^|\s)web(\s|$)/.test(c);
+      const owned = binMatch || genericDsh;
+      if (!owned) continue;
+      // 复用 config.extractPortFromCommand（同一解析实现，消除 config/supervisor 双份）
+      const port = extractPortFromCommand(c.split(' '));
+      if (port) candidates.push({ pid, port, cmdline: c.slice(0, 120) });
+    }
     // 多个候选：选正在监听其端口者（真在跑的实例），否则取第一个
     for (const c of candidates) { try { if (pidlook.findListeningPid(c.port) === c.pid) return c; } catch {} }
     return candidates[0] || null;

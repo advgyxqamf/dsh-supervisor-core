@@ -162,4 +162,39 @@ function isDshCmdline(pid) {
   return /(^|\s)(node|.*dsh.*)(\s|$)/i.test(cmd) && /dsh/i.test(cmd);
 }
 
-module.exports = { findListeningPid, isAlive, readCmdline, isDshCmdline };
+/**
+ * 平台兼容的「按命令行模式匹配进程」：返回 [{pid, cmdline}]。
+ * 修复（2026-09）：原多处用 Linux 专属 `pgrep -af <pat>`，在 macOS 的 pgrep（BSD 系）上
+ *  -a 选项不存在 → 命令报错被 try/catch 吞掉 → 匹配恒空 → 端口再推导/旧代回收在 mac 静默失效。
+ *  现统一走本函数：Linux 用 pgrep -af（兼容）；macOS 用 pgrep -f（仅回 pid）+ ps 补 cmdline；
+ *  Windows 无 pgrep → 返回空（pm 侧走 wmic/ps 分支，不依赖本路径）。
+ *  pattern 按子串匹配命令行（与旧 pgrep -af 的 "匹配完整命令行" 语义一致，非正则）。
+ */
+function pgrepList(pattern) {
+  const out = [];
+  const { execFileSync: ex } = require('node:child_process');
+  const readCmd = (pid) => readCmdline(pid) || '';
+  try {
+    if (isMac) {
+      // pgrep -f：BSD 版仅打印 pid（-a 不存在）；拿到的 pid 用 ps 补命令行
+      const pids = ex('pgrep', ['-f', String(pattern)], { encoding: 'utf8', timeout: 3000 }).toString().split(/\r?\n/);
+      for (const line of pids) {
+        const pid = parseInt(line.trim(), 10);
+        if (!Number.isInteger(pid) || pid <= 0) continue;
+        const cmd = readCmd(pid);
+        if (!cmd) continue;
+        out.push({ pid, cmdline: cmd });
+      }
+      return out;
+    }
+    // Linux（含 -a 支持）；Windows 走 wmic/ps 专用分支，此处返回空
+    const res = ex('pgrep', ['-af', String(pattern)], { encoding: 'utf8', timeout: 3000 }).toString();
+    for (const line of res.split(/\r?\n/)) {
+      const m = /^(\d+)\s+([\s\S]*)$/.exec(line.trim());
+      if (m) out.push({ pid: Number(m[1]), cmdline: m[2] });
+    }
+  } catch {}
+  return out;
+}
+
+module.exports = { findListeningPid, isAlive, readCmdline, isDshCmdline, pgrepList };

@@ -184,15 +184,12 @@ class PortRegistry {
       if (!o.reclaimCmdMark) return 0;
       let killed = 0;
       try {
-        const { execFileSync } = require('node:child_process');
-        const out = execFileSync('pgrep', ['-af', o.reclaimCmdMark], { encoding: 'utf8', timeout: 3000 }).toString();
+        const pidlook = require('../../platform/os/pidlookup');
         const cfg = o.reclaimCfg || '';
-        for (const line of out.split(/\r?\n/)) {
-          const m = /^(\d+)\s+(.*)$/.exec(line.trim());
-          if (!m) continue;
-          const pid = Number(m[1]);
+        for (const m of pidlook.pgrepList(o.reclaimCmdMark)) {
+          const pid = m.pid;
           if (pid === process.pid) continue;
-          const cmd = m[2];
+          const cmd = m.cmdline;
           if (cfg && cmd.indexOf(cfg) < 0) continue;
           try { process.kill(pid, 'SIGTERM'); killed++; } catch {}
         }
@@ -268,16 +265,13 @@ class PortRegistry {
         if (await this.isTaken(p)) {
           // 候选被监听：尝试回收本工程旧代后重判（避免跳号）
           if (o.reclaimCmdMark) {
-            const { execFileSync } = require('node:child_process');
             try {
-              const out = execFileSync('pgrep', ['-af', o.reclaimCmdMark], { encoding: 'utf8', timeout: 3000 }).toString();
+              const pidlook = require('../../platform/os/pidlookup');
               const cfg = o.reclaimCfg || '';
-              for (const line of out.split(/\r?\n/)) {
-                const m = /^(\d+)\s+(.*)$/.exec(line.trim());
-                if (!m) continue;
-                const pid = Number(m[1]);
+              for (const m of pidlook.pgrepList(o.reclaimCmdMark)) {
+                const pid = m.pid;
                 if (pid === process.pid) continue;
-                const cmd = m[2];
+                const cmd = m.cmdline;
                 if (cfg && cmd.indexOf(cfg) < 0) continue;
                 try { process.kill(pid, 'SIGTERM'); } catch {}
               }

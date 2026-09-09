@@ -133,14 +133,11 @@ class DaemonLifecycle {
     const marker = this.cmdMark;
     let killed = 0;
     try {
-      const out = execFileSync('pgrep', ['-af', marker], { encoding: 'utf8', timeout: 3000 }).toString();
       const mine = this.expectedPid();
       const ctlOwner = this._ctlOwnerPid();
-      for (const line of out.split(/\r?\n/)) {
-        const m = /^(\d+)\s+(.*)$/.exec(line.trim());
-        if (!m) continue;
-        const pid = Number(m[1]);
-        const cmd = m[2];
+      for (const m of pidlook.pgrepList(marker)) {
+        const pid = m.pid;
+        const cmd = m.cmdline;
         if (pid === process.pid) continue;
         if (pid === mine) continue;             // 当前受管代际
         if (pid === ctlOwner) continue;         // ctl 属主（就是当前在管进程）
