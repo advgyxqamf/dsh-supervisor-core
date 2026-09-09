@@ -62,6 +62,12 @@ if [ "$(node -p "process.platform")" = "darwin" ]; then
 fi
 
 echo "[5/6] 冒烟：self-check + --version + fresh-HOME daemon + UI 服务断言"
+# darwin 细二分：注入后先 --version（SEA 入口加载但不执行业务）→ 仍崩=加载问题；过=业务代码问题
+if [ "$(node -p "process.platform")" = "darwin" ]; then
+  echo "[5a/6] darwin 注入后 --version（二分：SEA 加载 vs 业务执行）…"
+  "$BIN" --version || { echo "冒烟失败：darwin SEA 注入后 --version 即崩（加载层问题）"; exit 1; }
+  echo "  --version OK（SEA 加载层正常，若 self-check 仍崩则为业务代码执行问题）"
+fi
 "$BIN" self-check
 VOUT=$("$BIN" --version)
 echo "  --version => $VOUT"
