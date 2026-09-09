@@ -86,7 +86,10 @@ async function main() {
   writeState({ updatedAt: Date.now(), instances: [makeInst('it-a', TARGET_A, WAN_A), makeInst('it-b', TARGET_B, WAN_B)], tokens: {} });
 
   // ── 启动 lan-daemon ──
-  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'domains', 'relay', 'daemon.js'), '-c', cfgPath], { stdio: 'ignore', detached: true });
+  // 诊断：stdio 由 ignore 改为捕获 stderr——wanPort 未监听失败时打印 daemon 错误（Windows 平台调试）。
+  const daemonErr = [];
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'domains', 'relay', 'daemon.js'), '-c', cfgPath], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+  child.stderr.on('data', (c) => { daemonErr.push(c.toString()); if (daemonErr.length > 200) daemonErr.shift(); });
   child.unref();
   let ctlUp = false;
   for (let i = 0; i < 40; i++) {
@@ -109,6 +112,11 @@ async function main() {
     await sleep(250);
   }
   check('relay wanPort 均在监听 (A/B)', aUp && bUp, { aUp, bUp });
+  if (!(aUp && bUp)) {
+    console.log('--- daemon stderr ---');
+    console.log(daemonErr.slice(-80).join(''));
+    try { const lf = fs.readFileSync(path.join(TMP, 'sup.log'), 'utf8').split('\n').slice(-40).join('\n'); console.log('--- sup.log tail ---\n' + lf); } catch {}
+  }
 
   const proxy = () => new Promise((resolve) => {
     const r = http.get({ host: '127.0.0.1', port: WAN_A, path: '/hi' }, (res) => {
