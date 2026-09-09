@@ -34,7 +34,7 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'   # Node 22 SEA 在 darwin-arm64 有启动崩溃（#47168 系）；升 24 修复
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
