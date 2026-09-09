@@ -43,6 +43,22 @@ ARCH="$(node -p "process.arch")"
 BIN="$OUT/dsh-supervisor-$VER-$PLAT-$ARCH"
 NODE_BIN="$(command -v node)"
 cp "$NODE_BIN" "$BIN" && chmod 755 "$BIN"
+echo "[3/6] node=$NODE_BIN $(node -p "process.version") $PLAT/$ARCH"
+# darwin 最小 SEA 冒烟（无 local 语法问题版）：隔离『本 runner Node SEA 能力』 vs 『项目 blob』
+if [ "$(node -p "process.platform")" = "darwin" ]; then
+  echo "[3.5/6] darwin 最小 SEA 冒烟（隔离平台能力）…"
+  MINI="$(mktemp -d)"
+  echo 'console.log("SEA-MINI-OK v" + process.version)' > "$MINI/mini.cjs"
+  printf '{ "main": "%s/mini.cjs", "output": "%s/mini.blob", "useCodeCache": false, "disableExperimentalSEAWarning": true }\n' "$MINI" "$MINI" > "$MINI/mini.json"
+  (cd "$MINI" && node --experimental-sea-config mini.json >/dev/null 2>&1)
+  cp "$NODE_BIN" "$MINI/mini-bin" && chmod 755 "$MINI/mini-bin"
+  npx --yes postject "$MINI/mini-bin" NODE_SEA_BLOB "$MINI/mini.blob" --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 >/dev/null 2>&1
+  codesign --force --sign - "$MINI/mini-bin" >/dev/null 2>&1
+  MINI_OUT="$($MINI/mini-bin 2>&1 | head -1)" || true
+  echo "  [darwin 最小 SEA] 输出: ${MINI_OUT:-（无输出/崩溃）}"
+  rm -rf "$MINI"
+  # 结论打印：minimal 崩 → Node SEA 在本 macOS 不可用（需换发布形态）；minimal OK → 项目 blob 层问题
+fi
 # 先清后拷，避免在既有 dist/sea/ui-react 上累积出 ui-react/ui-react 双重嵌套
 rm -rf "$OUT/ui-react"
 cp -r "$ROOT/ui-react" "$OUT/ui-react"
