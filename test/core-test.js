@@ -274,7 +274,14 @@ async function main() {
   await testRelay();
   console.log('\n==============================');
   console.log('结果: ' + passed + ' passed, ' + failed + ' failed');
-  process.exit(failed > 0 ? 1 : 0);
+  // Windows libuv 兼容退出：process.exit() 在 handle 关闭竞态下触发 src\win\async.c:94
+  // 断言崩溃（exit 127）。Windows 改用 exitCode + 兜底定时器自然排空；其余平台保持原语义。
+  if (process.platform === 'win32') {
+    process.exitCode = failed > 0 ? 1 : 0;
+    setTimeout(() => { process.exit(process.exitCode); }, 200);
+  } else {
+    process.exit(failed > 0 ? 1 : 0);
+  }
 }
 
 main().catch((e) => {
