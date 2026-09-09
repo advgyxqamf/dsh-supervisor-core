@@ -20,7 +20,7 @@ jobs:
             artifact: win-x64
           - os: macos-latest
             artifact: darwin-arm64
-          - os: macos-13        # Intel Mac → darwin-x64（无交叉编译，需真机 runner）
+          - os: macos-14        # Intel Mac → darwin-x64（macos-13 已被 GitHub 弃用，队列永不调度）
             artifact: darwin-x64
     runs-on: ${{ matrix.os }}
     env:

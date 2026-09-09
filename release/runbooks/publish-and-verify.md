@@ -60,7 +60,7 @@ npm run publish:core -- --publish       # 真发（需 npm 登录且 scope 权�
 - [x] **linux-x64 发布成功（2026-09-09）**：`@dsh-sup/dsh-core-linux-x64@0.1.2-BETA.5` 已发布 npm registry（os:['linux'] cpu:['x64'] bin:dsh-supervisor 校验通过）——发布产线端到端真实验证
 - [x] **darwin/win 平台障碍已逐项排除（2026-09-09，均为平台层/测试层问题，非发布工程引入）**：
   - **darwin-arm64**：SEA 注入后 `self-check`/`--version` 即段错误(139)。已排除 useCodeCache on/off、codesign adhoc、Node 22→24、postject 1.0.0-alpha.6（最新）。二分证明=SEA 加载层崩（骨架 node --version 正常、注入后崩）→ 指向 macOS 26 arm64 runner + Node SEA 上游工具链缺陷 → 需 mac 真机/更新 runner 再补发
-  - **darwin-x64**：GitHub macos-13（x64）runner 一直 queued（拿不到 runner，非代码问题）
+  - **darwin-x64**：GitHub macos-13（x64）runner 已被 GitHub 弃用、队列永不调度 → 已换 macos-14（2026-09-09）
   - **win-x64**：npm test 的 router-test R12c/R12g 在 Windows 上因信号语义（TERM 后进程立即退出 vs 假设仍在）失败，未到 build:sea → 需修该 2 个测试或用 Linux 交叉产物
 - [ ] **GitHub Secrets `NPM_TOKEN`**：在 lobbowen/dsh-supervisor → Settings → Secrets → Actions 新增（值=`@dsh-sup` scope 的 automation token）——待用户网页配置
 - [ ] 公开壳仓 push + 设为 Public（需你的 GitHub 操作）
