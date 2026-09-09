@@ -32,38 +32,40 @@ case "$PLAT" in linux) OS_TAG=linux;; darwin) OS_TAG=darwin;; win32) OS_TAG=win;
   *) echo "不支持的平台: $PLAT"; exit 1;; esac
 case "$ARCH" in x64|arm64) ;; *) echo "不支持的架构: $ARCH （子包仅 x64/arm64）"; exit 1;; esac
 PKG_NAME="$SCOPE/dsh-core-$OS_TAG-$ARCH"
-SRC_BIN="dist/sea/dsh-supervisor-$VER-$PLAT-$ARCH"
-[ -f "$SRC_BIN" ] || { echo "缺少构建产物: $SRC_BIN （请先 npm run build:sea）"; exit 1; }
-BIN_NAME="dsh-supervisor"; [ "$PLAT" = win32 ] && BIN_NAME="dsh-supervisor.exe"
+SRC_DIR="dist/launcher/dsh-supervisor-$VER-$PLAT-$ARCH"
+[ -d "$SRC_DIR" ] || { echo "缺少构建产物: $SRC_DIR （请先 npm run build:sea / build:launcher）"; exit 1; }
+[ -f "$SRC_DIR/bin/dsh-supervisor" ] || { echo "产物缺 bin/dsh-supervisor: $SRC_DIR"; exit 1; }
+[ -f "$SRC_DIR/core.cjs" ] || { echo "产物缺 core.cjs: $SRC_DIR"; exit 1; }
+BIN_NAME="dsh-supervisor"   # launcher 形态：node 启动脚本（win 亦无 .exe——由 npm bin shim 生成）
 
 # ---- 冒烟 + 版本核对（防产物错配） ----
-GV="$("$SRC_BIN" self-check | sed -n 's/^guardVersion=//p' | tr -d '\r')"
-[ "$GV" = "$VER" ] || { echo "版本错配：二进制自报 $GV ≠ 单源 $VER （禁止发布）"; exit 1; }
+GV="$(node "$SRC_DIR/bin/dsh-supervisor" self-check | sed -n 's/^guardVersion=//p' | tr -d '\r')"
+[ "$GV" = "$VER" ] || { echo "版本错配：launcher 自报 $GV ≠ 单源 $VER （禁止发布）"; exit 1; }
 echo "== 冒烟通过: guardVersion=$GV （= 单源） =="
 
-# ---- 组装子包目录 ----
+# ---- 组装子包目录（launcher 目录整体入包） ----
 STAGE="dist/npm/$PKG_NAME"
-rm -rf "$STAGE"; mkdir -p "$STAGE/bin"
-cp "$SRC_BIN" "$STAGE/bin/$BIN_NAME" && chmod 755 "$STAGE/bin/$BIN_NAME"
-# UI（Phase 1）：随包携带 ui-react（build-sea.sh 已产到 dist/sea/ui-react），
-# SEA 运行态由 src/api/index.js 候选② <exe>/../ui-react 解析（pkg/bin/dsh-supervisor → pkg/ui-react）
-if [ -d "$(dirname "$SRC_BIN")/ui-react" ]; then
-  cp -r "$(dirname "$SRC_BIN")/ui-react" "$STAGE/ui-react"
+rm -rf "$STAGE"; mkdir -p "$STAGE"
+cp -r "$SRC_DIR/bin" "$STAGE/bin"
+cp "$SRC_DIR/core.cjs" "$STAGE/core.cjs"
+if [ -d "$SRC_DIR/ui-react" ]; then
+  cp -r "$SRC_DIR/ui-react" "$STAGE/ui-react"
   [ -f "$STAGE/ui-react/supervisor.html" ] || { echo "错误：ui-react 缺 supervisor.html"; exit 1; }
 else
-  echo "警告：未找到 dist/sea/ui-react（请先 npm run build:sea 产出 UI）"
+  echo "警告：launcher 产物缺 ui-react"
 fi
-NODE_GEN="const fs=require('fs');const o={name:'$PKG_NAME',version:'$VER',description:'DSH lifecycle guard core (SEA single-file binary) for $OS_TAG-$ARCH — install-and-use, runs without Node.',license:'$MAIN_LICENSE',os:['$PLAT'],cpu:['$ARCH'],bin:{'dsh-supervisor':'bin/$BIN_NAME'},files:['bin','ui-react','README.md'],keywords:['dsh','guard','sea','core']};fs.writeFileSync('$STAGE/package.json',JSON.stringify(o,null,2)+'\n')"
+NODE_GEN="const fs=require('fs');const o={name:'$PKG_NAME',version:'$VER',description:'DSH lifecycle guard core (Node launcher) for $OS_TAG-$ARCH — requires Node >=18.',license:'$MAIN_LICENSE',os:['$PLAT'],cpu:['$ARCH'],bin:{'dsh-supervisor':'bin/dsh-supervisor'},files:['bin','core.cjs','ui-react','README.md'],keywords:['dsh','guard','launcher','core']};fs.writeFileSync('$STAGE/package.json',JSON.stringify(o,null,2)+'\n')"
 node -e "$NODE_GEN"
 cat > "$STAGE/README.md" <<EOF
 # $PKG_NAME
 
-DSH lifecycle guard core — SEA 单文件二进制（V8 字节码构建物，闭源口径）。本包仅面向 $OS_TAG-$ARCH （npm os/cpu 平台过滤）。
+DSH lifecycle guard core — Node launcher 形态（esbuild bundle + node 启动脚本，需 Node ≥18）。
+本包仅面向 $OS_TAG-$ARCH （npm os/cpu 平台过滤）。
 
-```bash
+\`\`\`bash
 npm i -g $PKG_NAME
 dsh-supervisor self-check   # guardVersion / node / platform 三段自检
-```
+\`\`\`
 EOF
 echo "== 子包已组装: $STAGE/"
 ls -lh "$STAGE/bin/" | tail -1

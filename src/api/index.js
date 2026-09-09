@@ -30,17 +30,19 @@ const API_DOMAINS = [
 //  2026-09-06 Phase 1 修复：SEA/esbuild 打包后 __dirname 不再等于源码目录，改多候选探测覆盖全部发行形态）。
 //  候选（按优先级，命中 supervisor.html 即用）：
 //    0) $DSH_UI_DIR                     — 显式注入（测试/特殊部署）
-//    1) <exe 同目录>/ui-react            — SEA 单文件分发态（dist/sea 旁放 ui-react）
-//    2) <exe>/../ui-react                — npm 子包态（pkg/bin/dsh-supervisor + pkg/ui-react）
-//    3) <repo 根>/ui-react               — 源码态发布镜像（release.sh 产物）
-//    4) <repo 根>/ui/dist                — 开发态（ui 源码 npm run build 产物）
-//  esbuild/SEA 中 __dirname = 可执行文件真实所在目录（实测），因此 1/2 覆盖发行态、3/4 覆盖源码态。
+//    1) <__dirname>/ui-react            — Node launcher 统一形态（core.cjs 同目录 ui-react）2026-09 定案
+//    2) <exe 同目录>/ui-react            — SEA 单文件分发态（dist/sea 旁放 ui-react）
+//    3) <exe>/../ui-react                — npm 子包态（pkg/bin/dsh-supervisor + pkg/ui-react）
+//    4) <repo 根>/ui-react               — 源码态发布镜像（release.sh 产物）
+//    5) <repo 根>/ui/dist                — 开发态（ui 源码 npm run build 产物）
+//  esbuild/launcher 中 __dirname = core.cjs 真实所在目录，1/2/3 覆盖发行态，4/5 覆盖源码态。
 function resolveUiDir() {
   const exeDir = (function () {
     try { return require('node:path').dirname(process.execPath); } catch { return __dirname; }
   })();
   const candidates = [
     process.env.DSH_UI_DIR || null,
+    require('node:path').join(__dirname, 'ui-react'),         // ① launcher 统一形态（core.cjs 旁）
     require('node:path').join(exeDir, 'ui-react'),
     require('node:path').join(exeDir, '..', 'ui-react'),
     require('node:path').join(__dirname, '..', '..', 'ui-react'),
