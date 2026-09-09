@@ -103,9 +103,10 @@ async function main() {
   if (!ctlUp) { child.kill('SIGTERM'); ta.close(); tb.close(); console.log('\n结果: ' + passed + ' passed, ' + failed + ' failed'); process.exit(failed ? 1 : 0); }
 
   // ── relay 拉起（wanPort 绑定 + 真实代理）──
+  // Windows 实测 relay 绑定需 10-14s（pidlookup/端口探测慢于 Linux）；窗口放宽到 120×250ms=30s。
   let aUp = false;
   let bUp = false;
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 120; i++) {
     aUp = await portListening(WAN_A);
     bUp = await portListening(WAN_B);
     if (aUp && bUp) break;
@@ -125,7 +126,7 @@ async function main() {
       res.on('end', () => resolve({ code: res.statusCode, body: b }));
     });
     r.on('error', () => resolve({ code: 0, body: '' }));
-    r.setTimeout(2000, () => { r.destroy(); resolve({ code: 0, body: 'timeout' }); });
+    r.setTimeout(5000, () => { r.destroy(); resolve({ code: 0, body: 'timeout' }); });
   });
   const p = await proxy();
   check('relay 真实代理到目标（mock-A /hi）', p.code === 200 && p.body === 'mock-A /hi', p);
