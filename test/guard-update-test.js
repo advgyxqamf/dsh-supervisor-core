@@ -31,9 +31,12 @@ function makeRelease(version) {
   fs.writeFileSync(path.join(inner, 'src', 'supervisor.js'), '// v' + version + '\nmodule.exports = {};\n');
   fs.writeFileSync(path.join(inner, 'VERSION'), version);
   const tar = path.join(TMP, 'release-' + version + '.tar.gz');
-  // Windows bsdtar：`-f C:\...` 会把盘符冒号误作「远程主机:文件」→ "Cannot connect to C:"。
-  // 修复：--force-local（GNU tar 与 bsdtar 均支持）声明归档为本地文件 + cwd 进入 root（免 -C）。
-  execFileSync('tar', ['--force-local', '-czf', tar, 'dsh-supervisor-' + version], { cwd: root });
+  // 跨平台 tar（2026-09-10 三次修复后定案）：
+  //  - Windows bsdtar：`-f C:\...` 把盘符冒号误作远程主机 → "Cannot connect to C:"；
+  //  - macOS bsdtar：不支持 GNU 的 --force-local（会报 unknown option）；
+  //  - 解法：在 root cwd 内用相对文件名产出（-f 无盘符），再移到 TMP——三平台全兼容。
+  execFileSync('tar', ['-czf', 'release.tar.gz', 'dsh-supervisor-' + version], { cwd: root });
+  fs.renameSync(path.join(root, 'release.tar.gz'), tar);
   return tar;
 }
 function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
