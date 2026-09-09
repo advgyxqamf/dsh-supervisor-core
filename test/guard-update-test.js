@@ -31,7 +31,9 @@ function makeRelease(version) {
   fs.writeFileSync(path.join(inner, 'src', 'supervisor.js'), '// v' + version + '\nmodule.exports = {};\n');
   fs.writeFileSync(path.join(inner, 'VERSION'), version);
   const tar = path.join(TMP, 'release-' + version + '.tar.gz');
-  execFileSync('tar', ['-czf', tar, '-C', root, 'dsh-supervisor-' + version]);
+  // Windows bsdtar 不认 `-C <盘符>路径`（将 C: 误作远程主机，报 "Cannot connect to C: resolve failed"）。
+  // 改用 execFileSync 的 cwd 选项进入 root——Linux/macOS/Windows 全部兼容且行为等价。
+  execFileSync('tar', ['-czf', tar, 'dsh-supervisor-' + version], { cwd: root });
   return tar;
 }
 function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
