@@ -42,6 +42,11 @@ PLAT="$(node -p "process.platform")"
 ARCH="$(node -p "process.arch")"
 BIN="$OUT/dsh-supervisor-$VER-$PLAT-$ARCH"
 cp "$(command -v node)" "$BIN" && chmod 755 "$BIN"
+# darwin 预注入冒烟：定位崩溃源（注入前骨架是否可运行 vs postject 注入后崩）。
+if [ "$(node -p "process.platform")" = "darwin" ]; then
+  echo "[3.5/6] darwin 预注入冒烟（node 骨架 --version）…"
+  "$BIN" --version || { echo "冒烟失败：darwin node 骨架本身不可运行（注入前即崩）"; exit 1; }
+fi
 # 先清后拷，避免在既有 dist/sea/ui-react 上累积出 ui-react/ui-react 双重嵌套
 rm -rf "$OUT/ui-react"
 cp -r "$ROOT/ui-react" "$OUT/ui-react"
