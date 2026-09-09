@@ -23,7 +23,7 @@ case "$MODE" in
     node release/scripts/verify-versions.js --core
     echo "=== 内核版本已提升: $CUR → $NEW ==="
     echo "  1) CHANGELOG.md：整理 [未发布] 段为 [$NEW] 并新开 [未发布]"
-    echo "  2) git add -A && git commit -m 【release: v$NEW】 && git tag v$NEW && git push --tags（私有仓 build.yml → SEA + npm 子包 --publish）"
+    echo "  2) git add -A && git commit -m 【release: v$NEW 】 && git tag v$NEW && git push --tags（私有仓 build.yml → SEA + npm 子包 --publish）"
     echo "  3) npm run build:sea（本机内核 SEA）"
     echo "  4) npm run publish:core -- --publish（对应平台）"
     ;;
@@ -35,7 +35,7 @@ case "$MODE" in
     node release/scripts/verify-versions.js --shell
     echo "=== 壳版本已提升: $CUR → $NEW ==="
     echo "  1) bash release/scripts/export-shell.sh <publicRepoUrl>（同步公开仓 dsh-supervisor-launcher）"
-    echo "  2) 公开仓 tag v$NEW（触发 launcher-build.yml → 三平台 bundle 挂 Release）"
+    echo "  2) 公开仓 tag v$NEW （触发 launcher-build.yml → 三平台 bundle 挂 Release）"
     ;;
-  *) echo "未知模式: $MODE（支持 --core | --shell）"; exit 2;;
+  *) echo "未知模式: $MODE （支持 --core | --shell）"; exit 2;;
 esac

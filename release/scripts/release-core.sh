@@ -21,7 +21,7 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 VER="$(node -p "require('./package.json').version")"
-echo "当前内核版本: $VER（package.json 单源）"
+echo "当前内核版本: $VER （package.json 单源）"
 
 echo "=== [1/6] 版本自洽校验 ==="
 npm run verify:versions

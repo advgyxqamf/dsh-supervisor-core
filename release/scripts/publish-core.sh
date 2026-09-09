@@ -30,16 +30,16 @@ PLAT="$(node -p "process.platform")"   # linux | darwin | win32
 ARCH="$(node -p "process.arch")"       # x64 | arm64
 case "$PLAT" in linux) OS_TAG=linux;; darwin) OS_TAG=darwin;; win32) OS_TAG=win;;
   *) echo "不支持的平台: $PLAT"; exit 1;; esac
-case "$ARCH" in x64|arm64) ;; *) echo "不支持的架构: $ARCH（子包仅 x64/arm64）"; exit 1;; esac
+case "$ARCH" in x64|arm64) ;; *) echo "不支持的架构: $ARCH （子包仅 x64/arm64）"; exit 1;; esac
 PKG_NAME="$SCOPE/dsh-core-$OS_TAG-$ARCH"
 SRC_BIN="dist/sea/dsh-supervisor-$VER-$PLAT-$ARCH"
-[ -f "$SRC_BIN" ] || { echo "缺少构建产物: $SRC_BIN（请先 npm run build:sea）"; exit 1; }
+[ -f "$SRC_BIN" ] || { echo "缺少构建产物: $SRC_BIN （请先 npm run build:sea）"; exit 1; }
 BIN_NAME="dsh-supervisor"; [ "$PLAT" = win32 ] && BIN_NAME="dsh-supervisor.exe"
 
 # ---- 冒烟 + 版本核对（防产物错配） ----
 GV="$("$SRC_BIN" self-check | sed -n 's/^guardVersion=//p' | tr -d '\r')"
-[ "$GV" = "$VER" ] || { echo "版本错配：二进制自报 $GV ≠ 单源 $VER（禁止发布）"; exit 1; }
-echo "== 冒烟通过: guardVersion=$GV（= 单源） =="
+[ "$GV" = "$VER" ] || { echo "版本错配：二进制自报 $GV ≠ 单源 $VER （禁止发布）"; exit 1; }
+echo "== 冒烟通过: guardVersion=$GV （= 单源） =="
 
 # ---- 组装子包目录 ----
 STAGE="dist/npm/$PKG_NAME"
@@ -58,7 +58,7 @@ node -e "$NODE_GEN"
 cat > "$STAGE/README.md" <<EOF
 # $PKG_NAME
 
-DSH lifecycle guard core — SEA 单文件二进制（V8 字节码构建物，闭源口径）。本包仅面向 $OS_TAG-$ARCH（npm os/cpu 平台过滤）。
+DSH lifecycle guard core — SEA 单文件二进制（V8 字节码构建物，闭源口径）。本包仅面向 $OS_TAG-$ARCH （npm os/cpu 平台过滤）。
 
 ```bash
 npm i -g $PKG_NAME

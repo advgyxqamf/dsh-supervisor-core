@@ -25,4 +25,4 @@ cp "$ROOT/src-tauri/bootstrap/shell.html" "$FE/shell.html" 2>/dev/null || true  
 # 3) 自检
 [ -f "$FE/supervisor.html" ] || { echo "[shell-frontend] 缺 supervisor.html"; exit 1; }
 [ -f "$FE/bootstrap.html" ] || { echo "[shell-frontend] 缺 bootstrap.html"; exit 1; }
-echo "[shell-frontend] 已组装 $FE（bootstrap + supervisor 双入口）"
+echo "[shell-frontend] 已组装 $FE （bootstrap + supervisor 双入口）"
