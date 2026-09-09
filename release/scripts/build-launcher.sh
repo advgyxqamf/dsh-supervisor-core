@@ -65,17 +65,21 @@ cat > "$SMOKE_HOME/config.json" <<EOF
 }
 EOF
 SMOKE_LOG="$SMOKE_HOME/boot.log"
-(HOME="$SMOKE_HOME" DSH_SUPERVISOR_CONFIG="$SMOKE_HOME/config.json" DSH_SUPERVISOR_LOCK_FILE="$SMOKE_HOME/guard.lock" timeout 8 node "$DIR/bin/dsh-supervisor" daemon >"$SMOKE_LOG" 2>&1 &)
+# 跨平台 daemon 冒烟：不用 GNU `timeout`（macOS BSD 无此命令）。直接后台 node（$! = node pid），
+# 断言后 kill node pid 清理。守卫 spawn 的 sleep 子进程由守卫自身生命周期管理，冒烟结束即无碍。
+HOME="$SMOKE_HOME" DSH_SUPERVISOR_CONFIG="$SMOKE_HOME/config.json" DSH_SUPERVISOR_LOCK_FILE="$SMOKE_HOME/guard.lock" node "$DIR/bin/dsh-supervisor" daemon >"$SMOKE_LOG" 2>&1 &
+SMOKE_PID=$!
 sleep 2
 if ! grep -q "guard started v$VER" "$SMOKE_LOG" 2>/dev/null; then
-  echo "冒烟失败：fresh-HOME daemon 未能自举"; cat "$SMOKE_LOG" 2>/dev/null | head -8; rm -rf "$SMOKE_HOME"; exit 1
+  echo "冒烟失败：fresh-HOME daemon 未能自举"; cat "$SMOKE_LOG" 2>/dev/null | head -8; kill "$SMOKE_PID" 2>/dev/null || true; rm -rf "$SMOKE_HOME"; exit 1
 fi
 echo "  fresh-HOME daemon 自举 OK"
 UI_BODY="$(curl -s -m 2 "http://127.0.0.1:3199/" 2>/dev/null || true)"
 if ! printf "%s" "$UI_BODY" | grep -q "<div id=\"root\">"; then
-  echo "冒烟失败：launcher UI 服务断言未通过"; cat "$SMOKE_LOG" 2>/dev/null | head -10; rm -rf "$SMOKE_HOME"; exit 1
+  echo "冒烟失败：launcher UI 服务断言未通过"; cat "$SMOKE_LOG" 2>/dev/null | head -10; kill "$SMOKE_PID" 2>/dev/null || true; rm -rf "$SMOKE_HOME"; exit 1
 fi
 echo "  UI 服务断言 OK"
+kill "$SMOKE_PID" 2>/dev/null || true
 rm -rf "$SMOKE_HOME"
 
 echo "[4/5] 携带版本自检文件…"
