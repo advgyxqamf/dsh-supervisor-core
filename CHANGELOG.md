@@ -4,6 +4,15 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.2-BETA.7]（2026-09-09）
+
+### 双仓拆分定稿（2026-09-09）：壳/核彻底分离，发布永不错位
+- 单仓 `lobbowen/dsh-supervisor` 拆为双仓并迁至账号 `wasi7mglns`：
+  - **内核仓** `wasi7mglns/dsh-supervisor-core`（私有，本仓）：bin/src/ui/systemd/release + 文档，`npm` 子包发布产线
+  - **壳仓** `wasi7mglns/dsh-supervisor-launcher`（公开）：src-tauri 引导器形态（MIT），GitHub 安装程序产线
+- **核仓产线自足化**（本版本核心）：剥离壳依赖——`ci-core.sh` 移除壳前端组装/壳集成冒烟（归壳仓职责），步骤重排为 verify(--core)→npm test→build:launcher→子包发布；`build.yml` 去掉 Rust/cargo/apt 壳依赖步骤；`verify:versions` 仅校验内核 package.json 单源（壳版本互锁随壳仓剥离）。内核 launcher 为纯 JS（Node ≥18），无 Rust/系统库依赖。
+- 壳仓首次 CI（launcher-build）产出 Linux 桌面安装程序 `.deb/.AppImage`——用户下载安装的桌面程序。
+
 ## [0.1.2-BETA.6]（2026-09-09）
 
 ### 跨平台架构整改：全平台弃 SEA 统一 Node launcher 发行形态
