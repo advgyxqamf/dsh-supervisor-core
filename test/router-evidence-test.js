@@ -29,7 +29,13 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   ev.append({ ts: '2026-09-04T10:00:02Z', status: 503, signal: 'transient' });
   const raw = fs.readFileSync(file, 'utf8');
   check('append 返回 true 且落盘 3 行合法 JSON', ok1 === true && raw.split('\n').filter(Boolean).length === 3 && raw.split('\n').every((l) => { if (!l.trim()) return true; try { JSON.parse(l); return true; } catch { return false; } }), raw);
-  check('文件权限 0600', (fs.statSync(file).mode & 0o777) === 0o600, String(fs.statSync(file).mode & 0o777));
+  // POSIX 0600 权限位校验；Windows 无 POSIX chmod 语义（mode 恒为 0o666 类默认 ACL），
+  // 严格位比较仅适用于类 Unix。Windows 上验证文件确已创建即可（权限由 NTFS ACL 表达）。
+  if (process.platform === 'win32') {
+    check('文件已创建（Windows：权限经 NTFS ACL，无 POSIX 位）', fs.existsSync(file), 'win');
+  } else {
+    check('文件权限 0600', (fs.statSync(file).mode & 0o777) === 0o600, String(fs.statSync(file).mode & 0o777));
+  }
   const tail1 = ev.readTail(1);
   check('readTail(1) 返回最后 1 条', tail1.length === 1 && tail1[0].status === 503 && tail1[0].signal === 'transient', JSON.stringify(tail1));
   const tail2 = ev.readTail(2);
