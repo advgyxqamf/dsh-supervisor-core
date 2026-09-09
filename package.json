@@ -1,6 +1,6 @@
 {
   "name": "dsh-supervisor",
-  "version": "0.1.2-BETA.5",
+  "version": "0.1.2-BETA.6",
   "private": true,
   "description": "DSH 生命周期监管工具：独立于 Harness 的守卫进程，自动重启 dsh web",
   "license": "UNLICENSED",

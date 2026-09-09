@@ -4,7 +4,12 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.2-BETA.6]（2026-09-09）
+
+### 跨平台架构整改：全平台弃 SEA 统一 Node launcher 发行形态
+- Node SEA 在 macOS 上注入后段错误（最小 SEA 亦崩，铁证=上游缺陷）→ 全平台改发 Node launcher（esbuild bundle + bin 启动脚本），darwin/win/linux 统一可发布
+- 修 4 处 Linux-only 假设：pgrep -af、macOS 无 timeout、SIGTERM 语义、0600 权限断言
+- darwin-x64 runner macos-13→macos-14（GitHub 弃用 macos-13）
 
 ### 发布自动化工程化（2026-09-09）：散落脚本收拢为专一 `release/` 发布工程
 - **单一发布工程根 `release/`**：`release/scripts/`（9 个发布脚本从根 `scripts/` 迁入 + `ci-core.sh` CI 核心 + `release-core.sh` 一键编排）、`release/runbooks/`（publish-and-verify / verify-desktop 手册迁入并**纳入 git 追踪**）、`release/README.md`（唯一端到端 SOP）。根 `scripts/` 已移除。
