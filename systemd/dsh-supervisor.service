@@ -1,0 +1,20 @@
+[Unit]
+Description=dsh-supervisor — DSH lifecycle guard
+After=network.target
+# 防守卫自身疯狂重启（注意：这两个键属于 [Unit] 段，写在 [Service] 会被 systemd 忽略）
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=@BIN@ daemon
+Restart=always
+RestartSec=5
+# KillMode=process（2026-09 D3-A 定案）：守卫自 spawn 主 DSH（detached 子进程）。
+# 守卫自身重启/升级时只杀守卫进程本身，绝不连带杀掉其 spawn 的 DSH——
+# 「守卫重启不断 3080」由 process 模式 + 新守卫 spawn 语义接管保证，不再依赖
+# 为 main 单独建 systemd unit（useSystemdForMain 已废除）。
+KillMode=process
+
+[Install]
+WantedBy=default.target

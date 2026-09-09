@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=dsh-supervisor GUI
+Comment=登录时打开 DSH 监管面板
+Exec=@HOME@/.local/bin/dsh-supervisor-gui
+Icon=@HOME@/.local/share/icons/dsh-supervisor.png
+Terminal=false
+X-GNOME-Autostart-enabled=true
