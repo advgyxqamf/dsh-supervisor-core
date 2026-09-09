@@ -1,0 +1,37 @@
+{
+  "name": "dsh-supervisor",
+  "version": "0.1.2-BETA.5",
+  "private": true,
+  "description": "DSH 生命周期监管工具：独立于 Harness 的守卫进程，自动重启 dsh web",
+  "license": "UNLICENSED",
+  "bin": {
+    "dsh-supervisor": "bin/dsh-supervisor"
+  },
+  "scripts": {
+    "test": "node test/core-test.js && node test/relay-dshauth-test.js && node test/task-registry-test.js && node test/managed-registry-test.js && node test/smoke.js && node test/upgrade-test.js && node test/capability-profile-test.js && node test/frp-platform-test.js && node test/instance-state-test.js && node test/ports-claim-test.js && node test/ports-migrate-test.js && node test/ports-verify.js && node test/precheck-test.js && node test/router-test.js && node test/router-e2e-test.js && node test/p2p-router-test.js && node test/p2p-api-test.js && node test/ensure-instance-test.js && node test/reconcile-instance-test.js && node test/commandcode-quota-test.js && node test/router-evidence-test.js && node test/upstream-credits-test.js && node test/freeze-recovery-test.js && node test/main-port-rederive-test.js && node test/adopt-token-reclaim-test.js && node test/router-ctl-test.js && node test/lifecycle-mirror-test.js && node test/daemon-lifecycle-test.js && node test/lan-daemon-test.js && node test/token-boundary-test.js && node test/guard-update-test.js && node test/loghub-test.js && node test/api-fuzz-test.js && node test/monthly-credits-freeze-test.js",
+    "test:native-uninstall": "node test/native-test.js",
+    "test:plugin-change-restart": "node test/plugin-change-restart-test.js",
+    "test:api-contract": "node test/api-contract-test.js",
+    "release:guard": "bash release/scripts/release.sh",
+    "verify:shell": "bash release/scripts/verify-shell.sh",
+    "build:sea": "bash release/scripts/build-sea.sh",
+    "verify:versions": "node release/scripts/verify-versions.js --core && node release/scripts/verify-versions.js --shell",
+    "publish:core": "bash release/scripts/publish-core.sh",
+    "export:shell": "bash release/scripts/export-shell.sh",
+    "release:core": "bash release/scripts/release-core.sh",
+    "release:core:publish": "bash release/scripts/release-core.sh --publish"
+  },
+  "_uninstallTests": "卸载类测试政策（2026-08-31 确认）：native-test.js（原生 DSH 卸载全量清理）、api-contract-test.js（含 POST /native/uninstall 契约断言）、plugin-change-restart-test.js（含插件卸载场景）禁止进入自动测试链（npm test），仅允许作为独立脚本被显式单独调用（node test/<file> 或上方 test:* 脚本）；除非用户明确指令，禁止擅自运行。",
+  "engines": {
+    "node": ">=18"
+  },
+  "npmPublish": {
+    "scope": "@dsh-sup",
+    "packages": [
+      "dsh-core-linux-x64",
+      "dsh-core-darwin-arm64",
+      "dsh-core-darwin-x64",
+      "dsh-core-win-x64"
+    ]
+  }
+}

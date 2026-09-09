@@ -1,0 +1,100 @@
+name: build-release
+
+# 私有内核仓产线（DESIGN §16.4：壳已剥离至公开仓 dsh-supervisor-launcher，本仓只管内核）。
+# tag v<内核版本> → 构建 SEA + npm 子包发布；壳构建仅保留本地集成冒烟，不出 Release。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux-x64
+          - os: windows-latest
+            artifact: win-x64
+          - os: macos-latest
+            artifact: darwin-arm64
+          - os: macos-13        # Intel Mac → darwin-x64（无交叉编译，需真机 runner）
+            artifact: darwin-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain（壳集成冒烟用）
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux system deps (Tauri v2)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev
+
+      # 发布产线核心逻辑单源：release/scripts/ci-core.sh（本机亦可复跑）。
+      # tag v<内核> 触发器 + 存有 NPM_TOKEN 时方 --publish 真发（无 token 一律仅验证）。
+      - name: 内核发布产线（verify + build:sea + 子包发布 / dry-run）
+        shell: bash
+        run: |
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ] && [ -n "$NPM_TOKEN" ]; then
+            bash release/scripts/ci-core.sh --publish
+          else
+            bash release/scripts/ci-core.sh
+          fi
+
+      - name: Upload artifacts（仅内核 SEA）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/sea/*.bin
+            dist/sea/*.zip
+            dist/sea/*.sha256
+            dist/sea/README.md
+
+      - name: Attach to GitHub Release（仅内核 SEA）
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/sea/*
+          generate_release_notes: true
+
+  # ---- 前端门禁（Phase 2：一源双出口的 verify；独立 job 单平台跑一次，避免矩阵重复）----
+  ui-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 前端 verify（typecheck/lint/test/build）
+        shell: bash
+        run: |
+          cd ui
+          npm ci
+          npm run verify
+
+      - name: 构建 UI 发布镜像（build-ui.sh → ui-react/）
+        shell: bash
+        run: |
+          bash release/scripts/build-ui.sh --skip-install
+          test -f ui-react/supervisor.html

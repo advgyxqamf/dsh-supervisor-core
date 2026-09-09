@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dsh-supervisor — 环境引导</title>
+<style>
+  /* ============================================================
+   * dsh-supervisor 引导页（极简自动版，2026-09-07）
+   * 职责单一：初次启动 → 检测环境 → 补全环境 → 拉守卫内核 → 进面板。
+   * 全程自动，无任何用户操作按钮；纯加载页氛围 + 简洁流程状态。
+   * ============================================================ */
+  :root {
+    --brand: #2F54EB; --brand-soft: rgb(47 84 235 / 12%);
+    --text: #0F1115; --status: #6b747d; --line: #DDE3EC; --ok: #10b981;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --brand: #6b83ff; --brand-soft: rgb(107 131 255 / 18%);
+      --text: #f1f4f9; --status: #9aa3ad; --line: #262b36; --ok: #34d399; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; height: 100dvh; }
+  body { margin: 0; background: transparent; color: var(--text); overflow: hidden;
+    font-family: Inter, "Noto Sans SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  .page {
+    width: 100%; height: 100%;
+    display: grid; place-items: center;
+    background: radial-gradient(circle at 50% 38%, var(--brand-soft), transparent 32%), #FAFBFC;
+  }
+  @media (prefers-color-scheme: dark) {
+    .page { background: radial-gradient(circle at 50% 38%, rgb(107 131 255 / 14%), transparent 32%), #0f1115; }
+  }
+  .inner { display: grid; justify-items: center; gap: 22px; width: min(460px, calc(100% - 48px)); }
+
+  /* 大 LOGO（加载页 DNA） */
+  .startup-logo {
+    position: relative; display: grid; width: 72px; height: 72px; place-items: center;
+    border: 1px solid rgb(47 84 235 / 14%); border-radius: 999px;
+    background: linear-gradient(145deg, rgb(255 255 255 / 96%), rgb(239 245 242 / 92%));
+    box-shadow: 0 18px 42px rgb(15 23 42 / 10%), inset 0 1px 0 rgb(255 255 255 / 90%);
+    color: var(--brand);
+  }
+  .startup-logo::after {
+    position: absolute; inset: -8px; content: ""; border-radius: 999px;
+    border: 2px solid rgb(47 84 235 / 10%); border-top-color: var(--brand);
+    animation: spin 960ms linear infinite;
+  }
+  .startup-logo.done::after { animation: none; border-color: rgb(16 185 129 / 30%); border-top-color: var(--ok); }
+  .startup-logo-image { width: 46px; height: 46px; background: currentColor;
+    mask: url("/dsh-logo.svg") center / contain no-repeat;
+    -webkit-mask: url("/dsh-logo.svg") center / contain no-repeat; }
+  .startup-name { font-size: 22px; font-weight: 760; line-height: 1; letter-spacing: .02em; }
+  .startup-status { color: var(--status); font-size: 13px; line-height: 1.5; text-align: center; min-height: 20px; }
+
+  /* 简洁流程（四小步：检测→环境→守卫→面板） */
+  .steps { display: flex; align-items: center; justify-content: center; gap: 4px; }
+  .step { display: flex; align-items: center; gap: 6px; color: var(--status); font-size: 12px;
+    padding: 5px 10px; border-radius: 999px; transition: all .3s ease; }
+  .step .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); flex: none; }
+  .step.active { color: var(--text); font-weight: 600; background: rgb(47 84 235 / 8%); }
+  .step.active .dot { background: var(--brand); }
+  .step.done { color: var(--ok); }
+  .step.done .dot { background: var(--ok); }
+  .step-arrow { color: var(--line); font-size: 12px; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="inner">
+      <div class="startup-logo" id="logo" aria-hidden="true"><span class="startup-logo-image"></span></div>
+      <div class="startup-name">DSH-SUP</div>
+      <div class="startup-status" id="status">正在检测环境…</div>
+      <div class="steps" id="steps" style="display:none">
+        <span class="step active" id="st-env"><span class="dot"></span>检测环境</span>
+        <span class="step-arrow">›</span>
+        <span class="step" id="st-node"><span class="dot"></span>环境就绪</span>
+        <span class="step-arrow">›</span>
+        <span class="step" id="st-guard"><span class="dot"></span>守卫内核</span>
+        <span class="step-arrow">›</span>
+        <span class="step" id="st-panel"><span class="dot"></span>进入面板</span>
+      </div>
+    </div>
+  </div>
+<script>(function () {
+  // Tauri API: 自身注入优先; 作为壳框架(shell.html) iframe 内容时经 parent 访问(同源)
+  var core = (window.__TAURI__ && window.__TAURI__.core)
+    || (window.parent && window.parent.__TAURI__ && window.parent.__TAURI__.core)
+    || (window.top && window.top.__TAURI__ && window.top.__TAURI__.core) || null;
+  var evtCore = core;
+  var evt = (window.__TAURI__ && window.__TAURI__.event)
+    || (window.parent && window.parent.__TAURI__ && window.parent.__TAURI__.event) || null;
+  var $ = function (id) { return document.getElementById(id); };
+  var stepNames = ['st-env', 'st-node', 'st-guard', 'st-panel'];
+  var nodeOk = false, coreOk = false, nodeBusy = false;
+  var nodeVer = null;
+
+  // 步骤状态机：0=检测环境 1=Node运行时 2=守卫内核 3=进入面板
+  var cur = -1;
+  function setStep(i, detail) {
+    if (i > cur) cur = i;
+    stepNames.forEach(function (id, idx) {
+      var el = document.getElementById(id);
+      var cls = 'step';
+      if (idx < cur) cls += ' done';
+      else if (idx === cur) cls += ' active';
+      el.className = cls;
+      if (detail && idx === cur) {
+        var d = el.querySelector('.step-detail');
+        if (d) d.textContent = detail;
+      }
+    });
+    $('steps').style.display = '';
+  }
+  function status(t) { $('status').textContent = t; }
+
+  // 逐步执行：每步真实状态 + 停留反馈
+  var finished = false;
+  function stepEnv() {
+    setStep(0);
+    status('正在检测系统环境…');
+    return core.invoke('node_status').then(function (st) {
+      nodeBusy = !!st.busy;
+      nodeOk = !!st.installed;
+      nodeVer = st.installed || null;
+      if (nodeBusy) { status(st.status || '正在准备 Node.js 运行环境…'); return stepNodeBusy(); }
+      if (!nodeOk) {
+        setStep(1);
+        status('未检测到 Node.js · 正在补全运行环境…');
+        return core.invoke('start_node_install').then(function () { return stepNodeWait(); });
+      }
+      return stepNodeDone();
+    });
+  }
+  function stepNodeBusy() { setStep(1); status('正在安装 Node.js 运行环境…'); return stepNodeWait(); }
+  function stepNodeWait() {
+    // 轮询等待安装完成
+    return new Promise(function (resolve) {
+      var t = setInterval(function () {
+        core.invoke('node_status').then(function (st) {
+          if (!st.busy && st.installed) { clearInterval(t); nodeOk = true; nodeVer = st.installed; resolve(stepNodeDone()); }
+          else if (!st.busy && !st.installed) { /* still waiting */ }
+        }).catch(function () {});
+      }, 600);
+      setTimeout(function () { clearInterval(t); resolve(stepNodeDone()); }, 15000); // 15s 兜底
+    });
+  }
+  function stepNodeDone() {
+    setStep(1, '');
+    status('Node.js ' + (nodeVer || '') + ' 已就绪 ✓');
+    // 停驻让用户感知 Node 检测完成
+    return wait(450).then(stepGuard);
+  }
+  function stepGuard() {
+    setStep(2);
+    status('正在探测守卫内核…');
+    return core.invoke('core_status').then(function (cs) {
+      coreOk = !!cs.installed;
+      if (!coreOk) {
+        // 内核缺失：一键安装标准产品包（npm i -g @dsh-sup/dsh-core-<platform>-<arch>）
+        status('守卫内核未安装 · 正在安装标准产品包…');
+        return core.invoke('core_install').catch(function (e) { status('内核安装启动失败: ' + e); }).then(stepGuardWait);
+      }
+      return stepGuardDone();
+    });
+  }
+  function stepGuardWait() {
+    return new Promise(function (resolve) {
+      var t = setInterval(function () {
+        core.invoke('core_status').then(function (cs) {
+          if (cs.installed) { clearInterval(t); coreOk = true; resolve(stepGuardDone()); }
+        }).catch(function () {});
+      }, 1500);
+      // 148MB 包安装耗时数分钟：兜底从 15s 放宽到 10min（安装中轮询继续，超时也放行进面板由 core_status 决定）
+      setTimeout(function () { clearInterval(t); coreOk = true; resolve(stepGuardDone()); }, 600000);
+    });
+  }
+  function stepGuardDone() {
+    setStep(2, '');
+    status('守卫内核已就绪 ✓');
+    return wait(450).then(stepPanel);
+  }
+  function stepPanel() {
+    setStep(3);
+    status('环境就绪 · 正在打开面板…');
+    $('logo').classList.add('done');
+    // 停留让用户看到完成态，然后进面板
+    return wait(900).then(function () {
+      if (core) core.invoke('finish_boot').catch(function () {});
+    });
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  // 启动：先环境，后守卫
+  function boot() {
+    if (!core) return;
+    stepEnv().catch(function (e) { status('检测异常: ' + e); });
+  }
+  boot();
+  // 事件：安装进度实时更新状态
+  if (evt) {
+    evt.listen('env_progress', function (e) {
+      var p = e.payload || {};
+      if (p.busy) { setStep(1); status(p.status || '正在安装 Node.js…'); }
+    });
+    evt.listen('env_done', function (e) {});
+    evt.listen('env_error', function (e) {});
+  }
+})();</script>
+</body>
+</html>

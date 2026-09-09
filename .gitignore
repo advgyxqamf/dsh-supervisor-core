@@ -1,20 +1,47 @@
+# 截图取证
+screenshots/
+**/screenshots/
+
+# build 产物（shell 壳 + 内核 SEA + npm 子包组装，全部可重新生成，绝不入库）
+src-tauri/target
+src-tauri/gen/schemas
+src-tauri/frontend
+dist/release
+dist/sea
+dist/npm
+dist/export-shell
+**/dist/
+# React UI 构建产物（release.sh 从 ui/dist 构建后镜像，不入库）
+ui-react/
+**/ui-react/
+
+# 测试残留/临时目录
+tmp-iso/
+
+# 依赖
 node_modules/
+
+# 系统/编辑器
 .DS_Store
-dist/
-!dsh-supervisor/src/domains/dist/
-!dsh-supervisor/src/domains/dist/*
-build/
-.next/
-.venv/
 *.log
+
+# 本地运行/状态（Harness 会话等，不入库）
 .dsh/
 .memory/
-# Tauri 构建产物（~1GB，禁止入库）
-src-tauri/target/
-dsh-supervisor/src-tauri/target/
+**/.dsh/
+**/.memory/
 
-# 根目录本地审计/过程文档（保留本地，不入库）
+# 产品源码仓不含文档/审计/过程物（本地保留，不入库）
+# 注意：release/runbooks/ 操作手册随发布工程入库（2026-09 定案），不在忽略之列
+DESIGN.md
+**/DESIGN.md
+CODE_REVIEW.md
+**/CODE_REVIEW.md
+MIGRATION.md
+**/MIGRATION.md
+docs/
+**/docs/
+
+# 本地审计/取证报告（不入库）
 dsh-supervisor-AUDIT-REPORT.md
 dsh-supervisor-REPAIR-PLAN.md
-
-
