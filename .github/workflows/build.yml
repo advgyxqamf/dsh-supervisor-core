@@ -16,20 +16,23 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: linux-x64
+            arch_override: ""
           - os: windows-latest
             artifact: win-x64
+            arch_override: ""
           - os: macos-latest
             artifact: darwin-arm64
+            arch_override: ""
             # GitHub 已无 Intel macOS runner（macos-13 弃用、macos-14 亦为 arm64）。
             # launcher 为架构无关纯 JS，仅 npm os/cpu 元数据区分——darwin-x64 用 macos-14(arm64)
-            # + DSH_ARCH_OVERRIDE 构建（产物相同，仅包名/元数据不同）。
+            # + DSH_ARCH_OVERRIDE=x64 构建（产物相同，仅包名/元数据不同）。
           - os: macos-14
             artifact: darwin-x64
-            env:
-              DSH_ARCH_OVERRIDE: x64
+            arch_override: x64
     runs-on: ${{ matrix.os }}
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      DSH_ARCH_OVERRIDE: ${{ matrix.arch_override }}
     steps:
       - uses: actions/checkout@v4
 
