@@ -70,8 +70,12 @@ if [ "$PUBLISH" = 1 ]; then
     echo "  工作树无待提交改动（版本已在先前提交中就位）→ 跳过 commit"
   fi
   git tag "v$VER"
-  git push --tags
-  echo "  ✅ 已推送 tag v$VER —— CI 将构建 win-x64 / darwin-arm64 / darwin-x64 并发布子包"
+  # ⚠ 必须同时推**分支**与 tag（2026-09-11 修复）：原实现只 `git push --tags`，
+  #   导致提交只存在于 tag 上、远端默认分支仍停在旧提交——既让仓库状态不一致，
+  #   也让依赖「默认分支最新代码」的手动触发（workflow_dispatch）跑的是旧版本。
+  #   `git push origin HEAD --tags` 一次完成两件事。
+  git push origin HEAD --tags
+  echo "  ✅ 已推送分支 + tag v$VER —— CI 将构建 win-x64 / darwin-arm64 / darwin-x64 并发布子包"
 
   echo "=== [5/5] 本地发布 $OS_TAG-$ARCH 子包（官方 registry） ==="
   echo "  ⚠ 若此处失败：tag 已推送、mac/win 已在 CI 发布；本步可单独重跑："
