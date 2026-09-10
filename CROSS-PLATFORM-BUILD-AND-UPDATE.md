@@ -263,7 +263,7 @@ $ bash ci/check-glibc.sh <binary> 2.35
 
 ```
 【壳发布】公开仓 dsh-supervisor-launcher（CI 免费额度）
-  ① git tag v0.2.0 && git push --tags
+  ① git push origin HEAD && git tag v0.2.0 && git push origin v0.2.0
   ② GitHub Actions 矩阵（7 个 job，见 §4.1），每个 job：
        - 装系统依赖（Linux 22.04 的 webkit2gtk-4.1-dev 等）
        - Rust 工具链（dtolnay/rust-toolchain）

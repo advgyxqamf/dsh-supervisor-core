@@ -24,7 +24,7 @@ case "$MODE" in
     node release/scripts/verify-versions.js --core
     echo "=== 内核版本已提升: $CUR → $NEW ==="
     echo "  1) CHANGELOG.md：整理 [未发布] 段为 [$NEW] 并新开 [未发布]"
-    echo "  2) git add -A && git commit -m 【release: v$NEW 】 && git tag v$NEW && git push --tags（私有仓 build.yml → SEA + npm 子包 --publish）"
+    echo "  2) git add -A && git commit -m 【release: v$NEW 】 && git tag v$NEW && git push origin HEAD --tags（⚠ 必须同时推分支与 tag，否则 CI 不触发）"
     echo "  3) npm run build:launcher（本机内核 launcher）"
     echo "  4) npm run publish:core -- --publish（对应平台）"
     ;;

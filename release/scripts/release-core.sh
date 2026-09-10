@@ -39,7 +39,7 @@ echo "  本机: $PLAT-$ARCH   内核版本: $VER"
 if [ "$PUBLISH" = 1 ] && [ "$PLAT" != "linux" ]; then
   echo "❌ 本机平台为 $PLAT，而本地真发布通道**仅限 Linux**（2026-09-10 定案）。"
   echo "   $PLAT 子包由 GitHub CI 在推送 tag 后生产。请改为："
-  echo "     git tag v$VER && git push --tags      # 触发 build.yml 的 mac/win 矩阵"
+  echo "     git tag v$VER && git push origin HEAD --tags   # 必须同时推分支与 tag（见下）"
   echo "   若确需在本机手工发布（例如 CI 额度耗尽），用底层脚本并自行承担与 CI 的重复发布风险："
   echo "     npm run build:launcher && npm run publish:core -- --publish"
   exit 2

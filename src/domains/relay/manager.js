@@ -277,12 +277,20 @@ class LanManager {
       // 目标必须真的在监听（TCP 可达，跨平台判定），否则代理无意义且会白占端口
       if (!(await this.targetReachable(inst))) return;
       // ── 确定性槽位仲裁（2026-09 架构定稿，docs/port-architecture.md）──
-      //  一个入口负责：byOwner 复用 → 槽位被旧代占则 cmdline 回收+等待 → main 偏好 40000 → 段内最小空闲；
+      //  一个入口负责：byOwner 复用 → 槽位被旧代占则 cmdline 回收+等待 → main 偏好段池首 → 段内最小空闲；
       //  外部长期占用 → 显式 conflict（不静默跳号，reconcile 下轮重试由事件暴露）。
-      // inst.wanPort 是持久化绑定记忆（无论数值）：作为 bindingPreferred 复用；main 无记忆时 advisory 40000
+      // inst.wanPort 是持久化绑定记忆（无论数值）：作为 bindingPreferred 复用。
+      //
+      // ⚠ main 无绑定时的「建议槽位」**必须派生自池定义**（2026-09-11 修复）：
+      //   旧实现硬编码 40000，而池重构后 relay 段为 20000-23999 → 该偏好落在池外，
+      //   既破坏「所有 relay 端口都在池内（避开 OS ephemeral）」的不变量，
+      //   也等于在内核里留了一个写死的固定端口（与「零硬编码端口」原则相悖）。
+      //   本机因 40000 恰被占用而回退到池内、测试侥幸通过；CI 净环境直接暴露。
+      //   现有安装不受影响：已有 wanPort 会被 hasPersistedBinding 原样复用。
       const hasPersistedBinding = !!(inst.wanPort && Number.isInteger(Number(inst.wanPort)) && inst.wanPort > 0);
+      const relayPool = ports.rangeOf('relay');
       const slot = await ports.claimSlot('relay', owner, {
-        preferred: hasPersistedBinding ? inst.wanPort : (inst.id === 'main' ? 40000 : undefined),
+        preferred: hasPersistedBinding ? inst.wanPort : (inst.id === 'main' ? relayPool.base : undefined),
         bindingPreferred: hasPersistedBinding,
         onBindingLost: (e) => { if (this.events) { try { this.events.append('lan_binding_lost', e); } catch {} } if (this.logger && this.logger.warn) this.logger.warn('[syncProxy] ' + inst.id + ' 绑定被盗：' + e.from + ' → 迁移 ' + e.to); },
         reclaimCmdMark: 'lan-daemon.js',

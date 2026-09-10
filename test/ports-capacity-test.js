@@ -85,6 +85,22 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   try { reg.registerUser(outsidePort, 'inst:ok'); } catch (e) { allowed = false; errMsg = e.message; }
   check('池外端口允许为实例端口', allowed, errMsg || ('registered at ' + outsidePort));
 
+  // 7) 回归守卫：relay 的 main 偏好不得硬编码池外端口
+  //    背景（2026-09-11，CI 净环境暴露）：relay/manager.js 曾为 main 硬编码 preferred 40000，
+  //    而池重构后 relay 段为 20000-23999 → 40000 落在池外，破坏「所有 relay 端口都在池内」的不变量。
+  //    本机因 40000 恰被占用而回退到池内、测试侥幸通过；CI 净环境直接失败。
+  //    此处做源码级守卫，防止该硬编码回归。
+  console.log('== 7) 回归守卫：relay main 偏好不得池外硬编码 ==');
+  {
+    const mgrSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'manager.js'), 'utf8');
+    const codeOnly = mgrSrc
+      .split('\n')
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join('\n');
+    check('relay/manager.js 无裸 40000 硬编码（已派生自池 base）', !/\b40000\b/.test(codeOnly), 'ok');
+    check('relay/manager.js 的 main 偏好取自 relay 段池', /rangeOf\('relay'\)/.test(codeOnly), 'ok');
+  }
+
   const failed = results.filter((r) => !r);
   console.log('\n结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
   process.exit(failed.length ? 1 : 0);

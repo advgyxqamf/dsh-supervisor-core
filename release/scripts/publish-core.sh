@@ -107,6 +107,24 @@ else
   echo "== 认证：无（dry-run 不校验认证；真发布需先配置） =="
 fi
 if [ "$PUBLISH" = 1 ]; then
+  # ── 幂等发布（2026-09-11）──
+  # 为什么需要：npm **不允许覆盖同版本**，而发布流水线可能「部分平台成功、部分失败」
+  # （实测 v0.1.3-BETA.1：linux-x64 已发，mac/win 因 CI 失败未发）。此时重跑，
+  # 已成功的平台会 403 报错，而 npm 又没有「只补发缺失平台」的入口 ——
+  # 结果就是重跑永远无法自愈。故：同版本已存在 → 视为成功（幂等），并做内容一致性核对。
+  EXISTING_SIZE="$(npm view "$PKG_NAME@$VER" dist.unpackedSize --registry="$REGISTRY" 2>/dev/null | tr -d '"' | tr -d "\r")"
+  if [ -n "$EXISTING_SIZE" ]; then
+    LOCAL_SIZE="$(npm pack --dry-run --json --registry="$REGISTRY" 2>/dev/null | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(b);console.log((j[0]&&j[0].unpackedSize)||"")}catch(e){console.log("")}})')"
+    echo "== $PKG_NAME@$VER 已存在于 $REGISTRY → 跳过发布（幂等：视为成功）=="
+    echo "   远端 unpackedSize=$EXISTING_SIZE  本地 unpackedSize=${LOCAL_SIZE:-未知}"
+    if [ -n "$LOCAL_SIZE" ] && [ "$EXISTING_SIZE" != "$LOCAL_SIZE" ]; then
+      echo "   ⚠ 体积不一致：远端与本地产物可能不同源。请人工确认后再决定是否升版本重发。"
+      echo "     （不自动失败：体积差异也可能来自 npm 打包细节，误判会阻断正常补发）"
+    else
+      echo "   ✅ 体积一致，内容可信"
+    fi
+    exit 0
+  fi
   echo "== 发布 $PKG_NAME@$VER ${DIST_TAG:-（tag=latest）} → $REGISTRY =="
   npm publish --access public --registry="$REGISTRY" $DIST_TAG
 else

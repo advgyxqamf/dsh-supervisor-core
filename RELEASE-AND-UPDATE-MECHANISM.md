@@ -108,7 +108,10 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 ```
 ① 开发完成 → push 到壳仓 main
-② 打 tag：git tag v0.2.0 && git push --tags
+② 打 tag：git tag v0.2.0 && git push origin v0.2.0
+    ⚠ **必须先 `git push origin main`**：实测（2026-09-11）若 tag 指向的提交不在任何分支上，
+    **GitHub 不会为该 tag 推送触发 workflow**（run 数为 0）。原 `release-core.sh` 只 `git push --tags`
+    正是踩了这个坑；已改为 `git push origin HEAD --tags`。
     （CI 触发条件从「push main + tags」**改为仅 tags + workflow_dispatch**——省配额，见 P4.3）
 ③ 壳仓 CI（三平台并行）：
       export TAURI_SIGNING_PRIVATE_KEY=<CI secret>
@@ -184,7 +187,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
   CI mac/win:  tag v<ver> 触发 build.yml → 三平台各自 ci-core.sh --publish
 
 【壳发布】
-  壳仓:        git tag v<ver> && git push --tags
+  壳仓:        git push origin main && git tag v<ver> && git push origin v<ver>   # 同样必须先推分支
                  → 三平台构建 + 签名 → npm publish @dsh-sup/shell-<os>-<arch>
                  → 用户下次启动自动看到更新（清单经 unpkg 直达）
 ```
