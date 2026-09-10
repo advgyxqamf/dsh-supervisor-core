@@ -52,3 +52,8 @@ dsh-supervisor-REPAIR-PLAN.md
 
 # 内核仓不得包含壳仓（本地克隆目录；曾误被 git add -A 收为 gitlink）
 .shell-work/
+
+# 临时文件（发布提交时曾被误纳入）
+.b2msg.tmp
+.commit-b2.sh
+*.tmp
