@@ -97,10 +97,15 @@ jobs:
           VER="$(node -p "require('./package.json').version")"
           mkdir -p out
           echo "  版本: $VER"
+          # ⚠ artifact 内的布局取决于 upload-artifact 的路径剥离（实测 CI #23）：
+          #   上传 `path: dist/launcher/**` 时，它以**最小公共祖先** dist/launcher 为根，
+          #   故下载后 artifact 根目录**直接就是** launcher 的内容，不含 dist/launcher 前缀。
+          #   两种形态都兼容，避免路径假设变化导致打包为空。
           for d in artifacts/*/; do
             plat="$(basename "$d")"
-            [ -d "$d/dist/launcher" ] || { echo "  跳过 $plat（无 dist/launcher）"; continue; }
-            tar -czf "out/dsh-supervisor-launcher-$VER-$plat.tar.gz" -C "$d" dist/launcher
+            if [ -d "$d/dist/launcher" ]; then SRC="$d/dist/launcher"; else SRC="$d"; fi
+            echo "  打包 $plat ← $SRC"
+            tar -czf "out/dsh-supervisor-launcher-$VER-$plat.tar.gz" -C "$SRC" .
           done
           echo "  产物:"
           ls -lh out/ | sed "s/^/    /"
