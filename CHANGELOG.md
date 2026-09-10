@@ -6,6 +6,42 @@
 
 ## [未发布]
 
+## [0.1.3-BETA.2]（2026-09-11）
+
+> **为什么跳过 BETA.1 直接发 BETA.2**：BETA.1 的 linux-x64 子包在「relay 端口偏好」修复**之前**
+> 构建并发布；npm **不允许覆盖已发布版本**，且**已 unpublish 的版本号永不可重用**
+> （实测 403 You cannot publish over the previously published versions）。
+> 若继续用 BETA.1，则 Linux 是旧代码、mac/win 是新代码 —— 同版本不同代码。
+> 故以 BETA.2 作为**代码一致**的正式发布；BETA.1 的 Linux 包成为弃用残留（beta dist-tag 已指向 BETA.2）。
+
+### 修复：relay 槽位偏好硬编码池外端口（导致内核 CI 连续 5 次失败）
+- **缺陷**：relay/manager.js 为 main 硬编码 preferred: 40000，而 2026-09 端口池重构后 relay 段为
+  20000-23999 → 该偏好落在池外，破坏「所有 relay 端口都在池内（避开 OS ephemeral 32768-60999）」的不变量。
+- **为什么长期未暴露**：本机 40000 恰被占用 → claimSlot 回退到池内 → 测试侥幸通过；
+  CI 净环境 40000 空闲 → 直接绑定 40000 → ports-verify 失败。
+  该失败使内核仓 CI **自 #9 起连续 5 次失败**，**mac/win 平台长期无法发布**。
+- **修复**：main 的建议槽位改为派生自池定义（ports.rangeOf("relay").base）。
+  现有安装不受影响：已持久化的 wanPort 走 hasPersistedBinding 原样复用。
+- **回归守卫**：ports-capacity-test.js 新增源码级断言，禁止该硬编码复活。
+
+### 修复：发布编排漏推分支，导致 tag 推送不触发 CI
+- **缺陷**：release-core.sh 只执行 git push --tags，从不推分支。
+  实测后果：tag 指向的提交不在任何分支上时，**GitHub 不为该 tag 触发 workflow**（匹配 run 数为 0）。
+- **修复**：改为 git push origin HEAD --tags；相关文档/提示同步修正。
+
+### 修复：内核仓误把壳仓收为 gitlink（无 .gitmodules）
+- **缺陷**：git add -A 把本地壳仓克隆目录 .shell-work/ 收成了 mode 160000 的 gitlink，
+  而仓库并无 .gitmodules → CI 检出后 git submodule foreach 报 No url found for submodule path。
+- **修复**：从索引移除该条目（工作区文件保留），并将 .shell-work/ 加入 .gitignore。
+
+### 修复：发布脚本的 GNU/BSD 不可移植断言
+- release-auth-test.js 用 stat -c %a 读权限 —— 该写法仅 GNU 有效；macOS(BSD) 需 stat -f %Lp。
+  结果是该断言在 **macOS CI 上恒为空值并失败**（CI #16 的失败点）。已改为两者回退。
+
+### 新增：发布幂等性
+- publish-core.sh 在真发布前先查该版本是否已存在：存在则**跳过并核对 unpackedSize**，
+  避免「部分平台已发、部分失败」时重跑被 403 卡死（npm 无「只补发缺失平台」入口）。
+
 ## [0.1.3-BETA.1]（2026-09-11）
 
 ### 关于卡：双版本呈现 + 内核/桌面壳一起检测（2026-09-11）

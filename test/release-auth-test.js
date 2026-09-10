@@ -59,7 +59,9 @@ console.log('== R3 NPM_TOKEN 临时 userconfig ==');
     'NPM_TOKEN=secret-xyz dsh_npm_auth_setup >/dev/null',
     'echo "SRC=$(dsh_npm_auth_describe)"',
     'echo "FILE=$DSH_NPM_AUTH_TMP"',
-    'echo "PERM=$(stat -c %a "$DSH_NPM_AUTH_TMP")"',
+    // ⚠ stat 的权限格式在 GNU 与 BSD 上不同：Linux 用 `-c %a`，macOS 用 `-f %Lp`。
+    //   旧写法只有 GNU 版，导致该断言在 macOS CI 上恒为空 → 失败（实测 CI #16）。
+    'echo "PERM=$(stat -c %a "$DSH_NPM_AUTH_TMP" 2>/dev/null || stat -f %Lp "$DSH_NPM_AUTH_TMP" 2>/dev/null)"',
     'echo "HAS=$(grep -c secret-xyz "$DSH_NPM_AUTH_TMP")"',
     'dsh_npm_auth_cleanup',
     'echo "GONE=$([ -f "$DSH_NPM_AUTH_TMP" ] && echo no || echo yes)"',
