@@ -22,9 +22,17 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 // 而 CommonJS 顶层不允许 await —— 之前全同步掩盖了这一点。
 (async () => {
 
-  // 隔离 HOME，避免污染真实壳状态
+  // 隔离 HOME，避免污染真实壳状态。
+  // ⚠ 必须同时设 USERPROFILE：Node 的 os.homedir() 在 Windows 上**优先读 USERPROFILE**，
+  //   只设 HOME 会退回真实用户目录 → 该测试在 Windows 上断言失败（实测 CI #22）。
   const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'shell-net-'));
   process.env.HOME = TMP;
+  process.env.USERPROFILE = TMP;
+  if (process.platform === 'win32') {
+    // 双保险：os.homedir() 在 USERPROFILE 缺失时的回退来源
+    process.env.HOMEDRIVE = '';
+    process.env.HOMEPATH = '';
+  }
 
   const shell = require(path.join(ROOT, 'src', 'domains', 'shell', 'index.js'));
   const dir = shell.shellDir();
