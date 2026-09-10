@@ -57,3 +57,7 @@ dsh-supervisor-REPAIR-PLAN.md
 .b2msg.tmp
 .commit-b2.sh
 *.tmp
+.cmsg
+.b2msg.tmp
+.commit-b2.sh
+.cleanup.sh
