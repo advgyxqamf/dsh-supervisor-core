@@ -6,6 +6,32 @@
 
 ## [未发布]
 
+### 修复：构建冒烟后的目录清理竞态（mac/win 发布失败的最后一环）
+- **现象**：CI 中所有测试全绿，却在 `build:launcher` 末尾以 exit 1 结束，报
+  `rm: <tmp>: Directory not empty`。
+- **根因**：`build-launcher.sh` 用 `kill` 结束冒烟守护进程后**立即** `rm -rf` 其 HOME 目录。
+  `kill` 是异步的，daemon 及其子进程仍在写该目录 → `rm -rf` 在遍历期间遇到新建文件而失败；
+  脚本是 `set -euo pipefail`，于是整个构建被中止（**测试其实全绿**）。
+  属竞态，故时好时坏（同一次 CI 中 darwin-x64 过、darwin-arm64 挂）。
+- **修复**：kill 后**轮询等待进程真正退出**（最多 3s）→ `kill -9` 兜底 → `rm -rf ... || true`
+  （清理绝不允许影响构建结果）。修复后本机重跑，rm 报错由 1 次降为 0 次。
+
+### 修复：frpc 不可执行时崩溃守卫（两条失败路径都无归宿）
+- **缺陷**：`FrpManager.start()` 对 `spawn` 的两条失败路径都没有处理：
+  ① **同步抛出**（Windows 上把非可执行格式当程序 spawn → errno -4094 / code UNKNOWN）：
+     原代码未捕获 → 调用方乃至整个守卫进程崩溃；
+  ② **异步 emit `error`**（二进制存在但不可执行：权限不足 / 架构不符 / 目标是目录）：
+     原代码**没有 `child.on('error')` 监听器** → Node 视为未捕获异常 → 守卫崩溃。
+- **修复**：`spawn` 包 try/catch 降级为 `{ok:false, ...}`；并新增 `child.on('error')`
+  记录日志、清空 child、按既有退避策略排期重启。
+- **测试**：`frp-resilience-test.js` 新增 R4（把 `binPath` 设为**目录**以触发不可执行路径），
+  断言不抛出且 child 被清理、进程存活。
+
+### 修复：`frp-resilience-test` 在 Windows 上不可运行（测试夹具的平台限制）
+- 该测试用 **POSIX shell 脚本**（`#!/bin/sh` + `sleep`）冒充 frpc 可执行文件，
+  Windows 无法执行该格式（spawn 同步抛出）。属夹具限制而非产品缺陷。
+- Windows 上显式 **SKIP** 并打印原因（不静默变绿）；产品侧「spawn 失败不得崩溃」已由上述修复保证。
+
 ### 修复：mac/win 平台发布长期 ENEEDAUTH（关键根因）
 - **现象**：macOS/Windows 的 CI 真发布恒在 `npm publish` 报 `ENEEDAUTH`，平台子包长期缺失。
 - **根因**：npm 把环境变量按 `npm_config_*`（**不分大小写**）映射为配置项，两者都落到 `userconfig`，

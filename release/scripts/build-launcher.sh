@@ -85,7 +85,17 @@ if ! printf "%s" "$UI_BODY" | grep -q "<div id=\"root\">"; then
 fi
 echo "  UI 服务断言 OK"
 kill "$SMOKE_PID" 2>/dev/null || true
-rm -rf "$SMOKE_HOME"
+# ⚠ 必须**等进程真正退出**再删目录（2026-09-11 修复，实测 CI mac/win 均因此失败）：
+#   kill 是异步的；刚启动的 daemon 及其子进程可能仍在写 $SMOKE_HOME，
+#   此时 rm -rf 会因遍历期间目录被新建文件而报 "Directory not empty" 并以非零退出；
+#   在 set -e 下直接中止整个构建（测试其实全绿，却报发布失败）。
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 "$SMOKE_PID" 2>/dev/null || break
+  sleep 0.3
+done
+kill -9 "$SMOKE_PID" 2>/dev/null || true
+# 清理本身绝不允许影响构建结果
+rm -rf "$SMOKE_HOME" 2>/dev/null || true
 
 echo "[4/5] 携带版本自检文件…"
 # 供 self-check/版本核对复用（与 SEA 形态一致的 guardVersion 注入校验）

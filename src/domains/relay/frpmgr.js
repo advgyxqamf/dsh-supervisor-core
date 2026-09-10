@@ -182,7 +182,16 @@ class FrpManager {
     this._cleanupOrphans();
     if (!fs.existsSync(this.binPath)) return { ok: false, error: 'frpc binary missing', needInstall: true };
     try { fs.accessSync(this.configFile, fs.constants.R_OK); } catch { return { ok: false, error: 'no config generated yet' }; }
-    const child = spawn(this.binPath, ['-c', this.configFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // ⚠ spawn 可能**同步抛出**，而不只是 emit 'error'：当 binPath 不是可执行格式时
+    //   （实测 Windows 上把 POSIX shell 脚本当程序 spawn → errno -4094 / code UNKNOWN），
+    //   未捕获会让调用方乃至整个守卫进程直接崩溃。frpc 缺失/损坏必须降级为返回值。
+    let child;
+    try {
+      child = spawn(this.binPath, ['-c', this.configFile], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      if (this._stableTimer) clearTimeout(this._stableTimer);
+      return { ok: false, error: 'frpc spawn failed: ' + ((e && e.message) || e), needInstall: true };
+    }
     this.child = child;
     const pushLog = (line) => {
       line = String(line).trim();
@@ -190,6 +199,14 @@ class FrpManager {
       this.logTail.push(new Date().toISOString().slice(11, 19) + ' ' + line);
       if (this.logTail.length > 200) this.logTail.splice(0, this.logTail.length - 200);
     };
+    // ⚠ 必须监听 'error'：二进制存在但不可执行时（权限不足 / 架构不符 / 目标是目录），
+    //   Node 会**异步** emit 'error'；无监听器即成为未捕获异常 → **整个守卫崩溃**。
+    //   （同步抛出那一路由上方 try/catch 覆盖；两条路径都要有归宿。）
+    child.on('error', (e) => {
+      pushLog('[spawn error] ' + ((e && e.message) || e));
+      if (this.child === child) this.child = null;
+      if (!this._intentionalStop) this._scheduleRestart();
+    });
     child.stdout.on('data', (c) => String(c).split('\n').forEach(pushLog));
     child.stderr.on('data', (c) => String(c).split('\n').forEach(pushLog));
     child.on('exit', (code) => {

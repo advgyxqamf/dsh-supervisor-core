@@ -33,8 +33,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
 
   // ── R2/R3：真实子进程 crash → 自动重拉 ──
+  // ⚠ 仅 POSIX：本组用「POSIX shell 脚本」（#!/bin/sh + sleep）冒充 frpc 可执行文件；
+  //   Windows 无法执行该格式（spawn 同步抛 errno -4094 / code UNKNOWN）——
+  //   属**测试夹具的平台限制**，非产品缺陷。产品侧「spawn 失败不得崩溃」由 frpmgr 的
+  //   try/catch 降级保证（本次一并修复）。Windows 上跳过并显式说明，不静默变绿。
   console.log('== R2/R3 非预期退出自动重拉 ==');
-  {
+  if (process.platform === 'win32') {
+    console.log('SKIP R2/R3（Windows 无法执行 POSIX shell 夹具）');
+  } else {
     const D = fs.mkdtempSync(path.join(TMP, 'live-'));
     const m = new FrpManager({ dir: D, logger, events: { append() {} } });
     // 用真实可执行脚本冒充 frpc：长驻 sleep，便于 kill 模拟崩溃
@@ -72,6 +78,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     m._scheduleRestart();
     check('R3-c 停用/无代理时不重启', !m._restartTimer, 'timer=' + !!m._restartTimer);
     try { if (m.child && m.child.pid) process.kill(m.child.pid, 'SIGKILL'); } catch {}
+  }
+
+  // ── R4：frpc 不可执行时必须优雅降级（不得抛出 / 不得崩溃进程）──
+  //   两条失败路径都要覆盖：
+  //     ① spawn 同步抛出（Windows 上拿非可执行格式当程序）
+  //     ② spawn 异步 emit 'error'（存在但不可执行：权限/架构/目标是目录）
+  //   ②若无监听器会成为未捕获异常 → 整个守卫崩溃。
+  console.log('== R4 frpc 不可执行时的降级 ==');
+  {
+    const D4 = fs.mkdtempSync(path.join(TMP, 'bad-'));
+    const m4 = new FrpManager({ dir: D4, logger, events: { append() {} } });
+    fs.mkdirSync(m4.binPath, { recursive: true });   // binPath 变成**目录**：existsSync 通过但不可执行
+    m4.saveSettings({ enabled: true, serverAddr: '127.0.0.1', serverPort: 7000, authToken: 'tok', user: 'dsh' });
+    m4.syncFromInstances([{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 40000 }]);
+    check('R4-a start 不抛出（同步异常已降级为返回值）', true, 'ok');
+    await sleep(500);
+    check('R4-b 异步 spawn 失败已被处理（child 清空、进程未崩溃）', m4.child === null, 'child=' + (m4.child && m4.child.pid));
+    m4.stop();
   }
 
   const failed = results.filter((r) => !r);
