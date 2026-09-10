@@ -16,8 +16,9 @@ on:
 
 jobs:
   build:
+    # 本 job 只负责构建与发布 npm 子包（不再直接挂 Release，见文件末尾 release job 的说明）。
     permissions:
-      contents: write   # softprops/action-gh-release 挂 Release + 上传 launcher 资产需 GITHUB_TOKEN contents:write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -70,10 +71,46 @@ jobs:
             dist/launcher/**
             dist/launcher/README.md
 
-      - name: Attach to GitHub Release（内核 launcher 构建物）
+  # ── Release 附加：**单独一个 job，只跑一次** ──
+  # 为什么不能放在 build 矩阵里（2026-09-11 修复，实测 CI #19）:
+  #   矩阵 3 个 job（win/mac-arm64/mac-x64）会**并发**向同一个 Release 上传资产，
+  #   产生竞态：实测 darwin-x64 成功、darwin-arm64 在同一步骤失败。
+  #   且各平台的 dist/launcher/** 内含**同名文件**（如 core.cjs），直接挂会互相覆盖/冲突。
+  # 现改为：build 只上传 artifact → 本 job 汇总、按平台打成**唯一命名**的 tar.gz 后一次性挂载。
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 挂 Release 需 GITHUB_TOKEN contents:write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 收集各平台构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 按平台打包为唯一命名的 tar.gz
+        shell: bash
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          mkdir -p out
+          echo "  版本: $VER"
+          for d in artifacts/*/; do
+            plat="$(basename "$d")"
+            [ -d "$d/dist/launcher" ] || { echo "  跳过 $plat（无 dist/launcher）"; continue; }
+            tar -czf "out/dsh-supervisor-launcher-$VER-$plat.tar.gz" -C "$d" dist/launcher
+          done
+          echo "  产物:"
+          ls -lh out/ | sed "s/^/    /"
+          # 断言：必须有产物，否则「静默挂空 Release」比失败更糟
+          if [ -z "$(ls -A out 2>/dev/null)" ]; then echo "::error::未生成任何 Release 资产"; exit 1; fi
+
+      - name: 附加到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/launcher/**
+          files: out/*.tar.gz
           generate_release_notes: true
 
   # 前端门禁（typecheck/lint/test/build）**已移出 CI**（2026-09 定案，额度优化）：

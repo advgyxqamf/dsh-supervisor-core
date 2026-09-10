@@ -6,6 +6,35 @@
 
 ## [未发布]
 
+### 修复：mac/win 平台发布长期 ENEEDAUTH（关键根因）
+- **现象**：macOS/Windows 的 CI 真发布恒在 `npm publish` 报 `ENEEDAUTH`，平台子包长期缺失。
+- **根因**：npm 把环境变量按 `npm_config_*`（**不分大小写**）映射为配置项，两者都落到 `userconfig`，
+  且**小写 `npm_config_userconfig` 胜出**。CI 中 `npm run publish:core` 由 npm 自身注入
+  `npm_config_userconfig=$HOME/.npmrc`，我们 `export NPM_CONFIG_USERCONFIG=<临时 token 文件>` 因此被忽略，
+  npm 转去读 runner 的无 token `~/.npmrc` → ENEEDAUTH。
+- **为何长期潜伏**：本地 `~/.npmrc` 恰好有 token，即使读错文件也能认证成功 —— 本地完全无法复现。
+- **对照实验**（同一台机、HOME 干净以排除掩盖）：
+  - 大写=token + 小写=无token → `npm error code ENEEDAUTH`（与 CI 一致）
+  - 大写=token + 小写=token   → `lob.bowen`（修复后）
+- **修复**：`_npm-auth.sh` 新增 `dsh_npm_auth__apply()`，设置 userconfig 时**大小写同时写**；
+  `snapshot`/`cleanup` 同时快照与还原两者（避免留下指向已删临时文件的悬空值）。
+  5 条解析分支统一走该函数。回归测试新增 R3-f/g/h 三条断言。
+
+### 修复：Windows 上跨平台路径断言恒失败（测试自身的正则错误）
+- `cross-platform-test.js` 用 `replace(/\\\\/g, '/')` 归一化路径 —— 该正则匹配的是**两个**反斜杠，
+  而 Windows 路径只有单个反斜杠 → 替换不生效 → 断言在 Windows CI 上恒失败
+  （Linux 因 `standardDirs` 返回正斜杠而侥幸通过，属平台掩盖）。
+- 改为归一化「任意连续分隔符」`replace(/[\\/]+/g, '/')`，与平台无关。
+
+### 修复：GitHub Release 附加的并发竞态 + 同名资产冲突
+- **缺陷**：`Attach to GitHub Release` 原先写在 build **矩阵内部**，3 个 job（win/mac-arm64/mac-x64）
+  会**并发**向同一 Release 上传（实测 CI #19：darwin-x64 成功、darwin-arm64 在同一步骤失败）。
+  且各平台 `dist/launcher/**` 含**同名文件**（如 `core.cjs`），直接挂载会互相覆盖。
+- **修复**：拆出独立的 `release` job（`needs: build`，仅 tag 触发，只跑一次）：
+  先 `download-artifact` 汇总，再按平台打成**唯一命名**的
+  `dsh-supervisor-launcher-<ver>-<platform>.tar.gz`，最后一次性挂载；并断言产物非空。
+- build job 的 `permissions` 相应收敛为 `contents: read`。
+
 ## [0.1.3-BETA.2]（2026-09-11）
 
 > **为什么跳过 BETA.1 直接发 BETA.2**：BETA.1 的 linux-x64 子包在「relay 端口偏好」修复**之前**

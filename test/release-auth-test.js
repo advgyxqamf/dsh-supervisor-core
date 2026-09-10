@@ -130,9 +130,17 @@ console.log('== R6 CI 矩阵不含 ubuntu ==');
 {
   const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'build.yml'), 'utf8');
   const code = y.split(String.fromCharCode(10)).filter((l) => !/^\s*#/.test(l)).join(String.fromCharCode(10));
-  check('R6-a 无 ubuntu runner', !/runs-on:\s*ubuntu/.test(code));
-  check('R6-b 含 windows-latest', /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/.test(code) && /windows-latest/.test(y));
+  // ⚠ 断言范围必须精确到「发布矩阵」，而非全文（2026-09-11 修正）：
+  //   linux-x64 由**本地**发布，故 CI 的 npm 发布矩阵不得含 ubuntu；
+  //   但 `release` job（汇总 artifact → 挂 GitHub Release，**不发 npm**）使用 ubuntu-latest 是正当的，
+  //   原断言扫全文 `runs-on: ubuntu` 会把它误判为违规。
+  const buildSection = (code.split(/\njobs:/)[1] || '').split(/\n\s{2}release:/)[0];
+  const releaseSection = (code.split(/\n\s{2}release:/)[1] || '');
+  check('R6-a 发布矩阵不含 ubuntu', !/os:\s*ubuntu/.test(buildSection) && !/runs-on:\s*ubuntu/.test(buildSection), buildSection.match(/os:\s*\S+/g));
+  check('R6-b build 用 matrix.os', /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/.test(buildSection) && /windows-latest/.test(y));
   check('R6-c 含 macos', /macos-latest/.test(y) && /macos-14/.test(y));
+  check('R6-d release job 只挂资产、不发布 npm', releaseSection.length > 0 && !/npm\s+publish/.test(releaseSection) && !/ci-core\.sh/.test(releaseSection));
+  check('R6-e release job 仅 tag 触发且 need build', /needs:\s*build/.test(releaseSection) && /startsWith\(github\.ref/.test(releaseSection));
 }
 
 // ── R7 平台闸 ──

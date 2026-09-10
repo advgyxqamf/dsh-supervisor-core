@@ -33,7 +33,11 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   const dm = ep.standardDirs('darwin', '/h');
   check('darwin 追加 Homebrew 路径', dm.includes('/opt/homebrew/bin') && dm.includes('/usr/local/bin'), JSON.stringify(dm));
   const dw = ep.standardDirs('win32', 'C:/U/X');
-  check('win 含 .local/bin 兼容目录', dw.some((d) => d.replace(/\\\\/g, '/').endsWith('/.local/bin')), JSON.stringify(dw));
+  // ⚠ 旧写法 replace(/\\\\/g, '/') 匹配的是**两个**反斜杠，而 Windows 路径是单个反斜杠，
+  //   于是 replace 不生效 → 该断言在 Windows CI 上恒失败（Linux 因 standardDirs 返回正斜杠而侥幸通过）。
+  //   改为归一化「任意连续的分隔符」，与平台无关。
+  const norm = (d) => d.replace(/[\\/]+/g, '/');
+  check('win 含 .local/bin 兼容目录', dw.some((d) => norm(d).endsWith('/.local/bin')), JSON.stringify(dw));
 
   // 真实解析：当前平台的 node 应可解析到
   const nodeHit = ep.resolveExecutable(process.platform === 'win32' ? 'node' : 'node');
