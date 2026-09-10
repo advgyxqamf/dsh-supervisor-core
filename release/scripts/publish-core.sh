@@ -112,9 +112,13 @@ if [ "$PUBLISH" = 1 ]; then
   # （实测 v0.1.3-BETA.1：linux-x64 已发，mac/win 因 CI 失败未发）。此时重跑，
   # 已成功的平台会 403 报错，而 npm 又没有「只补发缺失平台」的入口 ——
   # 结果就是重跑永远无法自愈。故：同版本已存在 → 视为成功（幂等），并做内容一致性核对。
-  EXISTING_SIZE="$(npm view "$PKG_NAME@$VER" dist.unpackedSize --registry="$REGISTRY" 2>/dev/null | tr -d '"' | tr -d "\r")"
+  # ⚠ 必须 `|| true`：版本不存在时 `npm view` 返回非零，而本脚本是 `set -euo pipefail`，
+  #   管道失败会让**赋值语句本身**失败并中止脚本 —— 即「首次发布必然失败」。
+  #   （实测：v0.1.3-BETA.2 发布时脚本在认证后静默终止，正是此处。）
+  EXISTING_SIZE="$(npm view "$PKG_NAME@$VER" dist.unpackedSize --registry="$REGISTRY" 2>/dev/null | tr -d '"' | tr -d "\r" || true)"
+  EXISTING_SIZE="$(printf '%s' "$EXISTING_SIZE" | tr -d '[:space:]')"
   if [ -n "$EXISTING_SIZE" ]; then
-    LOCAL_SIZE="$(npm pack --dry-run --json --registry="$REGISTRY" 2>/dev/null | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(b);console.log((j[0]&&j[0].unpackedSize)||"")}catch(e){console.log("")}})')"
+    LOCAL_SIZE="$(npm pack --dry-run --json --registry="$REGISTRY" 2>/dev/null | node -e 'let b="";process.stdin.on("data",d=>b+=d);process.stdin.on("end",()=>{try{const j=JSON.parse(b);console.log((j[0]&&j[0].unpackedSize)||"")}catch(e){console.log("")}})' || true)"
     echo "== $PKG_NAME@$VER 已存在于 $REGISTRY → 跳过发布（幂等：视为成功）=="
     echo "   远端 unpackedSize=$EXISTING_SIZE  本地 unpackedSize=${LOCAL_SIZE:-未知}"
     if [ -n "$LOCAL_SIZE" ] && [ "$EXISTING_SIZE" != "$LOCAL_SIZE" ]; then
