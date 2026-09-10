@@ -80,7 +80,14 @@ console.log('== R3 NPM_TOKEN 临时 userconfig ==');
   ].join(String.fromCharCode(10));
   const out = runBash(script);
   check('R3-a 命中 NPM_TOKEN 路径', /SRC=NPM_TOKEN/.test(out), (out.match(/^SRC=(.*)$/m) || [])[1]);
-  check('R3-b 临时 userconfig 权限 600', /PERM=600/.test(out), (out.match(/^PERM=(.*)$/m) || [])[1]);
+  // ⚠ POSIX-only 断言：Windows 的 NTFS ACL 不映射到 POSIX 权限位，`chmod 600` 实为无操作，
+  //   stat 报 644 —— 原断言在 Windows CI 上恒失败（且这并非产品缺陷：该文件的保护在
+  //   Windows 上依赖用户目录 ACL，而非 0600 位）。
+  if (process.platform === 'win32') {
+    console.log('SKIP R3-b（Windows 无 POSIX 权限位，0600 不适用）');
+  } else {
+    check('R3-b 临时 userconfig 权限 600', /PERM=600/.test(out), (out.match(/^PERM=(.*)$/m) || [])[1]);
+  }
   check('R3-c token 已写入临时文件', /HAS=1/.test(out), (out.match(/^HAS=(.*)$/m) || [])[1]);
   check('R3-d cleanup 删除临时文件', /GONE=yes/.test(out), (out.match(/^GONE=(.*)$/m) || [])[1]);
   check('R3-e cleanup 精确恢复 env', /ENVRESTORED=unset/.test(out), (out.match(/^ENVRESTORED=(.*)$/m) || [])[1]);
@@ -109,7 +116,12 @@ console.log('== R4 规范位置（真实 home/.npmrc）命中 ==');
   ].join(String.fromCharCode(10));
   const out = runBash(script, { DSH_REAL_HOME: fakeHome });
   check('R4-a 命中真实 home 规范文件', /HIT=真实 home/.test(out), (out.match(/^HIT=(.*)$/m) || [])[1]);
-  check('R4-b 指向该规范文件', out.includes('CFG=' + path.join(fakeHome, '.npmrc')), (out.match(/^CFG=(.*)$/m) || [])[1]);
+  // ⚠ 分隔符归一化：`dsh_canonical_npmrc` 用 "$(dsh_real_home)/.npmrc" 拼路径（硬编码 '/'），
+  //   而 path.join 在 Windows 上产出 '\\' → 原断言在 Windows 上必失败（仅分隔符差异）。
+  const sepNorm = (s) => String(s).replace(/[\\/]+/g, '/');
+  check('R4-b 指向该规范文件',
+    sepNorm(out).includes(sepNorm('CFG=' + path.join(fakeHome, '.npmrc'))),
+    (out.match(/^CFG=(.*)$/m) || [])[1]);
   const noneOut = runBash(script, { DSH_REAL_HOME: path.join(TMP, 'emptyhome') });
   check('R4-c 无 token 时不误报成功', /HIT=none/.test(noneOut), (noneOut.match(/^HIT=(.*)$/m) || [])[1]);
 }

@@ -132,8 +132,11 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     const r = await shell.restartShell({ procPattern: 'dsh-supervisor-gui-no-such-proc-xyz' });
     check('R9-a 无壳进程且无 exePath → ok=false 明确失败', r.ok === false && !!r.error, JSON.stringify(r));
 
-    // 提供 exePath：应尝试拉起（用 /bin/true 作为替身，秒退，不产生常驻进程）
-    const r2 = await shell.restartShell({ procPattern: 'dsh-supervisor-gui-no-such-proc-xyz', exePath: '/bin/true' });
+    // 提供 exePath：应尝试拉起。
+    // ⚠ 用 process.execPath（node 自身）而非 /bin/true —— 后者在 Windows 上不存在，
+    //   会让该断言在 Windows CI 上失败（测试夹具的平台可移植性）。
+    //   node 在 stdio 被 ignore（无 stdin）时立即退出，不会留下常驻进程。
+    const r2 = await shell.restartShell({ procPattern: 'dsh-supervisor-gui-no-such-proc-xyz', exePath: process.execPath });
     check('R9-b 有 exePath → 尝试拉起并返回 ok', r2.ok === true && r2.restarted === true, JSON.stringify(r2));
     check('R9-c 未杀任何真实进程（killed 为空）', Array.isArray(r2.killed) && r2.killed.length === 0, JSON.stringify(r2.killed));
   }
