@@ -96,9 +96,13 @@ class PluginManager {
     return out;
   }
 
-  /** 严格解析目标：native / all / <实例id>。无效目标返回 error（不静默降级）。 */
+  /** 严格解析目标：native / all / <实例id>（兼容前端 "id:<实例id>" 前缀）。
+   *  无效目标返回 error（不静默降级）。
+   *  2026-09 修复：前端 PluginsPage 发送 "id:<instId>"，后端曾不剥前缀直接 find → 恒报
+   *  「指定实例不存在」，面板「安装到指定实例」功能不可用。此处统一兼容两种写法。 */
   resolveTargets(targetStr) {
-    const str = targetStr || 'native';
+    let str = (targetStr === undefined || targetStr === null || targetStr === '') ? 'native' : String(targetStr);
+    if (str.startsWith('id:')) str = str.slice(3); // 前端目标前缀（id:<实例id>）
     if (str === 'native') return { ok: true, targets: [this._nativeTarget()] };
     if (str === 'all') return { ok: true, targets: [this._nativeTarget(), ...this._allSandboxTargets()] };
     const inst = ((this.instances && this.instances.instances) || []).find((x) => x.id === str);

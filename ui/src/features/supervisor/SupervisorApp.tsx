@@ -67,6 +67,7 @@ export function SupervisorApp() {
 
   const meta = PAGE_META[view];
   const phase = status?.phase;
+  const sessionState = status?.sessionState;
   const running = Boolean(status?.dshPid);
 
   // 共用壳架构（2026-09-07 定稿）：窗口栏唯一由壳框架 shell.html 提供；
@@ -139,7 +140,19 @@ export function SupervisorApp() {
               </>
             }
             right={
-              online && running ? (
+              // 会话生命周期优先（契约 §3，INV-S4）：stopping/stopped 时明确表达「退出中/已退出」——
+              // 这是整个服务链的运行相位，比单看 main phase 更准确（退出中 main 可能已 STOPPED）。
+              sessionState === "stopping" ? (
+                <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  管家正在退出（停止全部服务）…
+                </span>
+              ) : sessionState === "stopped" ? (
+                <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+                  管家已退出（服务已全部停止）
+                </span>
+              ) : online && running ? (
                 <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">
                   <span className="size-1.5 rounded-full bg-status-ok" />
                   DSH 管家运行中{phase ? " · " + phase : ""}

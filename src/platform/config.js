@@ -30,6 +30,14 @@ const DEFAULTS = {
   apiHost: '127.0.0.1',
   // API 端口：高位不常用段起始（3100 常用端口易与本机程序冲突）。守卫启动被占则自动顺延并持久化。
   apiPort: 36360,
+  // daemon 控制通道端口（router/lan 独立进程 ctl）：集中定义，杜绝散落硬编码（2026-09 端口收敛）。
+  routerCtlPort: 43107,
+  lanCtlPort: 43108,
+  // 动态端口池（工业标准：范围是配置项，非编译期常量）。默认避开 OS 动态端口范围
+  // （Linux ip_local_port_range=32768-60999），落在 IANA User 段低位供监听池使用。
+  // managed = relay/proxyInstance/oauthCallback 共享池（K8s 单一范围思想，杜绝段碎片化）；
+  // providerApi = 智能路由供应商独立端点池（按供应商规模调大）。null = 用内置默认池。
+  portPools: null,
   stateFile: '~/.dsh/supervisor/state.json',
   // 系统日志框架目录布局（docs/SYSTEM-LOGGING-ARCHITECTURE.md §2/§8）：log/ 与 events/ 分目录；
   // 守卫(guard) 事件在 events/guard.events.log、分级日志在 log/guard.log（daemon 用 router/lan 同构文件）。

@@ -46,6 +46,9 @@ class LifecycleManager {
   async start(id) {
     const lc = this.registrations.get(id);
     if (!lc) return { ok: false, error: '未注册模块: ' + id };
+    // B1 能力执法：声明不可启停的模块（如 plugin 聚合）显式拒绝——
+    // 原实现会走到 no-op 回调并返回 {ok:true}，用户以为成功了（假成功）。
+    if (lc.startable === false) return { ok: false, error: '模块不可启停（' + lc.kind + ':' + lc.id + '）' };
     // dsh 由守卫恒监管（internal 状态机）：start 只是申报运行意图，不翻转纳管位
     if (id !== 'dsh') lc._monitoring = true;
     lc.wantRunning();
@@ -58,6 +61,7 @@ class LifecycleManager {
   async stop(id, reason) {
     const lc = this.registrations.get(id);
     if (!lc) return { ok: false, error: '未注册模块: ' + id };
+    if (lc.startable === false) return { ok: false, error: '模块不可启停（' + lc.kind + ':' + lc.id + '）' }; // B1 执法
     // dsh 恒纳管：stop 只改 desired（守卫 internal 状态机继续观测其 desired=stopped 合规）
     if (id !== 'dsh') lc._monitoring = false;
     const r = await lc.stop(reason || 'user-stop');
@@ -69,6 +73,7 @@ class LifecycleManager {
   async restart(id) {
     const lc = this.registrations.get(id);
     if (!lc) return { ok: false, error: '未注册模块: ' + id };
+    if (lc.startable === false) return { ok: false, error: '模块不可启停（' + lc.kind + ':' + lc.id + '）' }; // B1 执法
     // 委托 lc.restart(): ManagedLifecycle 内 _restart 回调优先(如 dsh→requestRestart 真重启
     // 停旧拉新), 无回调才退化为 stop→start(通用模块)。
     if (typeof lc.restart === 'function') {

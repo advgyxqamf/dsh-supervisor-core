@@ -11,9 +11,10 @@
 import type {
   AccessKeyResult, AccessKeyStatus, AutostartStatus, CloseActionStatus, EnvStatus, EventsPage, FrpStatus, GenericOk,
   GuardVersion, InstancesResponse, InstalledPluginsResponse, LanAccessResponse,
-  LanPanelStatus, LifecycleModuleId, LifecycleModuleState, MarketResponse, NodeLtsStatus, PluginUpdatesResponse,
+  LanPanelStatus, LifecycleModuleId, MarketResponse, NodeLtsStatus, PluginUpdatesResponse,
   PortsResponse, ProvidersResponse, RegistryInfo, RouterStatus,
-  SelfUpdateStatus, SupervisorInstance, SupervisorStatus, TasksResponse,
+  PluginJobStatus, ProxyUpdateStatus, SelfUpdateStatus, SupervisorInstance, SupervisorStatus, TasksResponse,
+  ShellStatus, ShellUpdateCheck,
 } from "./types";
 
 // API 根（分体架构 + 动态端口 2026-09-07 定稿）：面板始终由守卫内核 HTTP 同源托管
@@ -67,6 +68,18 @@ async function http<T>(method: string, path: string, body?: unknown, opts?: Http
 const get = <T>(p: string, opts?: HttpOptions) => http<T>("GET", p, undefined, opts);
 const post = <T>(p: string, body?: unknown, opts?: HttpOptions) => http<T>("POST", p, body ?? {}, opts);
 
+/** 文本端点（text/plain，如 /changelog、/guard/changelog）：http() 会尝试 JSON 解析失败后返回 null，
+ *  故此处直接走 fetch 取原文（保持同源/CSP 与超时语义一致）。 */
+async function getText(path: string): Promise<string> {
+  const { signal, clear } = withTimeout(DEFAULT_TIMEOUT_MS);
+  try {
+    const res = await fetch(BASE + path, { method: "GET", signal });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
+    return text;
+  } finally { clear(); }
+}
+
 /** 查询参数拼接 */
 function qs(base: string, params: Record<string, string | number | undefined>) {
   const sp = new URLSearchParams();
@@ -78,6 +91,8 @@ function qs(base: string, params: Record<string, string | number | undefined>) {
 export const supervisorApi = {
   // ── 运行态 ──
   status: () => get<SupervisorStatus>("/status"),
+  // 注：/session/status 是**壳**（Rust get_session_state）与外部脚本的读取口；
+  // UI 不发额外请求——会话态已随 /status（2s 轮询）以 sessionState 字段投影返回（避免双路径）。
   events: (after = 0, limit = 60) => get<EventsPage>(qs("/events", { after, limit })),
   instances: () => get<InstancesResponse>("/instances"),
   lanAccess: () => get<LanAccessResponse>("/lan-access"),
@@ -90,21 +105,22 @@ export const supervisorApi = {
   //    取代分散的 /start|/stop|/router/start|/router/stop —— 后端语义等价且 daemon 监督感知）──
   lifecycleStart: (id: LifecycleModuleId) => post<GenericOk & { ok?: boolean }>("/lifecycle/" + id + "/start"),
   lifecycleStop: (id: LifecycleModuleId) => post<GenericOk & { ok?: boolean }>("/lifecycle/" + id + "/stop"),
-  lifecycleGet: (id: LifecycleModuleId) => get<LifecycleModuleState>("/lifecycle/" + id),
+  // 注：GET /lifecycle/{id} 保留为后端 REST 面（单模块查询，供脚本/curl）；UI 未使用故不设 client 方法。
 
   // ── native DSH ──
-  nativeCheckUpdate: () => post<GenericOk>("/native/check-update"),
+  // 后端返回 { ok, ...versionInfo() }（含 updateAvailable/latest/installed）；此前误标 GenericOk → 契约漏字段。
+  nativeCheckUpdate: () => post<GenericOk & { updateAvailable?: boolean; latest?: string; installed?: string | null }>("/native/check-update"),
   nativeInstall: () => post<GenericOk>("/native/install"),
   nativeUpgrade: (version?: string) => post<GenericOk>("/native/upgrade", version ? { version } : {}),
   nativeUninstall: () => post<GenericOk>("/native/uninstall"),
   // 原生主干(main)设置（概念清分：main 设置不走 /instances 沙箱域，统一 /native/settings）
-  nativeSettings: (patch: { guardian?: boolean; remoteEnabled?: boolean; frpEnabled?: boolean; frpRemotePort?: number }) =>
+  nativeSettings: (patch: { guardian?: boolean; remoteEnabled?: boolean; remoteToken?: string; frpEnabled?: boolean; frpRemotePort?: number }) =>
     post<GenericOk & { main?: SupervisorInstance }>("/native/settings", patch),
 
   // ── instances ──
   instanceAdd: (p: { name: string; port: number; command?: string[]; memoryMax?: string; cpuQuota?: string }) =>
     post<GenericOk>("/instances/add", p),
-  instanceUpdate: (id: string, patch: { guardian?: boolean; remoteEnabled?: boolean }) =>
+  instanceUpdate: (id: string, patch: { guardian?: boolean; remoteEnabled?: boolean; remoteToken?: string }) =>
     post<GenericOk>("/instances/update", { id, ...patch }),
   instanceRemove: (id: string) => post<GenericOk>("/instances/remove", { id }),
   instanceStart: (id: string) => post<GenericOk>("/instances/start", { id }),
@@ -134,6 +150,8 @@ export const supervisorApi = {
   proxyLoginWait: (timeoutMs: number) => post<GenericOk & { apiKey?: string }>("/router/proxy/login/wait", { timeoutMs }, { timeoutMs: Math.max(LONG_TIMEOUT_MS, timeoutMs + 30_000) }),
   proxyUpdateCheck: () => post<GenericOk>("/router/proxy/update/check"),
   proxyUpdateApply: (appId: string) => post<GenericOk>("/router/proxy/update/apply", { appId }),
+  // 反代更新进度（后端注释承诺的「job 模型，前端轮询消除黑盒」）：多实例依次更新的进度可视化
+  proxyUpdateStatus: (appId: string) => get<ProxyUpdateStatus>(qs("/router/proxy/update/status", { appId })),
 
   // ── plugins ──
   market: (force = false) => get<MarketResponse>("/plugins/market" + (force ? "?refresh=1" : "")),
@@ -144,11 +162,18 @@ export const supervisorApi = {
   pluginDisable: (name: string) => post<GenericOk>("/plugins/disable", { name, target: "all" }),
   pluginUpdate: (name: string) => post<GenericOk & { jobId?: string }>("/plugins/update", { name, target: "all" }),
   pluginUninstall: (name: string) => post<GenericOk & { jobId?: string }>("/plugins/uninstall", { name, target: "all" }),
+  // 插件任务进度（job 模型）：install/update/uninstall 返回 jobId，前端轮询到 done/failed 消除黑盒
+  pluginInstallStatus: (jobId: string) => get<PluginJobStatus>(qs("/plugins/install-status", { job: jobId })),
 
   // ── lan / frp ──
-  frpSettings: (s: { serverAddr: string; serverPort: number; authToken: string }) =>
+  // 注（FRP 修复）：enabled 是 frpc 启动的**总闸**（后端 syncFromInstances 要求 settings.enabled=true），
+  // 此前 UI 从不提交该字段 → 用户「配置了 frps 却永远不运行」。现必传。
+  frpSettings: (s: { serverAddr: string; serverPort: number; authToken: string; enabled?: boolean }) =>
     post<GenericOk>("/lan/frp/settings", s),
   frpInstall: () => post<GenericOk>("/lan/frp/install"),
+  // 实例级公网暴露（后端 /lan/frp/expose；此前**零 UI 消费者** → 永远 count=0 → frpc 无代理可跑）
+  frpExpose: (id: string, frpEnabled: boolean, remotePort?: number) =>
+    post<GenericOk>("/lan/frp/expose", { id, frpEnabled, remotePort }),
 
   // ── settings / env / guard / registry ──
   autostart: () => get<AutostartStatus>("/autostart"),
@@ -168,6 +193,15 @@ export const supervisorApi = {
   selfUpdateRestart: () => post<SelfUpdateStatus>("/self-update/restart-guard"),
   guardVersion: () => get<GuardVersion>("/guard/version"),
   guardVersionCheck: () => post<GuardVersion & { ok?: boolean }>("/guard/version/check"),
+  // ── 桌面壳（Tauri 壳）：版本检测 + 重启以应用更新（2026-09-11）──
+  shellStatus: () => get<ShellStatus>("/shell/status"),
+  shellCheckUpdate: () => post<ShellUpdateCheck>("/shell/check-update"),
+  /** 重启桌面壳：壳的自更新发生在启动时（门 0），故「应用壳更新」= 重启壳。 */
+  shellRestart: () => post<GenericOk>("/shell/restart"),
+  // 更新日志（A4 断点修复）：/changelog 返回 text/plain（DSH 版本信息 + 升级指引 + Releases 链接）。
+  dshChangelog: () => getText("/changelog"),
+  // 管家自身更新日志：本地 CHANGELOG.md 原文。
+  guardChangelog: () => getText("/guard/changelog"),
   envStatus: () => get<EnvStatus>("/env/status"),
   nodeLts: () => get<NodeLtsStatus>("/env/node-lts"),
 };

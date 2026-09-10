@@ -86,7 +86,7 @@ function openInBrowser(url, onExit) {
     const os = require('node:os');
     const path = require('node:path');
     const fs = require('node:fs');
-    const { spawn } = require('node:child_process');
+    // spawn 已下沉 platform.browser.launchIsolated（跨平台审计 §7.1）——本层不再直接 spawn 浏览器。
     const tmpProfile = path.join(os.tmpdir(), 'dsh-oauth-' + crypto.randomBytes(8).toString('hex'));
     // 图形变量注入：守卫在 systemd 无桌面环境下也能拉起浏览器（无显示时注入为 {}）
     const sysEnv = Object.assign({}, process.env, graphicalEnv());
@@ -112,51 +112,15 @@ function openInBrowser(url, onExit) {
     ];
     const antiEnv = Object.assign({}, sysEnv, { TZ: tz, LANG: lang });
 
-    if (process.platform === 'darwin') {
-      const p = spawn('open', ['-na', 'Google Chrome', '--args', ...antiArgs], { detached: true, stdio: 'ignore', env: antiEnv });
-      p.on('error', () => {});
-      p.unref();
+    // 平台差异（mac open -na / win cmd start / Linux 候选顺序）全部封装在 platform.browser；
+    // 本层只给策略参数并处理「profile 清理」策略（30min 兜底；登录完成后的及时清理由 loginWait 执行）。
+    const platform = require('../../platform/os/index');
+    const r = platform.browser.launchIsolated(url, { profileDir: tmpProfile, antiArgs, antiEnv, sysEnv, onExit });
+    if (!r || !r.ok) return null;
+    if (r.isolated) {
       setTimeout(() => { try { fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 30 * 60 * 1000);
-      return tmpProfile;
     }
-    if (process.platform === 'win32') {
-      // cmd start 对复杂参数转义脆弱：仅传 incognito + 独立 profile
-      const p = spawn('cmd', ['/c', 'start', '', 'chrome', '--incognito', '--user-data-dir=' + tmpProfile, url], { detached: true, stdio: 'ignore' });
-      p.on('error', () => {});
-      p.unref();
-      setTimeout(() => { try { fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 30 * 60 * 1000);
-      return tmpProfile;
-    }
-    // Linux：候选按「防风控强度 + 可用性」排序：Edge（本机默认）→ Chrome → Chromium → Firefox 无痕 → xdg-open 兜底
-    const candidates = [
-      { bin: 'microsoft-edge', args: antiArgs, env: antiEnv },
-      { bin: 'microsoft-edge-stable', args: antiArgs, env: antiEnv },
-      { bin: 'google-chrome', args: antiArgs, env: antiEnv },
-      { bin: 'chromium', args: antiArgs, env: antiEnv },
-      { bin: 'chromium-browser', args: antiArgs, env: antiEnv },
-      { bin: 'firefox', args: ['--private-window', url], env: sysEnv },
-      { bin: 'xdg-open', args: [url], env: sysEnv }, // 兜底：普通浏览器（无隔离，最后手段）
-    ];
-    let idx = 0;
-    const tryNext = () => {
-      if (idx >= candidates.length) return null;
-      const c = candidates[idx++];
-      let child;
-      try { child = spawn(c.bin, c.args, { detached: true, stdio: 'ignore', env: c.env || sysEnv }); }
-      catch { return tryNext(); }
-      child.on('error', () => { tryNext(); }); // bin 不存在 → 下一个候选
-      // 浏览器主进程退出监测：用户关闭浏览器 → 通知调用方取消登录（防 loginWait 干等超时）
-      if (c.bin !== 'xdg-open') {
-        child.on('exit', () => { if (typeof onExit === 'function') { try { onExit(); } catch {} } });
-      }
-      child.unref();
-      if (c.bin !== 'xdg-open' && c.bin !== 'firefox') {
-        // 兜底清理（30min；登录完成后的及时清理由 commandcodeLoginWait 执行）
-        setTimeout(() => { try { fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 30 * 60 * 1000);
-      }
-      return tmpProfile; // 返回 profile 路径（登录完成后及时清理）
-    };
-    return tryNext();
+    return tmpProfile;
   } catch { return null; }
 }
 
@@ -225,7 +189,16 @@ const auxMethods = {
         server = s;
       } catch {}
     }
-    if (!server) return { ok: false, error: '无法启动本地回调端口（oauthCallback 段已满）' };
+    if (!server) {
+      // 分配失败必须回滚登记（「分配即登记」配对释放），否则 oauth:<state> 记录永久泄漏、池耗尽。
+      try { ports.unregister('oauth:' + state); } catch {}
+      return { ok: false, error: '无法启动本地回调端口（oauthCallback 段已满）' };
+    }
+    // 回退候选（base+i, i>0）实际绑定端口须与登记一致：更正登记到真实 port，避免视图/释放错位。
+    if (port !== base) {
+      try { ports.unregister('oauth:' + state); } catch {}
+      try { ports.allocateMark(port, 'oauthCallback', 'oauth:' + state); } catch {}
+    }
     const callbackUrl = 'http://localhost:' + port + '/callback';
     const authUrl = STUDIO_BASE + '/studio/auth/cli?callback=' + encodeURIComponent(callbackUrl) + '&state=' + encodeURIComponent(state);
     // 先建立登录 promise（浏览器 exit 回调需要 Resolve/Reject 就绪）

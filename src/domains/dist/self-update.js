@@ -16,6 +16,17 @@ async function httpGetBytes(url, timeoutMs = 30000) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+/** 下载源白名单：https 任意主机；http 仅限回环（本地部署/测试）。 */
+function isUrlAllowed(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'https:') return true;
+    if (u.protocol !== 'http:') return false;
+    const h = u.hostname.toLowerCase();
+    return h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]';
+  } catch { return false; }
+}
+
 async function fetchManifest(manifestUrl) {
   const raw = (await httpGetBytes(manifestUrl)).toString('utf8');
   const m = JSON.parse(raw);
@@ -23,7 +34,10 @@ async function fetchManifest(manifestUrl) {
   const url = String(m.url || '').trim();
   const sha256 = String(m.sha256 || '').trim().toLowerCase();
   if (!version.startsWith('v')) throw new Error('manifest.version 非法: ' + version);
-  if (!/^https?:\/\//.test(url)) throw new Error('manifest.url 必须为 http(s): ' + url);
+  // 2026-09 安全加固：sha256 与 url 同来自 manifest（信任根在 manifest）——明文 HTTP 下 MITM 可同时
+  // 换 url+sha256 走私恶意载荷。故非回环下载强制 https；回环（127.0.0.1/localhost）放行以支持本地
+  // 部署与回归测试（回环不经过网络，不存在中间人）。
+  if (!isUrlAllowed(url)) throw new Error('manifest.url 必须为 https（或回环 http，防 MITM 换 sha256）: ' + url);
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('manifest.sha256 非法（需 64 位 hex）');
   return { version: version.slice(1), url, sha256 };
 }

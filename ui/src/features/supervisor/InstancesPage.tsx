@@ -36,6 +36,15 @@ export function InstancesPage({ onRegisterActions }: { onRegisterActions?: (a: {
   // 概念清分：后端 /instances 已把沙箱与原生拆分——instances[] 即沙箱（原生主干在 native 字段，
   // 由 Overview 主干卡呈现）。此处不再需要 domain 过滤。
   const items = snap.instances?.instances ?? [];
+  // 平台能力（A1 断点修复）：沙箱实例仅 Linux + systemd-run 可用——能力经 /env/status.capabilities 暴露。
+  // 不支持时**前置提示**（而非等用户点「添加」后被后端 400 拒绝才知道）。
+  const [caps, setCaps] = useState<{ multiInstance?: boolean; platform?: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    supervisorApi.envStatus().then((r) => { if (alive) setCaps(r.capabilities ?? null); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+  const sandboxUnsupported = caps !== null && caps.multiInstance === false;
 
   // 顶部 Toolbar 动作注册（对齐原版：页面动作按钮渲染在置顶行，点击打开本页 dialog）
   useEffect(() => {
@@ -47,6 +56,7 @@ export function InstancesPage({ onRegisterActions }: { onRegisterActions?: (a: {
   const act = (key: string, fn: () => Promise<unknown>) => run(key, fn);
 
   async function addInstance() {
+    if (sandboxUnsupported) { toast.error("当前平台不支持沙箱实例（需 Linux + systemd-run）"); return; }
     const port = parseInt(fPort, 10);
     if (!Number.isFinite(port) || port <= 0) { toast.error("请填写有效端口"); return; }
     const command = fCmd ? fCmd.split(/\n/).map((x) => x.trim()).filter(Boolean) : [];
@@ -180,12 +190,24 @@ export function InstancesPage({ onRegisterActions }: { onRegisterActions?: (a: {
 
   return (
     <div className="grid content-start gap-4">
+      {/* A1：平台能力前置提示——不支持的平台直接说明原因（无需等后端报错） */}
+      {sandboxUnsupported ? (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-muted-foreground">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+          <span>
+            当前平台（{caps?.platform || "未知"}）不支持沙箱实例：需 Linux + systemd-run（独立 cgroup 隔离）。
+            原生 DSH 主实例不受影响。
+          </span>
+        </div>
+      ) : null}
       {!items.length ? (
         <div className="grid min-h-[220px] place-items-center rounded-lg border border-dashed border-border text-center">
           <div>
             <Box className="mx-auto mb-3 size-8 text-muted-foreground" />
             <p className="text-sm font-medium text-foreground">尚未添加沙箱实例</p>
-            <p className="mt-1 text-xs text-muted-foreground">点击顶部「添加实例」创建沙箱</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {sandboxUnsupported ? "当前平台不支持沙箱实例（见上方说明）" : "点击顶部「添加实例」创建沙箱"}
+            </p>
           </div>
         </div>
       ) : (

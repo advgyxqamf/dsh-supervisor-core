@@ -67,7 +67,7 @@ function createEntry(o) {
     // 域摘要引用（R4：daemon 类黑盒经 ctl 向目录呈报的紧凑摘要，只存引用/只读缓存，不持久化；
     // 形如 { runState, providers, accounts, proxyInstances, resourcePorts, fetchedAt }）
     domainSummary: null,
-    // 退避（R3 调谐用；崩溃窗口）
+    // 退避（R3 调谐用；崩溃窗口）——随目录持久化（B2 归一，见 _load/_save）
     backoffLevel: 0,
     backoffUntil: null,
     crashWindowStart: null,
@@ -109,7 +109,15 @@ class ManagedRegistry {
     this._byId = new Map();
     this._adapters = {};          // kind -> { observe, apply }
     this._loaded = false;
-    if (this.file) this._load();
+    // 是否「从既有磁盘文件加载」（阶段 2 状态单源迁移判定）：
+    //   true  = 历史库已有权威目录 → 以目录 desired 为准，state.json 不回灌（纯投影）；
+    //   false = 目录文件原不存在（首启/老库迁移）→ 允许 state.json 的 desired 作一次性种子。
+    // 注意：必须记录「构造前是否存在」，而非 _save 之后——构造函数随后会创建文件（否则判定失真）。
+    this._loadedFromDisk = false;
+    if (this.file) {
+      try { this._loadedFromDisk = fs.existsSync(this.file); } catch { this._loadedFromDisk = false; }
+      this._load();
+    }
   }
 
   /* ── 持久化（应然+所有权；实然与适配器不入册） ── */
@@ -124,6 +132,10 @@ class ManagedRegistry {
         if (PHASES.includes(o.phase)) e.phase = o.phase;
         if (Number.isInteger(o.backoffLevel)) e.backoffLevel = o.backoffLevel;
         if (typeof o.backoffUntil === 'number' && o.backoffUntil > Date.now()) e.backoffUntil = o.backoffUntil;
+        // 崩溃窗/重启计数随目录持久化（B2 归一：与 state.json 不再双副本——main 崩溃保护跨重启保持）。
+        if (Number.isInteger(o.restartCount) && o.restartCount >= 0) e.restartCount = o.restartCount;
+        if (o.crashWindowStart === null || typeof o.crashWindowStart === 'number') e.crashWindowStart = o.crashWindowStart;
+        if (Number.isInteger(o.crashWindowRestarts) && o.crashWindowRestarts >= 0) e.crashWindowRestarts = o.crashWindowRestarts;
         if (typeof o.startedAt === 'string') e.startedAt = o.startedAt;
         e.lastTransitionAt = null;
         this._index(e);
@@ -145,6 +157,10 @@ class ManagedRegistry {
           ownership: o.ownership,
           phase: o.phase, backoffLevel: o.backoffLevel,
           backoffUntil: (o.backoffUntil && o.backoffUntil > Date.now()) ? o.backoffUntil : null,
+          // B2 归一：崩溃保护字段随目录持久化（主 DSH 崩溃计数/窗跨守卫重启保持），不再只落 state.json
+          restartCount: Number.isInteger(o.restartCount) ? o.restartCount : 0,
+          crashWindowStart: o.crashWindowStart || null,
+          crashWindowRestarts: Number.isInteger(o.crashWindowRestarts) ? o.crashWindowRestarts : 0,
           startedAt: o.startedAt, createdAt: o.createdAt, updatedAt: o.updatedAt,
         })),
       }, null, 2);
@@ -152,6 +168,17 @@ class ManagedRegistry {
       fs.writeFileSync(tmp, body, { mode: 0o600 });
       fs.renameSync(tmp, this.file);
     } catch (e) { this._log('warn', 'managed-objects 持久化失败: ' + (e && e.message)); }
+  }
+
+  /** B2 归一：崩溃/退避字段变化时的持久化入口（防抖 50ms 合并同拍多次变更，避免写放大）。
+   *  仅落盘目录文件；由 supervisor._persistCrashField 在 _mField 变更后调用。 */
+  persistCrashState() {
+    if (this._crashSaveTimer) return; // 已排期，合并
+    this._crashSaveTimer = setTimeout(() => {
+      this._crashSaveTimer = null;
+      this._save();
+    }, 50);
+    if (this._crashSaveTimer.unref) this._crashSaveTimer.unref(); // 不阻塞进程退出
   }
 
   _log(lv, msg) {

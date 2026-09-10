@@ -10,9 +10,9 @@ import { useSupervisorData, type PortRecord, type RouterProvider } from "../../s
 import { Card, CardTitle, Pill } from "./widgets";
 import { cn } from "../../framework/utils";
 
-function roleTone(role: string, owner: string): "ok" | "boot" | "warn" | "off" {
+function roleTone(role: string, owner?: string | null): "ok" | "boot" | "warn" | "off" {
   if (role === "dsh-main" || role === "supervisor-api") return "boot";
-  if (owner.startsWith("inst:")) return "ok";
+  if ((owner || "").startsWith("inst:")) return "ok"; // owner 后端可为 null（ports.js owner:||null）→ 必须防空
   if (role === "relay") return "warn";
   if (role.startsWith("managed:")) return "boot";
   return "off";

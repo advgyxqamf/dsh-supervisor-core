@@ -5,11 +5,21 @@
 #   bash release/scripts/configure-credentials.sh --git     # GH_TOKEN 环境变量 → 配置 git credential helper
 #   bash release/scripts/configure-credentials.sh --check   # 只读自检（不含任何值）
 # 原则：本脚本不接收命令行明文参数、不打印 token、不写仓库内任何文件。
+#
+# 与发布链路的关系（2026-09-10 标准化）：本脚本与 publish-core.sh **共用** release/scripts/_npm-auth.sh
+#   的同一份解析实现（单源）。本脚本负责**把 token 落到规范位置**，publish-core 负责**读**：
+#     规范位置 = **真实用户 home** 下的 .npmrc（不是沙箱 $HOME）——见 _npm-auth.sh 的解析顺序。
+#   之所以强调「真实 home」：DSH 沙箱会把 $HOME 指向实例数据目录，若写到 $HOME/.npmrc，
+#   该 token 就只对「那一个沙箱」可见，换沙箱即 ENEEDAUTH（这正是此前的真实故障）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
+# shellcheck source=./_npm-auth.sh
+. "$ROOT/release/scripts/_npm-auth.sh"
 
-NPMRC="$HOME/.npmrc"
+REAL_HOME="$(dsh_real_home)"
+NPMRC="$(dsh_canonical_npmrc)"          # 规范位置：真实 home/.npmrc
+CRED="$REAL_HOME/.git-credentials"
 
 write_npmrc() {
   [ -n "${NPM_TOKEN:-}" ] || { echo "❌ NPM_TOKEN 环境变量为空（请先 export NPM_TOKEN=...）"; exit 1; }
@@ -23,7 +33,12 @@ write_npmrc() {
   chmod 600 "$TMP"
   mv "$TMP" "$NPMRC"
   chmod 600 "$NPMRC"
-  echo "✅ NPM token 已写入 ~/.npmrc（权限 600）。验证：npm whoami"
+  echo "✅ NPM token 已写入规范位置（权限 600）：$NPMRC"
+  if [ "$HOME" != "$REAL_HOME" ]; then
+    echo "   注意：当前 $HOME($HOME) 与真实 home 不同（沙箱环境）——写入的是真实 home，"
+    echo "         故任何沙箱/shell 下的发布都能读到它。"
+  fi
+  echo "   验证：bash release/scripts/configure-credentials.sh --check"
   unset NPM_TOKEN
 }
 
@@ -31,7 +46,6 @@ configure_git() {
   [ -n "${GH_TOKEN:-}" ] || { echo "❌ GH_TOKEN 环境变量为空（请先 export GH_TOKEN=...）"; exit 1; }
   # 用 credential helper store 保存（写入 ~/.git-credentials 0600）——不内嵌 remote URL
   git config --global credential.helper store
-  CRED="$HOME/.git-credentials"
   TMP="$(mktemp)"
   # 已有行保留，仅替换 https://github.com 行
   if [ -f "$CRED" ]; then
@@ -42,22 +56,35 @@ configure_git() {
   chmod 600 "$TMP"
   mv "$TMP" "$CRED"
   chmod 600 "$CRED"
-  echo "✅ GitHub token 已写入 git credential store（~/.git-credentials 0600）。验证：git ls-remote --heads origin"
+  echo "✅ GitHub token 已写入 git credential store（$CRED 0600）"
+  echo "   验证：git ls-remote --heads origin"
+  echo "   注：本仓 git push 走 SSH（repo-local core.sshCommand），通常无需本项。"
   unset GH_TOKEN
 }
 
 check() {
   echo "=== 凭据自检（不含值） ==="
-  if [ -f "$NPMRC" ] && grep -q '^//registry\.npmjs\.org/:_authToken=' "$NPMRC"; then
-    echo "NPM: ~/.npmrc 含 token（权限 $(stat -c %a "$NPMRC" 2>/dev/null || stat -f %Lp "$NPMRC")）"
+  echo "真实 home: $REAL_HOME"
+  if [ "$HOME" != "$REAL_HOME" ]; then echo "当前 \$HOME: $HOME（沙箱覆盖，不影响发布：解析以真实 home 为准）"; fi
+  # 用与 publish-core 完全相同的解析器判定，避免「自检说没配、发布却成功」的错位
+  if dsh_npm_auth_setup; then
+    echo "NPM: ✅ 命中认证来源 → $(dsh_npm_auth_describe)"
+    dsh_npm_auth_cleanup
   else
-    echo "NPM: ~/.npmrc 无 token（需 npm login 或 configure-credentials.sh --npm）"
+    echo "NPM: ❌ 无任何可用认证（需 configure-credentials.sh --npm 或 npm login）"
   fi
-  if [ -n "$(git config --get credential.helper 2>/dev/null)" ]; then
-    echo "Git: credential helper = $(git config --get credential.helper)"
-    [ -f "$HOME/.git-credentials" ] && echo "Git: ~/.git-credentials 存在（权限 $(stat -c %a "$HOME/.git-credentials" 2>/dev/null || stat -f %Lp "$HOME/.git-credentials")）"
+  if [ -f "$NPMRC" ]; then
+    echo "NPM: 规范文件 $NPMRC（权限 $(stat -c %a "$NPMRC" 2>/dev/null || stat -f %Lp "$NPMRC")）"
   else
-    echo "Git: 未配置 credential helper"
+    echo "NPM: 规范文件 $NPMRC 不存在"
+  fi
+  # git 全局配置同样以真实 home 为准（沙箱 $HOME 会读到不同/空的全局配置）
+  local gh_helper; gh_helper="$(HOME="$REAL_HOME" git config --get credential.helper 2>/dev/null || true)"
+  if [ -n "$gh_helper" ]; then
+    echo "Git: credential helper = $gh_helper"
+    [ -f "$CRED" ] && echo "Git: $CRED 存在（权限 $(stat -c %a "$CRED" 2>/dev/null || stat -f %Lp "$CRED")）"
+  else
+    echo "Git: 未配置 credential helper（本仓 push 走 SSH，通常不需要）"
   fi
   if command -v gh >/dev/null 2>&1; then
     echo "gh: 已安装（gh auth status 查登录态）"

@@ -2,6 +2,12 @@ name: build-release
 
 # 私有内核仓产线（DESIGN §16.4 + 2026-09 双仓拆分：壳已剥离至公开仓 dsh-supervisor-launcher，本仓只管内核 npm 子包）。
 # tag v<内核版本> → verify + build:launcher + npm 子包发布；壳的构建/冒烟/安装程序归壳仓 launcher-build.yml。
+#
+# 平台分工（2026-09 定案，GitHub 额度优化）：
+#   - **linux-x64**：**本地生产**。在 Linux 机器执行 `npm run release:core:publish`——
+#     走 ci-core.sh 完整门禁后直推 npm，再 commit+tag+push 触发本 workflow 的 mac/win 矩阵。
+#   - **win-x64 / darwin-arm64 / darwin-x64**：GitHub CI 生产（本文件矩阵）。
+#   故本矩阵**不含 ubuntu**——若加回，会与本地发布形成同版本二次发布（npm 拒绝）。
 on:
   push:
     tags:
@@ -16,9 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            artifact: linux-x64
-            arch_override: ""
+          # Linux 不在 CI 生产（2026-09 定案，额度优化）：linux-x64 子包改由**本地**
+          # `npm run release:core:publish` 在 Linux 机器上构建并直推 npm（见 release-core.sh）；
+          # tag 推送后本矩阵仅负责 macOS/Windows 三平台（win-x64 / darwin-arm64 / darwin-x64）。
+          # 注意：因此 Linux 的 launcher 资产不再挂到 GitHub Release（npm 是其分发通道）。
           - os: windows-latest
             artifact: win-x64
             arch_override: ""
@@ -69,26 +76,7 @@ jobs:
           files: dist/launcher/**
           generate_release_notes: true
 
-  # ---- 前端门禁（Phase 2：一源双出口的 verify；独立 job 单平台跑一次，避免矩阵重复）----
-  ui-verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: 前端 verify（typecheck/lint/test/build）
-        shell: bash
-        run: |
-          cd ui
-          npm ci
-          npm run verify
-
-      - name: 构建 UI 发布镜像（build-ui.sh → ui-react/）
-        shell: bash
-        run: |
-          bash release/scripts/build-ui.sh --skip-install
-          test -f ui-react/supervisor.html
+  # 前端门禁（typecheck/lint/test/build）**已移出 CI**（2026-09 定案，额度优化）：
+  #   原 ui-verify 作业常驻 ubuntu-latest，是矩阵去 ubuntu 后唯一的 Linux 消耗。
+  #   现由本地发布前置（release-core.sh 的 [3/7] UI 门禁）承担——本地免费且与 Linux 生产同机，
+  #   **每次 release:core* 都会执行**（含 build-ui 镜像构建），不会漏跑。

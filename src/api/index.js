@@ -24,6 +24,7 @@ const API_DOMAINS = [
   require('./dist'),
   require('./instances'),
   require('./relay'),
+  require('./shell'),   // 桌面壳更新安全网（/shell/*）——内核仅做安全网，非更新源
 ];
 
 // 前端静态资源目录解析（2026-09-02：新 React UI 全面接管，老 vanilla ui/ 已删除退出；

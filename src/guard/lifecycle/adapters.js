@@ -8,6 +8,16 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const { ManagedLifecycle } = require('./managed');
+const { kindMeta } = require('./objects');
+
+/** 从受管类型表（MANAGED_KINDS，能力声明的**单一源**）取该模块的能力位。
+ *  B1 断点修复：原声明无人消费 → 现由 adapters 注入、LifecycleManager 执法、snapshot 供 UI 灰化。
+ *  未登记类型按「可启停/可守护」保守处理（不误禁）。 */
+function capsOf(objectKind) {
+  const m = kindMeta(objectKind);
+  if (!m) return { startable: true, guardable: true };
+  return { startable: m.startable !== false, guardable: m.guardable !== false };
+}
 
 /**
  * 注册全部模块到 LifecycleManager（supervisor.start 时调用）。统一启停/状态视图用；
@@ -29,6 +39,7 @@ function registerAll(mgr, deps) {
     const sup = deps && deps.supervisor;
     const rlc = new ManagedLifecycle({
       id: 'router',
+      ...capsOf('router-daemon'),
       guardian: true, // 核心服务：健康异常自动拉起（守护上收，阶段二）
       kind: 'router',
       name: '智能路由',
@@ -51,6 +62,7 @@ function registerAll(mgr, deps) {
   if (lan) {
     const llc = new ManagedLifecycle({
       id: 'lan',
+      ...capsOf('lan-daemon'),
       guardian: true, // 核心服务：健康异常自动拉起（守护上收，阶段二）
       kind: 'lan',
       name: '远程控制',
@@ -73,6 +85,10 @@ function registerAll(mgr, deps) {
       id: 'instances',
       kind: 'instances',
       name: '实例管理',
+      // 聚合单元：无全局进程（start/stop 为 no-op）——声明不可启停，避免「返回 ok 但无动作」的假成功。
+      // 单个实例的启停走 /instances/{start|stop}（各自独立生命周期）。
+      startable: false,
+      guardable: false,
       logger,
       start: async () => ({ ok: true }), // 实例无全局进程；单个实例由各自启停
       stop: async () => ({ ok: true }),
@@ -99,6 +115,7 @@ function registerAll(mgr, deps) {
       ? supervisor.mainGuardian() : false;
     const dsh = new ManagedLifecycle({
       id: 'dsh',
+      ...capsOf('dsh'),
       guardian: dshGuardian,
       kind: 'dsh',
       name: 'DeepSeek Harness',
@@ -124,6 +141,7 @@ function registerAll(mgr, deps) {
       id: 'plugins',
       kind: 'plugins',
       name: '插件管理',
+      ...capsOf('plugin'), // MANAGED_KINDS.plugin：startable=false / guardable=false（聚合视图）
       logger,
       start: async () => ({ ok: true }),
       stop: async () => ({ ok: true }),

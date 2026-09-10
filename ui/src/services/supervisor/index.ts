@@ -17,6 +17,9 @@ export * from "./types";
 export type { SupervisorSnapshot } from "./polling";
 export { supervisorApi } from "./client";
 export { supervisorStore } from "./polling";
+// 任务进度轮询（A2/A3 断点修复）：插件/反代 job 的「提交→轮询→终态」闭环。
+export { pollJob } from "./jobs";
+export type { JobState as PollJobState, PollJobOptions, PollJobResult } from "./jobs";
 
 /**
  * 消费运行态快照（只订阅，不启动轮询 —— 启动由 App 装配层负责）。

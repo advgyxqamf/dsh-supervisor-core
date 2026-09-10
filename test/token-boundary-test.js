@@ -52,7 +52,11 @@ async function main() {
     check('listLan 保留结构字段', !!it && it.id === 'inst-x' && it.wanPort === 40001);
     check('listLan 剔除 remoteToken', !!it && !Object.prototype.hasOwnProperty.call(it, 'token'));
     check('listLan 剔除 dshToken', !!it && !Object.prototype.hasOwnProperty.call(it, 'dshToken'));
-    check('listLan 白名单不含额外字段', Object.keys(it).sort().join(',') === ['dshPort','enabled','id','localPort','name','running','wanPort'].sort().join(','), Object.keys(it));
+    // 白名单（2026-09 扩展）：新增 frpEnabled/frpRemotePort/tokenSet —— 均为**非机密**
+    //   （布尔与端口号；tokenSet 只表明「令牌已设」，绝不含明文），用于 UI 呈现公网暴露开关。
+    //   机密字段（token/dshToken/remoteToken）仍被剔除（上方两条断言继续守护）。
+    const ALLOWED = ['dshPort','enabled','frpEnabled','frpRemotePort','id','localPort','name','running','tokenSet','wanPort'].sort().join(',');
+    check('listLan 白名单恰为已知非机密字段', Object.keys(it).sort().join(',') === ALLOWED, Object.keys(it).sort().join(','));
   }
 
   console.log('== 令牌边界：注入状态 inject 透传（不含令牌）==');

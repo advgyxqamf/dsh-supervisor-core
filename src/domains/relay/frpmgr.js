@@ -59,6 +59,26 @@ class FrpManager {
     this.binPath = path.join(this.binDir, tag ? (tag.exe ? 'frpc.exe' : 'frpc') : 'frpc');
     this.child = null;
     this.logTail = [];
+    // 兜底重启（2026-09 修复）：frpc 非预期退出（崩溃/配置错误/OOM）时自动重拉，
+    // 与系统其余守护语义一致。loginFailExit=false 已覆盖网络类失败，此处防其余崩溃。
+    this._lastCount = 0;      // 最近一次生成的 [[proxies]] 数（决定是否值得重启）
+    this._restartTimer = null;
+    this._restartAttempts = 0;
+    this._intentionalStop = false;
+    this._hardenPermissions(); // 历史遗留文件权限加固（见方法说明）
+  }
+
+  /** 敏感文件权限加固（2026-09 修复）：`frpc.toml` 含 auth.token 明文、`frp.json` 同含 token。
+   *  新写入已用 0600，但**历史遗留文件**可能是早期版本以默认 umask 写出的 0644/0664——
+   *  同机其他用户可读（实证：生产 frpc.toml 为 664 且含 49 字符 token）。
+   *  此处启动时对两个文件各加固一次（Unix chmod 0600 / Windows icacls，复用平台层）。 */
+  _hardenPermissions() {
+    try {
+      const fp = require('../../platform/os/index').fileProtect;
+      for (const f of [this.settingsFile, this.configFile]) {
+        try { if (fs.existsSync(f)) fp.protectFile(f); } catch {}
+      }
+    } catch { /* 平台层不可用时忽略（不阻断 frp 功能） */ }
   }
 
   /* ── 设置持久化 ── */
@@ -101,10 +121,16 @@ class FrpManager {
     lines.push('serverAddr = "' + (settings.serverAddr || '').replace(/"/g, '') + '"');
     lines.push('serverPort = ' + (Number(settings.serverPort) || 7000));
     if (settings.authToken) lines.push('auth.token = "' + String(settings.authToken).replace(/"/g, '') + '"');
+    // 健壮性（2026-09 修复）：frpc 默认 loginFailExit=true —— 首次连不上 frps（对端重启/网络抖动/端口未开）
+    // 即**退出且不重试**，隧道就此永久失效（除非再次触发 syncFrpc）。置 false → frpc 自身持续重连，
+    // 这是 frp 原生的自愈机制（实测：server 不可达时进程保持存活并每 2s 重试）。
+    lines.push('loginFailExit = false');
     lines.push('');
     let count = 0;
     for (const inst of instances || []) {
-      if (!inst.frpEnabled || !inst.frpRemotePort) continue;
+      // 2026-09 修复：除 frpEnabled/frpRemotePort 外必须校验 wanPort——wanPort 尚未分配（relay
+      // 未 claim 到槽位）时原实现写出 localPort=null 的无效 [[proxies]]，frpc 启动即解析失败。
+      if (!inst.frpEnabled || !inst.frpRemotePort || !Number.isInteger(inst.wanPort) || inst.wanPort <= 0) continue;
       const name = (settings.user || 'dsh') + '-lan-' + String(inst.id).slice(-8);
       lines.push('[[proxies]]');
       lines.push('name = "' + name.replace(/"/g, '') + '"');
@@ -124,8 +150,11 @@ class FrpManager {
     const { text, count } = this.buildConfig(settings, instances);
     fs.mkdirSync(this.dir, { recursive: true });
     const tmp = this.configFile + '.tmp';
-    fs.writeFileSync(tmp, text);
+    // frpc.toml 含 auth.token 明文：与 frp.json 同级 0600（原实现默认 umask → 同机他用户可读）。
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    try { fs.chmodSync(tmp, 0o600); } catch {}
     fs.renameSync(tmp, this.configFile);
+    this._lastCount = count; // 供兜底重启判定「是否还有代理值得拉起」
     if (!settings.enabled || count === 0) {
       this.stop();
       return { ok: true, proxies: count, running: false };
@@ -144,6 +173,11 @@ class FrpManager {
 
   start() {
     if (this.child && this.child.pid) return { ok: true, already: true, pid: this.child.pid };
+    this._intentionalStop = false; // 显式启动：清除主动停止标记
+    // 稳定运行 60s → 重置重试计数（避免「历史累计 5 次」把后续正常重启永久锁死）
+    if (this._stableTimer) clearTimeout(this._stableTimer);
+    this._stableTimer = setTimeout(() => { this._restartAttempts = 0; }, 60000);
+    if (this._stableTimer.unref) this._stableTimer.unref();
     // 先清理守卫重启后可能残留的孤儿 frpc（防双实例注册同名代理）
     this._cleanupOrphans();
     if (!fs.existsSync(this.binPath)) return { ok: false, error: 'frpc binary missing', needInstall: true };
@@ -161,13 +195,37 @@ class FrpManager {
     child.on('exit', (code) => {
       pushLog('[exited code=' + code + ']');
       if (this.child === child) this.child = null;
+      // 兜底重启：非我们主动 stop、且配置仍应运行时，按退避重拉（最多 5 次，封顶 60s）。
+      if (!this._intentionalStop) this._scheduleRestart();
     });
     if (this.events) this.events.append('frpc_started', { pid: child.pid });
     this.logger.info && this.logger.info('frpc started pid=' + child.pid);
     return { ok: true, pid: child.pid };
   }
 
+  /** 非预期退出后的有界退避重启（防 frpc 崩溃/配置类错误导致隧道长期失效）。 */
+  _scheduleRestart() {
+    if (this._restartTimer) return;
+    const settings = this.loadSettings();
+    if (!settings.enabled || !this._lastCount) return; // 已停用或无代理：不重启
+    if (this._restartAttempts >= 5) {
+      if (this.events) this.events.append('frpc_restart_gaveup', { attempts: this._restartAttempts });
+      this.logger.warn && this.logger.warn('[frpc] 连续重启 ' + this._restartAttempts + ' 次仍失败，停止重试（等待下次配置变更触发）');
+      return;
+    }
+    const delay = Math.min(60000, 2000 * Math.pow(2, this._restartAttempts));
+    this._restartAttempts += 1;
+    this._restartTimer = setTimeout(() => {
+      this._restartTimer = null;
+      this.logger.warn && this.logger.warn('[frpc] 非预期退出 → ' + Math.round(delay / 1000) + 's 后重启（第 ' + this._restartAttempts + ' 次）');
+      try { this.start(); } catch (e) { this.logger.warn && this.logger.warn('[frpc] 重启失败: ' + (e && e.message)); }
+    }, delay);
+    if (this._restartTimer.unref) this._restartTimer.unref();
+  }
+
   stop() {
+    this._intentionalStop = true;
+    if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
     if (!this.child) {
       // 本守卫无句柄：可能是守卫重启产生的孤儿 frpc → 按配置特征清理
       const killed = this._cleanupOrphans();
@@ -198,34 +256,13 @@ class FrpManager {
    *  - Windows：wmic process（含 CommandLine）；wmic 弃用时回退 PowerShell CIM
    *  @returns {Array<{pid:number, cmdline:string}>} */
   _findProcessesByCmd(pat) {
-    const { execFileSync } = require('node:child_process');
-    const out = [];
+    // 跨平台审计 §7.1：统一走平台层 pidlookup.pgrepList —— 它已实现三端语义
+    // （Linux pgrep -af / macOS pgrep -f + ps / Windows CIM Win32_Process），
+    // 域层不再自行拼 wmic/powershell（原 Windows 分支与 pgrepList 重复，且属分层违规）。
     try {
-      if (process.platform === 'win32') {
-        try {
-          const w = execFileSync('wmic', ['process', 'where', "Name like '%frp%'", 'get', 'ProcessId,CommandLine', '/format:csv'], { encoding: 'utf8', timeout: 5000 }).toString();
-          for (const line of w.split(/\r?\n/)) {
-            const parts = line.split(',');
-            if (parts.length >= 3) {
-              const pid = Number(parts[2]);
-              if (Number.isInteger(pid) && pid > 0 && String(parts[1] || '').includes(pat)) out.push({ pid, cmdline: parts.slice(1).join(',') });
-            }
-          }
-        } catch {
-          // wmic 弃用回退 PowerShell CIM（含 CommandLine 过滤）
-          const ps = "Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*frp*' } | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
-          const j = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 8000 }).toString();
-          let arr = [];
-          try { arr = JSON.parse(j); if (!Array.isArray(arr)) arr = [arr]; } catch {}
-          for (const it of arr) if (it && it.ProcessId && String(it.CommandLine || '').includes(pat)) out.push({ pid: Number(it.ProcessId), cmdline: it.CommandLine });
-        }
-      } else {
-        // 非 Windows：统一走 pidlookup.pgrepList（mac 的 pgrep 无 -a 选项，Linux 有）
-        const pidlook = require('../../platform/os/pidlookup');
-        for (const m of pidlook.pgrepList(pat)) out.push({ pid: m.pid, cmdline: m.cmdline });
-      }
-    } catch {}
-    return out;
+      const pidlook = require('../../platform/os/pidlookup');
+      return pidlook.pgrepList(pat).map((m) => ({ pid: m.pid, cmdline: m.cmdline }));
+    } catch { return []; }
   }
 
   /** 清理非本守卫托管的残留 frpc（cmdline 含本项目配置文件的孤儿进程），防守卫重启后双实例。

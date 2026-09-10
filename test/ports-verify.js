@@ -74,7 +74,10 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   sup._registerFixedPorts();
   check('固定端口已登记', ports.get('dsh-main') === targetPort && ports.get('supervisor-api') === apiPort);
   const relayPort = await ports.allocate('relay');
-  check('relay 端口 40000+（非常用段）', relayPort >= 40000 && relayPort <= 40199);
+  // 2026-09 池重构：动态池选址避开 OS 动态端口范围（Linux ip_local_port_range=32768-60999），
+  // 落 IANA User 段低位（默认 managed 池 20000-23999）。断言按「逻辑段所属池区间」而非旧硬编码。
+  const relayPool = ports.rangeOf('relay');
+  check('relay 端口落在其动态池区间内', relayPort >= relayPool.base && relayPort < relayPool.base + relayPool.count, JSON.stringify({ port: relayPort, pool: relayPool }));
   check('relay 端口避开固定端口', relayPort !== targetPort && relayPort !== apiPort);
 
   // 3. syncProxy：只有目标在监听才建代理
@@ -88,7 +91,7 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   // 代理端口互不冲突
   const wanPorts = lan.lanInstances.map((p) => p.wanPort);
   check('代理端口互不重复', new Set(wanPorts).size === wanPorts.length, JSON.stringify(wanPorts));
-  check('代理端口全部非常用段', wanPorts.every((w) => w >= 40000 && w <= 40199));
+  check('代理端口全部落在动态池区间（避开 OS 动态端口范围）', wanPorts.every((w) => w >= relayPool.base && w < relayPool.base + relayPool.count), JSON.stringify({ wanPorts, pool: relayPool }));
 
   // 4. 代理可访问：relay 转发到 mock
   const proxy = lan.lanInstances.find((p) => p.dshPort === okPort);

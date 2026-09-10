@@ -11,7 +11,9 @@ function owns(pathname) {
     || pathname === '/ports' || pathname === '/shutdown';
 }
 
-/** 「版本与升级」更新日志：只展示 DeepSeek Harness（DSH）相关内容（来自 NativeManager 版本信息），与管家无关。 */
+/** 更新日志（DSH）：只展示 DeepSeek Harness 相关内容（来自 NativeManager 版本信息），与管家无关。
+ *  命名统一（A4）：UI 中该能力位于「概览」页的「版本与升级」区块（非独立页面）——
+ *  历史注释曾按独立页面描述，易误导；此处按真实位置表述。 */
 function fetchDshChangelog(res, sup) {
   const v = (sup && sup.nativeManager) ? sup.nativeManager.versionInfo() : {};
   const inst = v.installed || '未安装';
@@ -20,7 +22,7 @@ function fetchDshChangelog(res, sup) {
   const md = 'DeepSeek Harness（DSH）更新日志\n\n'
     + '当前安装：' + inst + '\n'
     + '最新版本：' + latest + '\n'
-    + (upd ? ('检测到新版本，可在「版本与升级」一键升级到 ' + latest + '。\n') : '当前已是最新版本。\n')
+    + (upd ? ('检测到新版本，可在「概览 · 版本与升级」一键升级到 ' + latest + '。\n') : '当前已是最新版本。\n')
     + '\n完整变更记录见 DeepSeek Harness GitHub Releases：\n'
     + 'https://github.com/deepseek-ai/DeepSeek-Harness/releases\n';
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });

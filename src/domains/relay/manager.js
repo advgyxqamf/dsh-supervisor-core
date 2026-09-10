@@ -87,6 +87,10 @@ class LanManager {
         localPort: proxy ? proxy.localPort : null,
         running: !!this._lanServers && !!this._lanServers[inst.id],
         inject: st ? { tokenSet: !!st.tokenSet, cookieReady: !!st.cookieReady, lastOkAt: st.lastOkAt || null, lastError: st.lastError || null, lastErrorAt: st.lastErrorAt || null } : null,
+        // FRP 修复：下发公网暴露状态（此前缺此字段 → UI 无法呈现/驱动「公网暴露」开关）。
+        // 仅暴露开关与远端端口（非机密）；隧道状态另见 /lan/frp.instancesExposed。
+        frpEnabled: inst.frpEnabled === true,
+        frpRemotePort: inst.frpRemotePort || null,
       };
     });
     return { items, addresses };

@@ -172,6 +172,15 @@ registerDryRunApp();
     check('P19b proxy/select 锁定不可用账号被拒（A 语义）', r.code === 400 && r.body.ok === false, r.code + ' ' + JSON.stringify(r.body));
   }
 
+  // 16b. 资源端口视图（删除前）：router 自治段（proxy/providerApi）须经 /router/ports 可见（S1 契约）
+  r = await api('GET', '/router/ports');
+  {
+    const pvPre = (r.body && r.body.records) || [];
+    const proxyPre = pvPre.filter((x) => String(x.owner || '').startsWith('proxy:'));
+    const apiPre = pvPre.filter((x) => String(x.owner || '').startsWith('providerApi:'));
+    check('P29b 删除前 /router/ports 含 router 自治段（proxy+providerApi）', r.code === 200 && proxyPre.length >= 1 && apiPre.length >= 1 && !pvPre.some((x) => String(x.owner || '').startsWith('system:')), r.code + ' recs=' + pvPre.length + ' proxy=' + proxyPre.length + ' api=' + apiPre.length);
+  }
+
   // 17. 停止路由
   r = await api('POST', '/router/stop');
   check('P20 /router/stop', r.code === 200 && r.body.running === false, r.code + ' ' + JSON.stringify(r.body && r.body.running));
@@ -194,13 +203,14 @@ registerDryRunApp();
     check('P29 local() 应急视图带 _stale 标注（防误当实时）', v && v._stale === true && Array.isArray(v.providers), JSON.stringify(v && { stale: v._stale, hasProviders: Array.isArray(v.providers) }));
   }
 
-  // 22. 资源端口视图 /router/ports（阶段迁移 S1）：router 自治段（proxy/providerApi）由 daemon 自供，守卫仅转发
+  // 22. 资源端口视图 /router/ports（阶段迁移 S1）：厂商「删除即释放端口」契约（C3 修复）验证。
+  //     旧实现 removeProvider 不释放 providerApi/proxy 记录 → 端口登记永久泄漏（该断言曾把泄漏当预期）；
+  //     现语义：删除供应商后其自治段记录必须被回收。router 段可见性在上方 P30 前置点验证。
   r = await api('GET', '/router/ports');
   const pv = (r.body && r.body.records) || [];
-  const proxyRecs = pv.filter((x) => String(x.owner || '').startsWith('proxy:'));
-  const apiRecs = pv.filter((x) => String(x.owner || '').startsWith('providerApi:'));
-  check('P30 /router/ports 只含 router 自治段（proxy/providerApi）', r.code === 200 && proxyRecs.length >= 1 && apiRecs.length >= 1 && !pv.some((x) => String(x.owner || '').startsWith('system:')), r.code + ' recs=' + pv.length + ' proxy=' + proxyRecs.length);
-  check('P30b active 字段为布尔（TCP 探测；测试后段实例已停→false 为正确语义）', proxyRecs.every((x) => typeof x.active === 'boolean'), JSON.stringify(proxyRecs.map((x) => ({ port: x.port, active: x.active }))));
+  const leaked = pv.filter((x) => String(x.owner || '').startsWith('providerApi:' + proxyPid) || String(x.owner || '') === 'proxy:' + proxyPid);
+  check('P30 删除供应商后其端口登记已释放（无泄漏）', r.code === 200 && leaked.length === 0 && !pv.some((x) => String(x.owner || '').startsWith('system:')), r.code + ' recs=' + pv.length + ' leaked=' + leaked.length);
+  check('P30b active 字段为布尔', pv.every((x) => typeof x.active === 'boolean'), JSON.stringify(pv.map((x) => ({ port: x.port, active: x.active }))));
 
   // 23. 分域取数（迁移S3）：守卫 /ports 只含守卫自有段——但测试为内嵌模式（router 与守卫同进程共享注册表单例），
   //      生产 daemon 模式 router 独立 ports-router.json，/ports 自然无 router 段（见 P30 域分离契约）；

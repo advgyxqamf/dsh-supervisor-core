@@ -1,11 +1,21 @@
 'use strict';
 
 // ★★★ 平台抽象层（跨平台产品架构的地基）★★★
-// 原则：平台无关域（supervisor/domain/system-services）不得直接触碰平台 API
-// （systemctl/notify-send/xdg-open//proc/netstat/lsof...），一律经本门面。
-// 能力等价矩阵：每一平台均有 Provider 实现（允许能力面一致、隔离强度按平台文档化）。
+// 原则：平台无关域（supervisor/domains/guard/api）**不得直接触碰平台 API**
+// （systemctl/systemd-run/launchctl/schtasks/notify-send/xdg-open/wmic//proc/netstat/lsof…），
+// 一律经本门面。2026-09 跨平台审计已把域层的 8 处 systemctl + wmic/powershell + xdg-open
+// 全部收敛至此（回归防线见 test/cross-platform-test.js「分层不变量」）。
 //
-// TODO(P2)：servicehost/sandbox 的完整集成（bin install 迁移、多实例 Provider 切换）。
+// 实现形态（务实，不追求形式统一）：
+//   - 能力矩阵 capabilityProfile/capabilities：纯函数 + 工具探测（可测；非 Provider 对象）；
+//   - 服务管理 service：**Provider 分派**（linux→systemd / darwin→launchd / win32→windows-service /
+//     未知→none），未实现能力抛 CapabilityError（显式失败，不静默）；
+//   - 其余（pidlookup/notify/browser/process/autostart/exec-path/file-protect）：函数内按平台分支，
+//     接口三端一致。
+//   注：原注释曾写「每一平台均有 Provider 实现」——与当时的 if/else 实现不符（跨平台审计发现），
+//   现按真实形态描述；只有 service 是真 Provider 分派。
+//
+// TODO(P2)：servicehost/sandbox 的完整 Provider 化（bin install 迁移、多实例 Provider 切换）。
 
 const os = require('node:os');
 const path = require('node:path');
@@ -120,6 +130,13 @@ module.exports = {
   dataDir, supervisorDir, capabilities, capabilityProfile, resetCapabilityProbes, hasTool,
   processControl: require('./process'),
   pidlookup: require('./pidlookup'),
+  // P0/P1 修复（2026-09 跨平台审计）：
+  //   execPath     —— 跨平台可执行解析（Windows 扩展名/PATHEXT/标准目录）
+  //   fileProtect  —— 跨平台文件保护（Unix chmod / Windows icacls）
+  execPath: require('./exec-path'),
+  fileProtect: require('./file-protect'),
+  //   service      —— 服务管理器抽象（systemd/launchd/windows/none Provider 分派）
+  service: require('./service'),
   // notify 为直接可调函数（supervisor.notify 按 platform.notify(title, body, onError) 调用），不能导出模块对象——否则通知路径报 platform.notify is not a function，升级终态被误判为失败
   notify: require('./notify').notify,
   browser: require('./browser'),

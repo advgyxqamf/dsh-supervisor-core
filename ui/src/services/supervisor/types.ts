@@ -48,9 +48,14 @@ export interface UpgradeState {
   logTail?: string[];
 }
 
+// 会话生命周期（契约 §3）：与 phase 正交——phase 是 main 状态机相位，
+// sessionState 是整个服务链的运行相位（退出中/已退出）。
+export type SessionState = "starting" | "running" | "stopping" | "stopped" | "failed" | string;
+
 export interface SupervisorStatus {
   desired?: "running" | "stopped";
   phase?: DshPhase;
+  sessionState?: SessionState;
   guardVersion?: string;
   dshPid?: number | null;
   dshPort?: number | null;
@@ -97,7 +102,7 @@ export interface EventsPage { seq: number; events: SupervisorEvent[]; }
 export interface PortRecord {
   port: number;
   role: string;
-  owner: string;
+  owner: string | null;
   createdAt: number;
   /** 端口当前真实激活状态：正在监听=true（激活）；未监听=false（停用） */
   active?: boolean;
@@ -147,6 +152,8 @@ export interface SupervisorInstance {
   authUrl?: string;
   lanUrl?: string | null;
   lanRunning?: boolean;
+  /** 后端实例装饰（src/api/instances.js:31）：loopback 时为 true；UI 未直读，属后端返回契约。 */
+  tokenPresent?: boolean;
 }
 /** /instances 响应（概念清分）：instances[] 仅沙箱（管理对象）；native 为原生主干 main 的只读条目
  *  （横切视图如远程控制取用；其生命周期/升级不属沙箱 API——启停走 /lifecycle/dsh/*，安装/升级走 /native/*）。 */
@@ -166,6 +173,11 @@ export interface LanItem {
   enabled: boolean;
   localPort?: number;
   running: boolean;
+  /** 公网暴露（frp）：由 /lan/frp/expose 驱动；remotePort 为 frps 侧端口。 */
+  frpEnabled?: boolean;
+  frpRemotePort?: number | null;
+  /** 访问令牌是否已设（布尔，后端不下发明文）——公网暴露的安全前置。 */
+  tokenSet?: boolean;
   /** 注入状态（后端白名单下发，不含任何令牌明文）：tokenSet/cookieReady + 最近成败。 */
   inject?: {
     tokenSet?: boolean;
@@ -277,7 +289,7 @@ export interface ProxyAppInfo {
 export interface RouterStatus {
   running: boolean;
   autostart?: boolean;
-  conflict?: boolean;
+  // conflict?: boolean —— 已移除（后端从不产出，死字段；2026-09 审计）
   activatedProviders?: number;
   usage: {
     requests: number;
@@ -360,6 +372,31 @@ export interface PluginUpdatesResponse {
   plugins?: Array<{ name: string; updateAvailable?: boolean; targets?: Array<{ name: string; updateAvailable?: boolean; latest?: string }> }>;
   checkedAt?: string;
 }
+// 插件任务进度（后端 /plugins/install-status?job= 派生自 TaskRegistry；前端轮询到 done/failed）
+export type JobState = "running" | "done" | "failed";
+export interface PluginJobStatus {
+  id?: string;
+  kind?: string;
+  name?: string;
+  target?: string;
+  state?: JobState;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  error?: string | null;
+  targets?: Array<{ name?: string; ok?: boolean; error?: string | null }>;
+  error_?: never;
+}
+// 反代更新任务进度（/router/proxy/update/status；steps 逐实例，支持多实例依次更新可视化）
+export interface ProxyUpdateStatus {
+  state?: JobState;
+  restarted?: number;
+  errors?: number;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+  steps?: Array<{ name: string; state: string }>;
+  taskId?: string;
+  error?: string;
+}
 // ── settings / env / guard / registry / self-update ─────
 export interface AutostartStatus { on: boolean; unit?: string; gui?: boolean; }
 export interface LanPanelStatus { enabled: boolean; host?: string; port?: number; urls?: string[]; }
@@ -388,12 +425,63 @@ export interface SelfUpdateStatus {
   restartRequired?: boolean;
 }
 export interface GuardVersion { version?: string; commit?: string; latest?: string; updateAvailable?: boolean; upstream?: string; }
+// ── 桌面壳（Tauri 壳）版本与更新 ──────────────────────────────
+// 产品语义（2026-09-11）：关于卡需同时呈现「桌面壳版本」与「内核版本」，
+// 且「检查更新」要对两者一起检测。壳版本来自壳启动时写入的 identity.json（经 /shell/status）。
+export interface ShellIdentity {
+  version?: string;
+  platform?: string;
+  arch?: string;
+  /** 运行时安装形态：deb / rpm / appimage / msi / nsis / app */
+  installKind?: string;
+  /** 是否具备自更新能力（形态受支持且有提权通道） */
+  selfUpdateCapable?: boolean;
+  attempt?: number;
+  phase?: string;
+  pinned?: string[];
+}
+export interface ShellStatus {
+  ok?: boolean;
+  identity?: ShellIdentity | null;
+  journal?: { to?: string | null; confirmed?: boolean; rolledBack?: boolean; pinnedVersions?: string[] } | null;
+  state?: string;
+  reason?: string | null;
+  pinned?: string[];
+  dir?: string;
+}
+export interface ShellUpdateCheck {
+  ok: boolean;
+  installed?: string | null;
+  latest?: string | null;
+  updateAvailable?: boolean;
+  error?: string | null;
+}
+// 平台能力矩阵（A1 接线）：三平台静态档位 × 实际工具探测；UI 据此灰化/提示不支持项。
+export interface PlatformCapabilities {
+  platform?: string;
+  arch?: string;
+  /** 多实例（沙箱）支持——仅 Linux + systemd-run */
+  multiInstance?: boolean;
+  /** 接管既有进程（端口/命令行反查） */
+  pidAdoption?: boolean;
+  /** 进程树终止（POSIX 组信号 / Windows taskkill /T） */
+  processTreeKill?: boolean;
+  /** 桌面通知（notify-send / osascript / powershell 气泡） */
+  desktopNotify?: boolean;
+  /** 开机自启（systemd --user + linger / LaunchAgent / schtasks） */
+  autostart?: boolean;
+  /** 公网暴露（frpc） */
+  frpExpose?: boolean;
+  /** 宿主服务形态 */
+  hostService?: string;
+}
 export interface EnvStatus {
   node?: { detected?: string; runtime?: string | null; path?: string | null };
   npm?: { detected?: string };
   git?: { detected?: string };
   ok?: boolean;
   catalog?: { ready?: boolean; items?: Record<string, { label: string; required?: boolean; state: string; detail?: string }> };
+  capabilities?: PlatformCapabilities | null;
 }
 /** Node.js 环境检测：当前版本 vs 官方最新 LTS（GET /env/node-lts） */
 export interface NodeLtsStatus {

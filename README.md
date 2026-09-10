@@ -49,10 +49,11 @@ xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
 - **产物**：`dist/launcher/dsh-supervisor-<ver>-<platform>-<arch>/`（bin + core.cjs + ui-react + version.txt），整包发布可辨识。
 - **运行时依赖**：Node.js ≥18（launcher 需目标机 node；SEA 免运行时优势已弃，换取三端可运行可发布）。
 - **版本自包含**：esbuild 编译期注入 `__DSH_VERSION__`，launcher 任意 cwd 自报正确版本——版本规范见 [DESIGN.md §16](DESIGN.md)；提升走 `release/scripts/bump.sh`。
-- **平台命名**：npm 内核子包按平台分（`@scope/dsh-core-linux-x64` / `darwin-arm64` / `darwin-x64` / `win-x64`；`process.platform` 的 `win32` 需映射 `win`）。各平台在对应平台 runner 上各自构建（无交叉编译）。
+- **平台命名**：npm 内核子包按平台分（`@scope/dsh-core-linux-x64` / `darwin-arm64` / `darwin-x64` / `win-x64`；`process.platform` 的 `win32` 需映射 `win`）。各平台在对应平台机器上各自构建（无交叉编译）。
+- **平台生产分工（2026-09 定案，GitHub 额度优化）**：**linux-x64 本地生产**——Linux 机器执行 `npm run release:core:publish` 走完整门禁后直推 npm；**win-x64 / darwin-arm64 / darwin-x64 由 GitHub CI** 在 tag 触发后生产。故 CI 矩阵不含 ubuntu，本地真发布有平台闸（非 Linux 直接拒绝，防与 CI 二次发布）。
 - **许可**：内核 **UNLICENSED**（闭源构建物，主 `package.json`/`LICENSE` 声明）；壳 **MIT**（`src-tauri/LICENSE`）。
 - **双仓库（壳开源引流）**：壳源码随公开仓库 `dsh-supervisor-launcher`（MIT）发布——`release/scripts/export-shell.sh` 导出（clone 即 `cargo build`）；本仓库保持私有存内核。
-- **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/` 九脚本 + `release/scripts/ci-core.sh` CI 核心 + `release/scripts/release-core.sh` 一键编排 + `release/runbooks/` 操作手册 + `release/README.md` SOP）。一键发布见 `npm run release:core`（dry-run）/ `npm run release:core:publish`（真发）。
+- **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/` 发布脚本集 + `release/scripts/ci-core.sh` 产线核心 + `release/scripts/release-core.sh` 一键编排 + `release/runbooks/` 操作手册 + `release/README.md` SOP）。一键发布见 `npm run release:core`（dry-run）/ `npm run release:core:publish`（真发，仅 Linux）。
 
 ## 架构
 
@@ -110,48 +111,73 @@ dsh-supervisor uninstall   # 卸载（守卫退出，DSH 不受影响）
 
 ## 本地 API（默认 127.0.0.1:3100）
 
+> **权威清单**：`src/api/surface.js`（机器可校验的单一事实源——每个路由的分类/方法/消费者/用途），
+> 由 `test/api-surface-test.js` 强制「源码 ↔ 清单」双向一致：**新增路由不登记即测试失败**。
+> 下表为分类速览；完整字段以 surface.js 为准。
+
 ```
 # 核心状态与生命周期
-GET  /status                状态摘要
+GET  /status                状态摘要（含 desired/phase/sessionState）
 GET  /events?after=&limit=  增量事件（seq 跨轮转/守卫重启连续）
-GET  /healthz /readyz       守卫自身存活/就绪探针
-POST /start                  desired=running
-POST /stop                   desired=stopped
-POST /restart                立即重启一次（desired=stopped 时返回 409 拒绝）
+GET  /healthz               存活探针
+GET  /lifecycle[/status]    模块生命周期一览
+POST /lifecycle/{id}/{start|stop|restart}  统一启停（唯一入口；不可启停模块返回 409）
+# 会话生命周期（壳「退出管家」握手）
+GET  /session/status        会话态（starting|running|stopping|stopped）
+POST /session/stop          停全部被管对象 + 回执（守卫不自停；由壳/systemd 停止进程）
 # 原生 DSH 生命周期（唯一通道）
 GET  /native/status          安装状态 + 版本信息 + 升级状态机（含安装/卸载任务进度）
 POST /native/check-update    触发一次版本检查
-POST /native/install {v?}    异步安装：前置拒绝 400 / 受理 202，进度经 /native/status.state|installLog|lastInstall 轮询
+POST /native/install {v?}    异步安装：前置拒绝 400 / 受理 202，进度经 /native/status 轮询
 POST /native/uninstall       异步卸载：受理 202，进度经 /native/status.state|lastUninstall 轮询
 POST /native/upgrade {v?}    一键升级（先停后装，失败自动回滚；异步 202，进度经 /native/status.upgrade 轮询）
-# 版本与日志
-GET  /changelog              DSH 更新日志（版本概览）
-GET  /guard/changelog        管家自身更新日志
-GET  /guard/version          管家本地版本（同步安全）
-POST /guard/version/check    管家完整版本检查（异步 fetch）
-# 实例管理（沙箱/主实例）
+POST /native/settings         main 元数据补丁（guardian/remoteEnabled/frpEnabled）
+# 版本与更新日志
+GET  /changelog              DSH 更新日志（text/plain）
+GET  /guard/changelog        管家自身更新日志（CHANGELOG.md）
+GET  /guard/version          管家本地版本（同步安全，无网络 I/O）
+POST /guard/version/check    管家完整检查（npm 或 git 上游，按部署形态）
+GET  /self-update/status     内核自更新状态
+POST /self-update/apply      执行自更新
+POST /self-update/restart-guard  守卫退出以生效（systemd Restart=always 重拉）
+# 环境与平台能力
+GET  /env/status             环境探针 + **平台能力矩阵**（capabilities）
+GET  /env/dsh                DSH 本体安装/纳管判定（bin/binOk/managed/phase）
+GET  /env/node-lts           Node 当前 vs 官方最新 LTS
+# 实例管理（沙箱）
 GET  /instances              实例列表（含运行状态/安装进度）
-POST /instances/add|remove|update|start|stop
+POST /instances/{add|remove|update|start|stop|check-update|open-web|upgrade}
 # 插件
-GET  /plugins/market         插件市场索引（TTL 缓存）
-GET  /plugins/installed      已安装第三方插件
-GET  /plugins/install-status?job=  插件安装进度
-POST /plugins/install|enable|disable|uninstall
+GET  /plugins/market|installed|check-updates   市场索引 / 已装 / 更新检测
+GET  /plugins/install-status?job=   插件任务进度（前端轮询到终态）
+POST /plugins/{install|enable|disable|uninstall|update}
 # 智能路由（多供应商 Key 轮换）
 GET  /router/status          中转状态 + 用量统计
-POST /router/start|stop      中转启停
 GET  /router/providers       供应商 + 账号 + 实例视图
-POST /router/providers/add|remove|refresh|switch 等
-POST /router/proxy/login/start|wait   Command Code 一键登录
-POST /router/proxy/update/check|apply 反代版本检测/应用
+POST /router/providers/{add|remove|refresh|activate|deactivate|keys/set|key/use|proxy/*|account/*}
+POST /router/proxy/login/{start|wait}   Command Code 一键登录
+POST /router/proxy/update/{check|apply}  反代版本检测/应用
+GET  /router/proxy/update/status         反代更新进度（前端轮询）
 # 局域网/公网访问
-GET  /lan-access             远程代理列表（实例 remoteEnabled 状态；令牌不下发公网）
-POST /lan/frp/settings|install|toggle|expose   FRP 公网暴露
+GET  /lan-access             远程代理列表（令牌不下发公网）
+GET  /lan/frp + POST /lan/frp/{settings|install|toggle|expose}   FRP 公网暴露
 # 设置
 GET/POST /autostart          整条服务链开机自启
-GET/POST /settings/lan       面板局域网访问开关（0.0.0.0 <-> 127.0.0.1）
-GET/POST /dist/registry      全局镜像源配置（DSH 升级 + 反代共用）
+GET/POST /settings/lan       面板局域网访问开关
+GET/POST /settings/access-key / settings/close-action
+GET/POST /dist/registry(+ /refresh|/set)   全局镜像源配置
+GET  /ports                  端口视图（聚合三注册表 + 池容量）
+GET  /tasks[/{id}]           统一任务列表
 GET  /                       运维面板
+
+# 运维/可观测面（一方 UI 不调用，供监控/编排/审计工具）
+GET  /readyz                 就绪探针（守卫已初始化且未停机）
+GET  /metrics                监控：事件流派生遥测
+GET  /logs/tail?stream=&n=   诊断：各 stream 日志尾部（远程排障）
+GET  /logs/export?after=&limit=  审计：聚合流 JSONL 导出
+
+# 兼容保留
+POST /shutdown               已由 POST /session/stop 取代（保留供旧版壳退出）
 ```
 
 **安全模型（无鉴权设计）**：API 只绑回环地址，局域网内其他机器不可达，因此**不做任何登录/令牌**。

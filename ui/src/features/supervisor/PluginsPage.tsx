@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../framewor
 import { Input } from "../../framework/ui/input";
 import { formatSize } from "../../framework/format";
 import {
+  pollJob,
   supervisorApi,
   type InstalledPlugin, type MarketPlugin,
 } from "../../services/supervisor";
@@ -18,6 +19,21 @@ import { cn } from "../../framework/utils";
 
 type Tab = "market" | "installed";
 const PAGE = 24;
+
+/** 批量 job 轮询汇总（A2 断点修复）：全部到终态后给出统一成败提示；无 jobId 时静默跳过。 */
+async function pollJobsSummary(jobIds: string[], verb: string, total: number) {
+  if (!jobIds.length) return;
+  const t = toast.loading("正在" + verb + " " + total + " 个插件…（0/" + jobIds.length + "）");
+  let done = 0, failed = 0;
+  for (const id of jobIds) {
+    const res = await pollJob(() => supervisorApi.pluginInstallStatus(id));
+    if (res.state === "done") done++;
+    else if (res.state === "failed") failed++;
+    toast.loading("正在" + verb + " " + total + " 个插件…（" + (done + failed) + "/" + jobIds.length + "）", { id: t });
+  }
+  if (failed === 0) toast.success(verb + "完成（" + done + "/" + jobIds.length + "）", { id: t });
+  else toast.warning(verb + "结束：成功 " + done + "，失败 " + failed, { id: t });
+}
 
 export function PluginsPage() {
   const [tab, setTab] = useState<Tab>("market");
@@ -106,8 +122,17 @@ function MarketTab() {
     try {
       const r = await supervisorApi.pluginInstall(installTarget.name, target);
       if (r.ok === false) { toast.error(r.error || "安装失败"); return; }
-      toast.success("安装任务已提交" + (r.jobId ? "（job " + r.jobId + "）" : ""));
       setInstallTarget(null);
+      // A2 断点修复：后端返回 jobId 后**轮询到终态**（原先只提示「已提交」即止，无进度/成败反馈）
+      if (r.jobId) {
+        const t = toast.loading("正在安装 " + installTarget.name + "…");
+        const res = await pollJob(() => supervisorApi.pluginInstallStatus(r.jobId as string));
+        if (res.state === "done") toast.success("已安装 " + installTarget.name, { id: t });
+        else if (res.state === "failed") toast.error("安装失败：" + (res.error || "未知原因"), { id: t });
+        else toast.warning("安装仍在进行（超时未完成，可稍后查看）", { id: t });
+      } else {
+        toast.success("安装任务已提交");
+      }
     } catch (e) { toast.error(String(e)); }
   }
 
@@ -256,8 +281,12 @@ function InstalledTab() {
     // 更新后这些插件不再是待更新项 → 从 updatable 移除（按钮回归「检查更新」态）
     setUpdatable((prev) => { const n = new Map(prev); for (const x of names) n.delete(x); return n; });
     await run("upd-sel", async () => {
-      // 单个插件提交失败不阻断批量：失败项会留在任务中心/由用户重试
-for (const n of names) { try { await supervisorApi.pluginUpdate(n); } catch { /* 单点失败跳过 */ } }
+      // A2 断点修复：收集 jobId 后**统一轮询到终态**（原先只提示「已提交」）
+      const jobIds: string[] = [];
+      for (const n of names) {
+        try { const r = await supervisorApi.pluginUpdate(n); if (r.jobId) jobIds.push(r.jobId); } catch { /* 单点失败跳过 */ }
+      }
+      await pollJobsSummary(jobIds, "更新", names.length);
     }, { success: "已提交 " + names.length + " 个插件的更新任务", refresh: false, onDone: () => void load() });
   }
   async function uninstallSelected() {
@@ -265,7 +294,11 @@ for (const n of names) { try { await supervisorApi.pluginUpdate(n); } catch { /*
     if (!confirm("将卸载所选 " + names.length + " 个插件：\n" + names.join("\n") + "\n\n确定继续？")) return;
     setSelected(new Set());
     await run("uni-sel", async () => {
-      for (const n of names) { try { await supervisorApi.pluginUninstall(n); } catch { /* 单点失败跳过 */ } }
+      const jobIds: string[] = [];
+      for (const n of names) {
+        try { const r = await supervisorApi.pluginUninstall(n); if (r.jobId) jobIds.push(r.jobId); } catch { /* 单点失败跳过 */ }
+      }
+      await pollJobsSummary(jobIds, "卸载", names.length);
     }, { success: "已提交 " + names.length + " 个插件的卸载任务", refresh: false, onDone: () => void load() });
   }
   /** 批量停止（停用当前启用的所选插件） */

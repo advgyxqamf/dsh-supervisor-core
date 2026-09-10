@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 版本提升（双轨独立——DESIGN §16.4：双仓库拆分后发布通道解耦，内核/壳各自版本号互不 bump）。
 # 用法:
-#   release/scripts/bump.sh --core <ver>     内核版本（唯一事实源=package.json）→ SEA/npm 子包/tag v<ver>（manifest 已废，D1 定案 2026-09）
+#   release/scripts/bump.sh --core <ver>     内核版本（唯一事实源=package.json）→ launcher/npm 子包/tag v<ver>（manifest 已废，D1 定案 2026-09）
 #   release/scripts/bump.sh --shell <ver>    壳版本（Cargo.toml + tauri.conf.json 两处互锁同号）→ 公开仓 tag v<ver>
+#     壳源码在独立仓（双仓拆分后）——本仓无 src-tauri；用 DSH_SHELL_DIR 或 .shell-work 指定壳 checkout。
 # 只允许递增（>= 当前）；派生处由各自构建脚本读取单源，禁止手改。
 set -euo pipefail
 # SemVer 逐段数值比较（RC6：字符串比较在 0.10 vs 0.2 场景双向失效）。
@@ -24,7 +25,7 @@ case "$MODE" in
     echo "=== 内核版本已提升: $CUR → $NEW ==="
     echo "  1) CHANGELOG.md：整理 [未发布] 段为 [$NEW] 并新开 [未发布]"
     echo "  2) git add -A && git commit -m 【release: v$NEW 】 && git tag v$NEW && git push --tags（私有仓 build.yml → SEA + npm 子包 --publish）"
-    echo "  3) npm run build:sea（本机内核 SEA）"
+    echo "  3) npm run build:launcher（本机内核 launcher）"
     echo "  4) npm run publish:core -- --publish（对应平台）"
     ;;
   --shell)

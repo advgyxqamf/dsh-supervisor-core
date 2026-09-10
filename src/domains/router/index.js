@@ -433,6 +433,14 @@ class RouterService {
         try { p.apiPort = await ports.allocate('providerApi', 'providerApi:' + id); } catch (e) { p.apiPort = null; }
         if (p.apiPort) { try { if (!ports.isRegistered(p.apiPort)) ports.registerUser(p.apiPort, 'providerApi:' + id); } catch {} }
       }
+      // 工业标准（2026-09 池重构）：池满必须显式失败——绝不静默「激活了但无端点」。
+      // p.apiPort 为空 = providerApi 池耗尽；回滚 activated 位并返回显式 ErrFull（含容量）。
+      if (!p.apiPort) {
+        p.activated = false;
+        const cap = (ports.capacity && ports.capacity().providerApi) || null;
+        if (this.events) { try { this.events.append('router_provider_activation_failed', { id, name: p.name, error: 'providerApi 端口池耗尽', capacity: cap }); } catch {} }
+        return { ok: false, error: 'providerApi 端口池耗尽（' + (cap ? cap.free + ' 空闲 / ' + cap.size + ' 总量' : '满') + '），请扩 portPools.providerApi 或停用部分供应商', poolFull: true, capacity: cap };
+      }
       if (p.kind === 'proxy') this._ensureProviderInstances(p).catch(() => {});
       this._startProviderServer(id);
       if (this.events) this.events.append('router_provider_activated', { id, name: p.name, port: p.apiPort });
@@ -685,8 +693,21 @@ class RouterService {
     const removed = this.providers.splice(idx, 1)[0];
     this._stopProviderServer(id); // 删除即停用：关闭其独立端点
     if (removed.kind === 'proxy') { for (const i of removed.instances || []) removed.stopInstance(i); }
+    // 端口登记级联释放（「删除对象即释放端口」契约，ports.js）：删供应商必须释放其
+    // providerApi 端点 + 各反代实例（proxy:<keyId>）记录，否则 owner 永久累积、池最终耗尽。
+    try { this._releaseProviderPorts(removed); } catch (e) { this.logger.warn && this.logger.warn('release provider ports ' + id + ': ' + (e && e.message)); }
     this._save();
     return { ok: true };
+  }
+
+  /** 释放某供应商在端口注册表中的全部记录（providerApi:<id> 与各 proxy:<keyId>）。 */
+  _releaseProviderPorts(p) {
+    if (!p) return;
+    const { shared: ports } = require('../../guard/lifecycle/ports');
+    try { ports.unregister('providerApi:' + p.id); } catch {}
+    for (const i of (p.instances || [])) {
+      if (i && i.keyId) { try { ports.unregister('proxy:' + i.keyId); } catch {} }
+    }
   }
 
   getProvider(id) { return this.providers.find((p) => p.id === id) || null; }

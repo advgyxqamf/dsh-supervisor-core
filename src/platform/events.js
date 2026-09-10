@@ -119,12 +119,16 @@ class Events {
     if (!out.ts) out.ts = new Date().toISOString();
     if (this.process && !out.producer) out.producer = { process: this.process };
     const line = JSON.stringify(out);
+    let wrote = true;
     try {
       fs.appendFileSync(this.file, line + '\n');
     } catch (e) {
+      wrote = false;
       console.error('[events] append failed:', e.message);
     }
     this._saveMeta();
+    // 写盘失败可观测（供 EventHub 水位不推进、下轮补齐——RC5.2 契约；原实现恒吞错误使水位虚进）。
+    this._lastAppendOk = wrote;
     // 守卫事件零延迟可见：若已接 EventHub，同步推入聚合流（守卫文件与聚合流同进程单写，无多写者）。
     if (this._hub && typeof this._hub.pushGuard === 'function') {
       try { this._hub.pushGuard(out); } catch (e2) { console.error('[events] hub push failed:', e2 && e2.message); }

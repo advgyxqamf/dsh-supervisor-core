@@ -53,7 +53,7 @@ npm run publish:core -- --publish       # 真发（需 npm 登录且 scope 权�
 ## 状态追踪
 - [x] SEA 内核构建物化（Linux x64 验证通过：注入 done、self-check OK、strings 无 class 明文）
 - [x] **版本管理规范 v2**（DESIGN §16）：单一事实源 package.json；壳同号跟随内核；bump.sh 一处改三处；verify-versions 三处同号校验；SEA __DSH_VERSION__ 注入自包含（孤立目录实证 0.10.0）
-- [x] **publish-core.sh**（4 平台 npm 子包，单源注入裸版本 + os/cpu 过滤 + self-check 错配拒绝；Linux dry-run 验证通过：包 47.5MB/integrity 已生成）
+- [x] **publish-core.sh**（npm 平台子包，单源注入裸版本 + os/cpu 过滤 + self-check 错配拒绝；Linux dry-run 验证通过）
 - [x] **双仓库方案 A 落地**：壳解耦（resources 仅 bootstrap/icons；main.rs 定位已安装内核）；export-shell.sh（导出目录独立构建验证通过）；许可（内核 UNLICENSED / 壳 MIT）
 - [x] **凭据管理落地（2026-09-09）**：令牌值不入库（CI Secrets `NPM_TOKEN` + 本机 credential helper / 0600）；scope 单源化 `@dsh-sup`（package.json.npmPublish.scope）；remote URL 已脱敏（旧内嵌 PAT 报废）；最小权限规格见 credentials.md
 - [x] **本机 git/npm 认证接通（2026-09-09）**：git credential store 0600 + npm login 均验证通过（git ls-remote / npm whoami→lob.bowen）

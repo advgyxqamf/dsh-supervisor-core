@@ -45,3 +45,7 @@ docs/
 # 本地审计/取证报告（不入库）
 dsh-supervisor-AUDIT-REPORT.md
 dsh-supervisor-REPAIR-PLAN.md
+
+# 签名密钥（绝不入库）
+*.key
+*.key.pub

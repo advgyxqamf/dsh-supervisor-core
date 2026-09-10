@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const Events = require('./events');
 const { createLogger, Rotator, LineBuffer } = require('./log');
-const { EventHub } = require('./loghub');
+const { EventHub, EventReader } = require('./loghub');
 
 let _instance = null;
 let _process = null;
@@ -72,6 +72,9 @@ class LogCore {
     } else {
       this.hub = null;
     }
+    // 统一读路径（契约 §3.6，空对象模式）：hub 不可用时用 EventReader 适配本地事件流，
+    // 使消费方（/events、/logs/*、/metrics）永远只有一条读路径，无需 if(hub)…else… 双语义。
+    this.reader = this.hub || new EventReader(this.events);
   }
 
   event(type, data) { return this.events.append(type, data); }

@@ -2,7 +2,9 @@
 
 // 原生 DeepSeek Harness（原生 DSH）生命周期管理器 —— 原生 DSH 的唯一管理门面。
 // 职责（完整生命周期，单通道）：安装状态探测 / 版本检测 / 安装 / 升级（先停后装、验证、回滚）/ 卸载。
-// 状态机：uninstalled → installing → installed → (守卫管理 start/stop) → upgrading → uninstalling → uninstalled
+// 状态机（安装态）：uninstalled → installing → installed → uninstalling → uninstalled；
+// 升级态（upgradeState，正交于安装态）：idle → restarting → verifying → done | failed（失败含 rolling_back → failed）。
+//   注：2026-09 审计修正——原注释写 upgrading，代码实际用 restarting（manager.js upgradeState 赋值处）。
 // 关键：安装/升级/回滚共用同一安装执行核心（_runInstall），无重复逻辑；
 //       版本检测/升级统一走 domain/dist（全局镜像源），无第二通道；
 //       安装时记录安装清单(manifest)，卸载时按清单全量清理，不留残留。

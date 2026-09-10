@@ -19,6 +19,8 @@ const monitor = require('../../guard/monitor/index');
 const guardian = require('../../guard/guardian/index');
 const ports = require('../../guard/lifecycle/ports').shared;
 const { semverCompare } = require('../dist/index');
+// 服务管理器抽象（跨平台审计 §7.1）：域层**不得**直接调用 systemctl——一律经平台 Provider。
+const service = require('../../platform/os/service').current();
 
 /* 说明：实例用 systemd-run 启动为 transient 单元（每实例独立 cgroup），无需 dsh-web@.service 模板文件；
  * 残留的模板片段会阻止 systemd-run --unit=dsh-web@*（见 _prepareSystemd）。 */
@@ -137,7 +139,7 @@ class InstanceManager {
         fs.unlinkSync(this.systemdTemplatePath);
         this.logger.info && this.logger.info('removed incompatible dsh-web@.service template fragment (blocks systemd-run)');
       }
-      try { execFileSync('systemctl', ['--user', 'daemon-reload']); } catch {}
+      service.daemonReload();
       return true;
     } catch (e) {
       this.logger.error && this.logger.error('_prepareSystemd: ' + e.message);
@@ -336,7 +338,7 @@ class InstanceManager {
       try { ports.unregister('inst:' + id); } catch {}
       try { ports.release(inst.port); } catch {} // 双保险：owner 释放 + 端口号释放
     }
-    try { execFileSync('systemctl', ['--user', 'stop', 'dsh-web@' + id]); } catch {}
+    service.stopUnit('dsh-web@' + id);
     // 沙箱实例：异步清理其独立根目录（install 依赖 + data 数据），避免磁盘残留。
     // 删除是破坏性操作，仅对 sandbox 域生效（main/native 永不删除）；失败只警告不阻塞。
     if (inst && inst.domain === 'sandbox' && inst.id !== 'main') {
@@ -494,7 +496,7 @@ class InstanceManager {
         inst.state.version = this._readInstalledVersion(inst);
         {
           if (task) { const s = this.tasks.step(task.id, '重启实例并验证'); this.tasks.stepState(task.id, this.tasks.get(task.id).steps.indexOf(s), 'running'); }
-          const sr = await this.startInstance(id).catch(() => ({ ok: false }));
+          const sr = await this.startInstance(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
           if (!sr || !sr.ok) { nj.errors++; nj.error = '升级后重启失败: ' + ((sr && sr.error) || ''); nj.state = 'failed'; }
           else {
             // 等待端口就绪并确认单元存活（统一走 dist.waitPortHealthy）。
@@ -502,19 +504,24 @@ class InstanceManager {
             // 只探测端口会误判成功，必须同时检查 systemd 单元仍 active + 稳定期。
             let up = false;
             if (this.dist) {
+              // 验证窗口（2026-09 修复）：原 40s 对慢启动实例（插件多/首次加载）偏紧——
+              // 配合 waitPortHealthy 的稳定期 15s，端口若在 25s 后就绪会被误判失败。提到 120s。
               const vh = await this.dist.waitPortHealthy({
                 host: '127.0.0.1',
                 port: inst.port,
                 unit: 'dsh-web@' + inst.id,
-                timeoutMs: 40000,
+                timeoutMs: 120000,
               });
               up = vh.ok;
             }
             if (!up) {
               nj.errors++;
-              nj.error = '升级后实例未能启动（端口 ' + inst.port + ' 未就绪）——可能是新版 DSH 与已装插件不兼容';
+              // 文案准确性（2026-09 修复）：不再归因「插件与新版不兼容」——实测该归因是误导，
+              // 真实原因可能是启动被并发守卫挡住（见 startInstance 的 fromUpgrade）、慢启动超窗、
+              // 或新版本自身启动失败。这里只陈述**可观测事实**，把诊断留给日志（dsh.log / systemctl status）。
+              nj.error = '升级后实例未能启动（端口 ' + inst.port + ' 未就绪）';
               nj.state = 'failed';
-              if (task) this.tasks.log(task.id, '实例启动失败：端口 ' + inst.port + ' 未就绪（疑似插件与新版不兼容）');
+              if (task) this.tasks.log(task.id, '实例启动失败：端口 ' + inst.port + ' 未就绪（详见 dsh.log / systemd 单元状态）');
               // ── 自动回滚：装回升级前版本并重启，保证实例永远可用 ──
               if (oldVersion) {
                 if (task) { this.tasks.log(task.id, '自动回滚到 ' + oldVersion + '…'); const s = this.tasks.step(task.id, '自动回滚到 ' + oldVersion); this.tasks.stepState(task.id, this.tasks.get(task.id).steps.indexOf(s), 'running'); }
@@ -532,7 +539,7 @@ class InstanceManager {
                 }
                 inst.state.version = this._readInstalledVersion(inst);
                 if (rbOk) {
-                  const rbStart = await this.startInstance(id).catch(() => ({ ok: false }));
+                  const rbStart = await this.startInstance(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
                   if (task) this.tasks.log(task.id, '回滚完成，版本 ' + (this._readInstalledVersion(inst) || '') + '，实例已重启');
                   if (!rbStart || !rbStart.ok) {
                     nj.error += '；回滚后重启也失败';
@@ -694,19 +701,10 @@ class InstanceManager {
    *  关键（日志实证 21:21:25）：删除文件后 systemd 内存仍缓存该单元为 loaded，
    *  必须 daemon-reload 让 systemd 卸载其加载状态，否则 systemd-run 依然拒绝。 */
   _cleanStaleUnit(unit) {
-    try { execFileSync('systemctl', ['--user', 'stop', unit + '.service'], { stdio: 'ignore' }); } catch {}
-    try { execFileSync('systemctl', ['--user', 'reset-failed', unit + '.service'], { stdio: 'ignore' }); } catch {}
-    try {
-      const f = path.join(process.env.XDG_RUNTIME_DIR || ('/run/user/' + os.userInfo().uid), 'systemd', 'transient', unit + '.service');
-      if (fs.existsSync(f)) {
-        fs.unlinkSync(f);
-        this.logger.info && this.logger.info('cleaned stale transient unit: ' + f);
-      }
-    } catch (e) {
-      this.logger.warn && this.logger.warn('_cleanStaleUnit 清理 transient 文件失败: ' + e.message);
-    }
-    // 删除文件后必须 daemon-reload：systemd 才会卸载该单元的加载状态（否则 systemd-run 仍拒绝重建）
-    try { execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'ignore' }); } catch {}
+    // 平台 Provider 负责 systemd 特有布局（transient 单元文件 + daemon-reload 语义）；
+    // 域层不再触碰 systemctl / XDG_RUNTIME_DIR 路径（跨平台审计 §7.1）。
+    service.cleanTransient(unit);
+    this.logger.info && this.logger.info('cleaned stale transient unit: ' + unit);
   }
 
   /** 用 systemd 启动实例（独立 transient unit/隔离环境）。沙箱注入独立 HOME/XDG/PATH/NODE_PATH。
@@ -717,32 +715,33 @@ class InstanceManager {
       if (!cmdArr || !cmdArr.length) return { ok: false, error: '实例未配置启动命令' };
       // 端口被占：不启动（避免抢占/双实例），交给调用方重试/告警
       if (this._probeState(inst).running) return { ok: false, error: '端口 ' + inst.port + ' 已被占用' };
-      const sysdArgs = [
-        '--user', '--unit=dsh-web@' + inst.id,
-        '--property=KillMode=process',
-        '--property=MemoryMax=' + ((inst.sandbox && inst.sandbox.memoryMax) || '8G'),
-        '--property=CPUQuota=' + ((inst.sandbox && inst.sandbox.cpuQuota) || '200%'),
-        '--property=PrivateTmp=' + (inst.sandbox.privateTmp ? 'yes' : 'no'),
-        '--property=ProtectHome=' + (inst.sandbox.protectHome ? 'yes' : 'no'),
-        '--property=Restart=no',
+      // 业务约束以「属性 + 环境 + 工作目录」表达，交平台层拼装（域层不拼 systemd 参数）。
+      const props = [
+        'KillMode=process',
+        'MemoryMax=' + ((inst.sandbox && inst.sandbox.memoryMax) || '8G'),
+        'CPUQuota=' + ((inst.sandbox && inst.sandbox.cpuQuota) || '200%'),
+        'PrivateTmp=' + (inst.sandbox.privateTmp ? 'yes' : 'no'),
+        'ProtectHome=' + (inst.sandbox.protectHome ? 'yes' : 'no'),
+        'Restart=no',
       ];
+      const env = {};
+      let workingDir = null;
       if (inst.domain === 'sandbox') {
         const dataDir = this.sandboxDataDir(inst);
         const installDir = this.sandboxInstallDir(inst);
         const nodeBinDir = path.dirname(process.execPath);
-        const paths = [nodeBinDir, path.join(installDir, 'bin'), process.env.PATH || ''].join(':');
-        sysdArgs.push(
-          '--setenv=HOME=' + dataDir,
-          '--setenv=XDG_CONFIG_HOME=' + dataDir,
-          '--setenv=XDG_DATA_HOME=' + dataDir,
-          '--setenv=PATH=' + paths,
-          '--setenv=NODE_PATH=' + path.join(installDir, 'lib', 'node_modules'),
-          '--working-directory=' + dataDir,
-        );
+        // P2 审计修复：PATH 连接符必须用 path.delimiter（Windows 为 ';'，Unix 为 ':'）。
+        const paths = [nodeBinDir, path.join(installDir, 'bin'), process.env.PATH || ''].join(path.delimiter);
+        env.HOME = dataDir;
+        env.XDG_CONFIG_HOME = dataDir;
+        env.XDG_DATA_HOME = dataDir;
+        env.PATH = paths;
+        env.NODE_PATH = path.join(installDir, 'lib', 'node_modules');
+        workingDir = dataDir;
       }
       this._cleanStaleUnit('dsh-web@' + inst.id);
       try {
-        execFileSync('systemd-run', [...sysdArgs, '--', ...cmdArr]);
+        service.startTransient({ unit: 'dsh-web@' + inst.id, cmd: cmdArr, env, props, workingDir });
       } catch (e) {
         const msg = 'systemd 启动失败: ' + (e.message || e);
         inst.state.lastError = msg;
@@ -769,13 +768,19 @@ class InstanceManager {
   async startInstance(id, opts) {
     const inst = this.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: '实例不存在' };
-    if (!this.sandboxSupported) return { ok: false, error: '当前平台不支持沙箱实例（需 Linux + systemd-run，见 /env/status capabilities.multiInstance）' };
+    if (!this.sandboxSupported) return { ok: false, error: '当前平台不支持沙箱实例（需 Linux + systemd-run；能力矩阵见 GET /env/status 的 capabilities.multiInstance）' };
     // 手动启动不受「守护(自动拉起)」开关限制：守护只控制进程挂了是否自动拉起，不影响手动启停/安装。
     this._prepareSystemd();
     // 沙箱实例：install 目录没有完整 DSH 副本 → 先独立安装（装配作业化：以 TaskRegistry 作业执行，
     // 装完由监督拍按作业结果 systemd 拉起）。升级/安装作业进行中 → 幂等返回（不双开安装）。
+    //
+    // ⚠ 升级直通（2026-09 修复，升级恒失败根因）：upgradeInstance 自身就是一个 instance 作业，
+    //   它在「装完 → 重启并验证」阶段必须调用本方法真正拉起 systemd 单元。若在此被自己的作业挡住
+    //   （返回 {ok:true, installing:true} 而**未启动任何进程**），调用方会误以为已启动 → 等端口 40s
+    //   → 判「升级后实例未能启动」→ 回滚 → 回滚再被挡 → 最终「升级失败」。故升级路径显式直通。
     if (inst.domain === 'sandbox') {
-      if (this.tasks && this.tasks.isBusy('instance', id)) {
+      const fromUpgrade = !!(opts && opts.fromUpgrade);
+      if (!fromUpgrade && this.tasks && this.tasks.isBusy('instance', id)) {
         return { ok: true, installing: true, already: true };
       }
       this._ensureSandboxDirs(inst);
@@ -792,8 +797,8 @@ class InstanceManager {
   stopInstance(id) {
     const inst = this.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: '实例不存在' };
-    if (!this.sandboxSupported) return { ok: false, error: '当前平台不支持沙箱实例（需 Linux + systemd-run）' };
-    try { execFileSync('systemctl', ['--user', 'stop', 'dsh-web@' + inst.id], { timeout: 20000 }); } catch {} // RC4：有界，防 dbus 挂起冻结守卫
+    if (!this.sandboxSupported) return { ok: false, error: '当前平台不支持沙箱实例（需 Linux + systemd-run；能力矩阵见 GET /env/status 的 capabilities.multiInstance）' };
+    service.stopUnit('dsh-web@' + inst.id, { timeoutMs: 20000 }); // RC4：有界，防 dbus 挂起冻结守卫
     inst.state.phase = 'STOPPED';
     this.save();
     this._stopLanForInstance(inst);

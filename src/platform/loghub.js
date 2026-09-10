@@ -171,7 +171,9 @@ class EventHub {
         };
         if (e.producer) rec.producer = e.producer;
         this.writer.appendRaw(rec); // 聚合流 seq/ts 由 appendRaw 注入
-        lastOkSeq = e.seq;          // appendRaw 同步写盘成功（失败其内部已吞并记录）→ 视为已转写
+        // 写盘失败（磁盘满/权限）→ 不推进水位，下轮 sync 补齐（RC5.2 契约；appendRaw 以 _lastAppendOk 报告）。
+        if (this.writer._lastAppendOk === false) { this._log('warn', '[hub] ingest ' + source + ' seq=' + e.seq + ' 写盘失败，水位不推进'); break; }
+        lastOkSeq = e.seq;
       } catch (e2) {
         // appendRaw 内部已兜底不抛；此分支防御性保留——失败的源事件不推进水位，sync 重试补齐
         this._log('warn', '[hub] ingest ' + source + ' seq=' + e.seq + ' failed: ' + ((e2 && e2.message) || e2));
@@ -197,9 +199,13 @@ class EventHub {
     if (rec.producer) out.producer = rec.producer;
     try {
       this.writer.appendRaw(out);
+      if (this.writer._lastAppendOk === false) {
+        // 写盘失败：水位不动——_syncGuard 会在后续拍补转写（事件不丢）
+        this._log('warn', '[hub] pushGuard append failed (watermark held): ' + rec.seq);
+        return;
+      }
       this.watermark.guard = Math.max(this.watermark.guard || 0, rec.seq); // 只在成功后推进
     } catch (e) {
-      // 写失败：水位不动——_syncGuard 会在后续拍补转写（事件不丢）
       this._log('warn', '[hub] pushGuard append failed (watermark held): ' + ((e && e.message) || e));
     }
   }
@@ -284,10 +290,6 @@ class EventHub {
     return tailFile(file, n);
   }
 
-  /** /logs/events-tail: 事件流尾部（等价旧 readSince 面，供 CLI/调试）。 */
-  eventTail(n) {
-    return this.read(0, n || 100);
-  }
 
   /** 读聚合流全窗（供检索/导出/metrics；readAll 全量，无 readSince 500 上限）。 */
   window() {
@@ -296,75 +298,89 @@ class EventHub {
 
   /** 用户时间线读（穿透审计修正）：seq > after 且非 internal 的最近 limit 条业务事件。
    *  先全窗过滤再取尾——避免『先 limit 后过滤 → 被内部事件挤空/看不到存量业务』。 */
-  readVisible(after, limit) {
-    const aft = Number(after) || 0;
-    const lim = Math.min(Math.max(Number(limit) || 50, 1), 500);
-    const out = [];
-    for (const e of this.window()) {
-      if (e.seq <= aft) continue;
-      if (e.internal === undefined ? isInternalEvent(e.type) : e.internal === true) continue;
-      out.push(e);
-    }
-    return out.slice(-lim);
-  }
+  readVisible(after, limit) { return visibleFrom(this.window(), after, limit); }
 
   /** 事件检索（P2）：filter { type?: 前缀, source?: guard|router-daemon|lan-daemon } → 匹配事件。
    *  从聚合流过滤（事件已经全局有序）。limit 上限 2000。 */
-  readFiltered(filter, after, limit) {
-    const f = filter || {};
-    const lim = Math.min(Math.max(Number(limit) || 200, 1), 2000);
-    const aft = Number(after) || 0;
-    const out = [];
-    for (const e of this.window()) {
-      if (e.seq <= aft) continue;
-      if (f.source && e.source !== f.source) continue;
-      if (f.type && !String(e.type || '').startsWith(f.type)) continue;
-      out.push(e);
-      if (out.length >= lim) break;
-    }
-    return out;
-  }
+  readFiltered(filter, after, limit) { return filteredFrom(this.window(), filter, after, limit); }
 
   /** 审计导出（P2）：把聚合流原文行导出为文本（JSONL），供离线备份/审计。limit 行数上限。 */
-  exportLines(after, limit) {
-    const aft = Number(after) || 0;
-    const lim = Math.min(Math.max(Number(limit) || 2000, 1), 20000);
-    const lines = [];
-    for (const e of this.window()) {
-      if (e.seq <= aft) continue;
-      try { lines.push(JSON.stringify(e)); } catch {}
-      if (lines.length >= lim) break;
-    }
-    return lines;
-  }
+  exportLines(after, limit) { return exportFrom(this.window(), after, limit); }
 
   /** 遥测派生（P2 /metrics）：事件流上的只读投影——按 source 计数事件、top type、窗口事件率。
    *  不引入新采集通道（日志/事件即唯一采集面）。 */
-  metrics() {
-    const win = this.window();
-    const total = win.length;
-    const bySource = {};
-    const byType = {};
-    let lastTs = null;
-    for (const e of win) {
-      bySource[e.source || 'unknown'] = (bySource[e.source || 'unknown'] || 0) + 1;
-      const t = String(e.type || 'unknown');
-      byType[t] = (byType[t] || 0) + 1;
-      if (!lastTs || (e.ts && e.ts > lastTs)) lastTs = e.ts;
-    }
-    const topTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([type, count]) => ({ type, count }));
-    const now = Date.now();
-    const lastAt = lastTs ? new Date(lastTs).getTime() : null;
-    return {
-      gseq: this.seq,
-      events: total,
-      bySource,
-      topTypes,
-      lastEventAt: lastTs,
-      sinceLastMs: lastAt ? Math.max(0, now - lastAt) : null,
-      ts: new Date().toISOString(),
-    };
-  }
+  metrics() { return metricsFrom(this.window(), this.seq); }
 }
 
-module.exports = { EventHub, tailFile, isInternalEvent };
+/* ── 读路径共享实现（契约 §3.6：消除 EventHub 与降级读的双语义漂移）──
+ * 所有「窗口派生读」只实现一次，EventHub 与 EventReader 共用，杜绝两处逻辑漂移。 */
+function visibleFrom(win, after, limit) {
+  const aft = Number(after) || 0;
+  const lim = Math.min(Math.max(Number(limit) || 50, 1), 500);
+  const out = [];
+  for (const e of win) {
+    if (e.seq <= aft) continue;
+    if (e.internal === undefined ? isInternalEvent(e.type) : e.internal === true) continue;
+    out.push(e);
+  }
+  return out.slice(-lim);
+}
+function filteredFrom(win, filter, after, limit) {
+  const f = filter || {};
+  const lim = Math.min(Math.max(Number(limit) || 200, 1), 2000);
+  const aft = Number(after) || 0;
+  const out = [];
+  for (const e of win) {
+    if (e.seq <= aft) continue;
+    if (f.source && e.source !== f.source) continue;
+    if (f.type && !String(e.type || '').startsWith(f.type)) continue;
+    out.push(e);
+    if (out.length >= lim) break;
+  }
+  return out;
+}
+function exportFrom(win, after, limit) {
+  const aft = Number(after) || 0;
+  const lim = Math.min(Math.max(Number(limit) || 2000, 1), 20000);
+  const lines = [];
+  for (const e of win) {
+    if (e.seq <= aft) continue;
+    try { lines.push(JSON.stringify(e)); } catch {}
+    if (lines.length >= lim) break;
+  }
+  return lines;
+}
+function metricsFrom(win, seq) {
+  const total = win.length;
+  const bySource = {};
+  const byType = {};
+  let lastTs = null;
+  for (const e of win) {
+    bySource[e.source || 'unknown'] = (bySource[e.source || 'unknown'] || 0) + 1;
+    const t = String(e.type || 'unknown');
+    byType[t] = (byType[t] || 0) + 1;
+    if (!lastTs || (e.ts && e.ts > lastTs)) lastTs = e.ts;
+  }
+  const topTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([type, count]) => ({ type, count }));
+  const now = Date.now();
+  const lastAt = lastTs ? new Date(lastTs).getTime() : null;
+  return { gseq: seq, events: total, bySource, topTypes, lastEventAt: lastTs, sinceLastMs: lastAt ? Math.max(0, now - lastAt) : null, ts: new Date().toISOString() };
+}
+
+/** 降级读路径（空对象模式 null-object，契约 §3.6）：hub 不可用时（非守卫进程/初始化降级/测试）
+ *  把守卫本地事件流适配成与 EventHub **完全相同**的读接口——使 /events、/logs/*、/metrics 全程
+ *  只有一条读路径，彻底消除 `if (hub) … else …` 双语义漂移。 */
+class EventReader {
+  constructor(events) { this.events = events; }
+  get seq() { return this.events.seq; }
+  window() { return this.events.readAll(); }
+  read(after, limit) { return this.events.readSince(after, limit); }
+  readVisible(after, limit) { return visibleFrom(this.window(), after, limit); }
+  readFiltered(filter, after, limit) { return filteredFrom(this.window(), filter, after, limit); }
+  tailLog() { return []; } // 降级模式无聚合日志（各 stream 返回空）
+  exportLines(after, limit) { return exportFrom(this.window(), after, limit); }
+  metrics() { return metricsFrom(this.window(), this.seq); }
+  sync() { return Promise.resolve(); } // 无聚合流水位需同步
+}
+
+module.exports = { EventHub, EventReader, tailFile, isInternalEvent };

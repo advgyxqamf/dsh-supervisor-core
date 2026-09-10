@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "../../framework/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../framework/ui/dialog";
 import {
-  supervisorApi, supervisorStore, useSupervisorData,
+  pollJob, supervisorApi, supervisorStore, useSupervisorData,
   type ProviderAccount, type ProvidersResponse, type RouterProvider,
 } from "../../services/supervisor";
 import { formatCount } from "./format";
@@ -68,8 +68,10 @@ export function RouterPage({ onRegisterActions }: { onRegisterActions?: (a: { on
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-5 py-3.5">
           <div className="flex items-center gap-2">
-            <ToneDot tone={r?.running ? "ok" : r?.conflict ? "warn" : "off"} ping={Boolean(r?.running)} />
-            <strong className="text-xl font-semibold tracking-[-0.01em] text-foreground">{r?.running ? "路由运行中" : r?.conflict ? "端口被占" : "路由已停止"}</strong>
+            {/* conflict 分支移除（2026-09 审计）：后端 routerStatus/router.status 从不产出 conflict，
+                原「端口被占」永不可达（死分支）。路由不可用由 running=false 呈现。 */}
+            <ToneDot tone={r?.running ? "ok" : "off"} ping={Boolean(r?.running)} />
+            <strong className="text-xl font-semibold tracking-[-0.01em] text-foreground">{r?.running ? "路由运行中" : "路由已停止"}</strong>
             {/* 路由服务默认自动启动(2026-09 用户定稿)——不额外外显「自动启动」标签 */}
           </div>
           <Button
@@ -85,10 +87,11 @@ export function RouterPage({ onRegisterActions }: { onRegisterActions?: (a: { on
         </div>
         {/* 运行指标：四格分隔（每格带边框与独立底） */}
         <div className="grid grid-cols-1 divide-y divide-border/60 sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x lg:divide-border/60">
-          <div className="px-5 py-3.5"><Metric icon={<Activity className="size-4" />} label="总请求 / 失败" value={formatCount(r?.usage.requests) + " / " + formatCount(r?.usage.errors)} mono /></div>
-          <div className="px-5 py-3.5"><Metric icon={<CheckCircle2 className="size-4" />} label="总 Tokens" value={formatCount(r?.usage.totalTokens)} mono /></div>
-          <div className="px-5 py-3.5"><Metric icon={<Terminal className="size-4" />} label="Prompt / Completion" value={formatCount(r?.usage.promptTokens) + " / " + formatCount(r?.usage.completionTokens)} mono /></div>
-          <div className="px-5 py-3.5"><Metric icon={<XCircle className="size-4" />} label="估算费用" value={r?.usage.costUsd ? "$" + Number(r.usage.costUsd).toFixed(4) : "—"} mono warn={!r?.usage.costUsd} /></div>
+          {/* 后端降级响应（{running:false,error}）无 usage 字段：必须 usage?.，否则整页 TypeError（2026-09 修复） */}
+          <div className="px-5 py-3.5"><Metric icon={<Activity className="size-4" />} label="总请求 / 失败" value={formatCount(r?.usage?.requests) + " / " + formatCount(r?.usage?.errors)} mono /></div>
+          <div className="px-5 py-3.5"><Metric icon={<CheckCircle2 className="size-4" />} label="总 Tokens" value={formatCount(r?.usage?.totalTokens)} mono /></div>
+          <div className="px-5 py-3.5"><Metric icon={<Terminal className="size-4" />} label="Prompt / Completion" value={formatCount(r?.usage?.promptTokens) + " / " + formatCount(r?.usage?.completionTokens)} mono /></div>
+          <div className="px-5 py-3.5"><Metric icon={<XCircle className="size-4" />} label="估算费用" value={r?.usage?.costUsd ? "$" + Number(r.usage.costUsd).toFixed(4) : "—"} mono warn={!r?.usage?.costUsd} /></div>
         </div>
       </Card>
 
@@ -188,7 +191,26 @@ function ProviderCard({ p, proxyApps, busy, onAction }: {
               <Button
                 className="gap-1 rounded-full px-2.5 text-xs text-warning"
                 disabled={busy}
-                onClick={() => void onAction("proxy-upd-" + p.id, () => supervisorApi.proxyUpdateApply(p.proxyAppId as string).then(() => undefined), "已提交更新，所有实例将依次更新并重启")}
+                onClick={() => void onAction("proxy-upd-" + p.id, async () => {
+                  // A3 断点修复：后端注释承诺「job 模型，前端轮询消除黑盒」——此处补上轮询，
+                  // 多实例依次更新期间显示进度（steps），到终态给出成败汇总。
+                  const appId = p.proxyAppId as string;
+                  const r = await supervisorApi.proxyUpdateApply(appId);
+                  if (r.ok === false) { toast.error((r as { error?: string }).error || "提交失败"); return; }
+                  const t = toast.loading("正在更新 " + p.name + " 的全部实例…");
+                  const res = await pollJob(() => supervisorApi.proxyUpdateStatus(appId), {
+                    onTick: (s) => {
+                      const st = (s as { steps?: Array<{ state: string }> })?.steps || [];
+                      const doneN = st.filter((x) => x.state === "done").length;
+                      if (st.length) toast.loading("正在更新 " + p.name + "…（" + doneN + "/" + st.length + " 实例）", { id: t });
+                    },
+                  });
+                  const snap = res.snapshot as { restarted?: number; errors?: number } | null;
+                  if (res.state === "done") toast.success("更新完成" + (snap?.restarted ? "（已重启 " + snap.restarted + " 个实例）" : ""), { id: t });
+                  else if (res.state === "failed") toast.error("更新失败：" + (res.error || (snap?.errors ? snap.errors + " 个实例失败" : "未知原因")), { id: t });
+                  else toast.warning("更新仍在进行（超时未完成，可稍后查看）", { id: t });
+                  await supervisorStore.refresh();
+                }, undefined)}
                 size="chip"
                 title="检测到新版本，点击更新该应用全部实例"
                 variant="outline"
@@ -317,7 +339,7 @@ function EditKeysDialog({ open, onOpenChange, p }: {
     finally { setLoggingIn(false); }
   }
   async function addKeys() {
-    const keys = input.split(/[,;s]+/).map((s) => s.trim()).filter(Boolean);
+    const keys = input.split(/[,;\s]+/).map((s) => s.trim()).filter(Boolean); // \s=空白（原 /[,;s]+/ 把字母 s 当分隔符，切碎含 s 的 Key）
     if (!keys.length) { toast.error("请输入至少一个 Key"); return; }
     setSaving(true);
     try {

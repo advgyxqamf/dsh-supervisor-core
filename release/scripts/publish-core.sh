@@ -84,8 +84,28 @@ case "$VER" in
   *-RC.*)   DIST_TAG="--tag rc" ;;
 esac
 # 发布到官方 npm registry（发布必须官方源；本机默认 npmmirror 只读消费不适配发布认证）
-# token 经 ~/.npmrc 的 //registry.npmjs.org/:_authToken 或 NPM_TOKEN 环境变量提供。
+#
+# 认证（2026-09-10 **标准化**）：解析逻辑**单源**收敛到 release/scripts/_npm-auth.sh——
+# 本脚本与 configure-credentials.sh 共用同一份实现（此前各写一套，行为不一致）。
+# 解析顺序：DSH_NPMRC → NPM_CONFIG_USERCONFIG → NPM_TOKEN(临时 userconfig) → 真实 home ~/.npmrc → 沙箱 $HOME/.npmrc。
+# 关键点：「真实 home」经 getent/dscl/~user 解析，**不受沙箱 $HOME 覆盖影响**——
+# 否则同一台机器上会「A 沙箱能发版、B 沙箱报 ENEEDAUTH」。
 REGISTRY="${DSH_PUBLISH_REGISTRY:-https://registry.npmjs.org/}"
+# shellcheck source=./_npm-auth.sh
+. "$ROOT/release/scripts/_npm-auth.sh"
+trap 'dsh_npm_auth_cleanup' EXIT
+if dsh_npm_auth_setup; then
+  echo "== 认证：$(dsh_npm_auth_describe) =="
+else
+  if [ "$PUBLISH" = 1 ]; then
+    echo "❌ 未找到任何 npm 发布认证（真发布必需）。任选其一后重试："
+    echo "   a) bash release/scripts/configure-credentials.sh --npm   # NPM_TOKEN → 真实 home ~/.npmrc(0600)，一次性"
+    echo "   b) export NPM_TOKEN=<automation token>                    # 仅本次会话，不落盘"
+    echo "   c) npm login --registry=https://registry.npmjs.org/"
+    exit 1
+  fi
+  echo "== 认证：无（dry-run 不校验认证；真发布需先配置） =="
+fi
 if [ "$PUBLISH" = 1 ]; then
   echo "== 发布 $PKG_NAME@$VER ${DIST_TAG:-（tag=latest）} → $REGISTRY =="
   npm publish --access public --registry="$REGISTRY" $DIST_TAG

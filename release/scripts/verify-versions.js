@@ -13,12 +13,25 @@ function coreCheck() {
   if (!/^[0-9]+\.[0-9]+\.[0-9]+(-(BETA|RC)\.[0-9]+)?$/.test(pkg.version || '')) bad.push('package.json.version 非法: ' + pkg.version);
   if (!bad.length) console.log('内核版本 OK: ' + pkg.version + '（package.json 单源）');
 }
+/** 壳源码目录（双仓拆分后本仓无 src-tauri）——DSH_SHELL_DIR 或 .shell-work。 */
+function shellDir() {
+  const path = require('node:path');
+  const root = path.join(__dirname, '..', '..');
+  if (process.env.DSH_SHELL_DIR) {
+    const d = process.env.DSH_SHELL_DIR;
+    return fs.existsSync(path.join(d, 'src-tauri')) ? path.join(d, 'src-tauri') : d;
+  }
+  const local = path.join(root, '.shell-work', 'src-tauri');
+  return fs.existsSync(local) ? local : null;
+}
 function shellCheck() {
-  const root = require('node:path').join(__dirname, '..', '..');
+  const path = require('node:path');
+  const dir = shellDir();
+  if (!dir) { bad.push('未找到壳源码（本仓已剥离 src-tauri）；请设置 DSH_SHELL_DIR 或在 .shell-work 放置壳 checkout'); return; }
   let cargo; let tauri;
   try {
-    cargo = fs.readFileSync(require('node:path').join(root, 'src-tauri/Cargo.toml'), 'utf8').match(/^version\s*=\s*"([0-9.]+)"/m)?.[1];
-    tauri = JSON.parse(fs.readFileSync(require('node:path').join(root, 'src-tauri/tauri.conf.json'), 'utf8')).version;
+    cargo = fs.readFileSync(path.join(dir, 'Cargo.toml'), 'utf8').match(/^version\s*=\s*"([0-9.]+)"/m)?.[1];
+    tauri = JSON.parse(fs.readFileSync(path.join(dir, 'tauri.conf.json'), 'utf8')).version;
   } catch (e) { bad.push('读取壳版本失败: ' + e.message); return; }
   if (!cargo) bad.push('Cargo.toml 缺 [package] version');
   if (tauri && cargo && tauri !== cargo) bad.push('tauri.conf.json ' + tauri + ' ≠ Cargo.toml ' + cargo);

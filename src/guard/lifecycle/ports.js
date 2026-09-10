@@ -11,20 +11,68 @@ const fs = require('node:fs');
 const path = require('node:path');
 const probe = require('../monitor/probe'); // 同层依赖（infra/probe），不依赖上层 domain/monitor（消除越界）
 
-// 动态分配段：全部选用非常用端口段，避开开发/常用服务端口
-const RANGES = {
-  relay: { base: 40000, count: 200 },        // 局域网反向代理（每实例一个对外端口）
-  proxyInstance: { base: 41000, count: 200 }, // 反代应用实例（npx 子进程）
-  oauthCallback: { base: 42000, count: 20 },  // 本地 OAuth 回调服务器
-  providerApi: { base: 43000, count: 32 },   // 智能路由每供应商独立 API 端点（激活供应商监听）
+// ═══════════════════════════════════════════════════════════════════════════
+// 动态端口池（2026-09 工业标准重构）
+//
+// 设计依据（避免打补丁，对齐标准实现）：
+//   - RFC 6335 §6：端口三段制（System 0-1023 / User 1024-49151 / Dynamic 49152-65535）。
+//     动态池是共享空间而非「每业务固定一小块」；边界值保留以便将来延伸。
+//   - Kubernetes NodePort 分配器（工业事实标准）：少数可配置范围 + 容量指标 +
+//     池满显式 ErrFull；「宁可泄漏端口，绝不双分配」（分配即生效、释放延迟）。
+//   - 选址必须避开 OS 动态端口范围（Linux 默认 net.ipv4.ip_local_port_range=32768-60999）：
+//     监听池若落入该区间，会与内核 connect() 临时源端口竞争——原 40000-43199 正落其中。
+//
+// 模型：少数「物理池」+「逻辑段→池」映射。逻辑段名（role）保留为端口记录上的业务标签，
+//   端口统一直共享池取号：relay/proxyInstance/oauthCallback 共用 managed 池（K8s 单一范围
+//   思想，杜绝段碎片化「这个段空那个段满」）；providerApi 独立池（供应商规模可弹性扩）。
+// 可配置：config.portPools 覆盖（大规模部署按需调大 base/count），不写死在编译期。
+// ═══════════════════════════════════════════════════════════════════════════
+const DEFAULT_POOLS = {
+  managed: { base: 20000, count: 4000 },      // relay + proxyInstance + oauthCallback 共享（20000-23999）
+  providerApi: { base: 24000, count: 2000 },  // 智能路由每供应商独立 API 端点（24000-25999，可容 2000 供应商）
 };
+
+// 逻辑段（role）→ 物理池。role 仍是端口记录上的业务标签，仅决定从哪个池取号。
+const SEGMENT_POOL = {
+  relay: 'managed',
+  proxyInstance: 'managed',
+  oauthCallback: 'managed',
+  providerApi: 'providerApi',
+};
+
 
 class PortRegistry {
   constructor(opts) {
     this._file = (opts && opts.file) || path.join(process.env.HOME || '/tmp', '.dsh', 'supervisor', 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
     this._allocLock = false;     // 分配互斥：isTaken(await) 窗口内并发调用必须串行
+    // 物理池（可配置）：opts.pools 覆盖默认（config.portPools 注入）；键缺失回退默认。
+    this._pools = Object.assign({}, DEFAULT_POOLS, (opts && opts.pools) || {});
     this._load();
+  }
+
+  /** 设置/覆盖物理池定义（config 注入）。 */
+  configurePools(pools) {
+    if (pools && typeof pools === 'object') this._pools = Object.assign({}, DEFAULT_POOLS, pools);
+    return this._pools;
+  }
+
+  /** 逻辑段 → 池定义（未注册段名回退 managed 池，保持前向兼容）。 */
+  rangeOf(segment) {
+    const pool = SEGMENT_POOL[segment] || 'managed';
+    return this._pools[pool] || DEFAULT_POOLS[pool] || DEFAULT_POOLS.managed;
+  }
+
+  /** 逻辑段在其所属池内的锚点偏移：同一池内各段有稳定起点（按池内段序 × 1000），
+   *  保证确定性最小空闲分配仍可预测；池空间不足时经取模回绕扩展（不越池）。
+   *  注意：偏移必须按「同池段序」而非全局段序计算，否则跨池段会锚到池外。 */
+  _anchorOffset(segment) {
+    const pool = SEGMENT_POOL[segment] || 'managed';
+    const samePool = Object.keys(SEGMENT_POOL).filter((s) => (SEGMENT_POOL[s] || 'managed') === pool);
+    const idx = samePool.indexOf(segment);
+    const range = this.rangeOf(segment);
+    const offset = (idx > 0 ? idx * 1000 : 0);
+    return offset < range.count ? offset : 0; // 偏移不得超出池容量（否则回退池首）
   }
 
   /** 重设持久化文件（守卫构造时注入：与 stateFile 同域；测试可指向临时目录，避免污染生产记录）。
@@ -109,10 +157,13 @@ class PortRegistry {
     const p = Number(port);
     if (!Number.isInteger(p) || p <= 0 || p > 65535) throw new Error('ports.registerUser: 非法端口 ' + port);
     if (this._records.has(p)) throw new Error('端口 ' + p + ' 已被 [' + this._records.get(p).role + '] 占用');
-    // 实例端口不得落入任何动态分配保留段
-    for (const key of Object.keys(RANGES)) {
-      const rng = RANGES[key];
-      if (p >= rng.base && p < rng.base + rng.count) throw new Error('端口 ' + p + ' 位于保留段 [' + key + ']，实例端口不可占用');
+    // 实例端口不得落入任何动态物理池（去重：共享池只报一次，避免重复报错文案）
+    const seenPools = new Set();
+    for (const key of Object.keys(this._pools)) {
+      const rng = this._pools[key];
+      if (!rng || seenPools.has(rng.base + ':' + rng.count)) continue;
+      seenPools.add(rng.base + ':' + rng.count);
+      if (p >= rng.base && p < rng.base + rng.count) throw new Error('端口 ' + p + ' 位于动态保留池 [' + key + ']，实例端口不可占用');
     }
     this._records.set(p, { port: p, role: 'user', owner: owner || 'user', createdAt: Date.now() });
     this._save();
@@ -178,8 +229,27 @@ class PortRegistry {
    *   回收「本工程旧代」→ 等释放（opts.waitMs）→ 重试；仍被外部占用 → 返回显式冲突（绝不静默跳号）。 */
   async claimSlot(rangeKey, owner, opts) {
     const o = opts || {};
-    const range = o.range || RANGES[rangeKey];
+    const range = o.range || this.rangeOf(rangeKey);
     if (!range) throw new Error('ports.claimSlot: 未知端口段 ' + rangeKey);
+    // 整个「探测→登记」决策置于单一分配互斥下（含 tryClaim 的 async isTaken 探测窗口）：
+    // 防止两个并发 claimSlot（异 owner）都读到端口空闲 → 双分配。原 _allocLock 只保护 _allocFree，
+    // 未覆盖 tryClaim 路径（本文件自身『绝不双分配』不变量的破口）。
+    await this._acquireAlloc();
+    try {
+      return await this._claimSlotLocked(rangeKey, owner, range, o);
+    } finally {
+      this._allocLock = false;
+    }
+  }
+
+  /** 获取分配互斥（自旋等待）；调用方必须在 finally 释放 _allocLock。 */
+  async _acquireAlloc() {
+    while (this._allocLock) { await new Promise((r) => setTimeout(r, 10)); }
+    this._allocLock = true;
+  }
+
+  /** claimSlot 主体（调用方已持锁；内部不得再次获取 _allocLock）。 */
+  async _claimSlotLocked(rangeKey, owner, range, o) {
     const reclaim = async (port) => {
       if (!o.reclaimCmdMark) return 0;
       let killed = 0;
@@ -204,91 +274,84 @@ class PortRegistry {
     const register = (port) => {
       if (!this._records.has(port)) { this._records.set(port, { port, role: rangeKey, owner, createdAt: Date.now() }); this._save(); }
     };
-    // 尝试把 port 交给 owner：成功(空/自听/可回收)→register+返回；否则返回 null（不可用）
     const tryClaim = async (port) => {
       if (!port) return null;
       const rec = this._records.get(port);
       const selfListener = (() => { try { const pidlook = require('../../platform/os/pidlookup'); return pidlook.findListeningPid(port) === process.pid; } catch { return false; } })();
       if (selfListener) { register(port); return { port, mode: 'self-listening' }; }
-      if (rec && rec.owner !== owner) return null; // 其它 owner 已登记：不抢（交上层裁决）
+      if (rec && rec.owner !== owner) return null;
       const reused = !!(rec && rec.owner === owner);
       const taken = await this.isTaken(port, owner);
       if (!taken) { register(port); return { port, mode: reused ? 'reuse' : 'claim' }; }
       const killed = await reclaim(port);
       if (killed > 0 && (await waitFree(port, o.waitMs || 6000))) { register(port); return { port, mode: 'reclaimed' }; }
-      return null; // 外部占用且回收失败
+      return null;
     };
     const bound = this.byOwner(owner);
-    // ── ① 权威绑定（byOwner）── 绑定的端口优先；被占→回收；回收失败→显式迁移（不静默、不中断）
     if (bound) {
       const r = await tryClaim(bound);
       if (r) return Object.assign({ owner, segment: rangeKey, binding: true }, r);
-      // 绑定被外部/其它 owner 永久占用：尝试立即回收等待后仍失败 → 迁移并显式事件（binding-lost）
-      const alt = await this._allocFree(rangeKey, range, owner, o);
+      const alt = await this._allocFreeCore(rangeKey, range, owner, o);
       if (alt) {
         if (o.onBindingLost) { try { o.onBindingLost({ owner, from: bound, to: alt.port }); } catch {} }
         return Object.assign({ owner, segment: rangeKey, binding: true, bindingLost: true, from: bound }, alt);
       }
-      return Object.assign({ owner, segment: rangeKey, conflict: true, reason: 'binding-occupied-and-segment-full', port: bound });
+      return Object.assign({ owner, segment: rangeKey, conflict: true, reason: 'binding-occupied-and-pool-full', error: 'port-pool-exhausted', capacity: this.capacity()[SEGMENT_POOL[rangeKey] || 'managed'] || null, port: bound });
     }
-    // ── ② preferred ──
-    //   - bindingPreferred=true（调用方持久绑定记忆，如 inst.wanPort 或 byOwner 曾绑定）：
-    //     该端口被异 owner 抢注/外部占用且无法回收 → 迁移 + onBindingLost 显式事件（绑定被盗不静默）；
-    //   - 普通 preferred（advisory，如 main→40000 默认槽位）：被占则回退最小空闲，绝不因偏好中断服务。
     if (o.preferred) {
       const r = await tryClaim(o.preferred);
       if (r) return Object.assign({ owner, segment: rangeKey, preferred: true, bindingPreferred: !!o.bindingPreferred }, r);
       if (o.bindingPreferred) {
-        // 持久绑定记忆的端口不可用（被盗/被占且回收失败）→ 迁移并显式标记
-        const alt = await this._allocFree(rangeKey, range, owner, o);
+        const alt = await this._allocFreeCore(rangeKey, range, owner, o);
         if (alt) {
           if (o.onBindingLost) { try { o.onBindingLost({ owner, from: o.preferred, to: alt.port }); } catch {} }
           return Object.assign({ owner, segment: rangeKey, preferred: true, bindingPreferred: true, bindingLost: true, from: o.preferred }, alt);
         }
-        return Object.assign({ owner, segment: rangeKey, conflict: true, reason: 'binding-preferred-occupied-and-segment-full', port: o.preferred });
+        return Object.assign({ owner, segment: rangeKey, conflict: true, reason: 'binding-preferred-occupied-and-pool-full', error: 'port-pool-exhausted', capacity: this.capacity()[SEGMENT_POOL[rangeKey] || 'managed'] || null, port: o.preferred });
       }
-      // advisory preferred：静默回退（由 ③ 分配最小空闲）
     }
-    // ── ③ 段内最小空闲 ──
-    const free = await this._allocFree(rangeKey, range, owner, o);
-    return Object.assign({ owner, segment: rangeKey }, free || { conflict: true, reason: 'segment-full' });
+    const free = await this._allocFreeCore(rangeKey, range, owner, o);
+    if (free) return Object.assign({ owner, segment: rangeKey }, free);
+    const cap = this.capacity()[SEGMENT_POOL[rangeKey] || 'managed'] || null;
+    return Object.assign({ owner, segment: rangeKey, conflict: true, reason: 'pool-full', error: 'port-pool-exhausted', capacity: cap });
   }
 
-  /** 段内最小空闲分配（含回收尝试后仍被占则跳过——但跳过即跳号，故先对候选做回收再定）。 */
-  async _allocFree(rangeKey, range, owner, o) {
-    while (this._allocLock) { await new Promise((r) => setTimeout(r, 10)); }
-    this._allocLock = true;
-    try {
-      for (let i = 0; i < range.count; i++) {
-        const p = range.base + i;
-        if (this._records.has(p)) continue; // 已登记给任何 owner 都跳过（防同端口双 owner）
-        if (await this.isTaken(p)) {
-          // 候选被监听：尝试回收本工程旧代后重判（避免跳号）
-          if (o.reclaimCmdMark) {
-            try {
-              const pidlook = require('../../platform/os/pidlookup');
-              const cfg = o.reclaimCfg || '';
-              for (const m of pidlook.pgrepList(o.reclaimCmdMark)) {
-                const pid = m.pid;
-                if (pid === process.pid) continue;
-                const cmd = m.cmdline;
-                if (cfg && cmd.indexOf(cfg) < 0) continue;
-                try { process.kill(pid, 'SIGTERM'); } catch {}
-              }
-            } catch {}
-            await new Promise((r2) => setTimeout(r2, o.waitMs || 2500));
-          }
-          if (await this.isTaken(p)) continue; // 仍被外部占：跳过（该槽位不可用）
+  /** 池内最小空闲分配（不获取锁；调用方已持 _allocLock）。 */
+  async _allocFreeCore(rangeKey, range, owner, o) {
+    const offset = (o && o.range) ? 0 : this._anchorOffset(rangeKey);
+    for (let n = 0; n < range.count; n++) {
+      const p = range.base + ((offset + n) % range.count);
+      if (this._records.has(p)) continue;
+      if (await this.isTaken(p)) {
+        if (o.reclaimCmdMark) {
+          try {
+            const pidlook = require('../../platform/os/pidlookup');
+            const cfg = o.reclaimCfg || '';
+            for (const m of pidlook.pgrepList(o.reclaimCmdMark)) {
+              const pid = m.pid;
+              if (pid === process.pid) continue;
+              const cmd = m.cmdline;
+              if (cfg && cmd.indexOf(cfg) < 0) continue;
+              try { process.kill(pid, 'SIGTERM'); } catch {}
+            }
+          } catch {}
+          await new Promise((r2) => setTimeout(r2, o.waitMs || 2500));
         }
-        if (!(await this._canBind(p))) continue;
-        this._records.set(p, { port: p, role: rangeKey, owner, createdAt: Date.now() });
-        this._save();
-        return { port: p, mode: 'allocated' };
+        if (await this.isTaken(p)) continue;
       }
-      return null;
-    } finally {
-      this._allocLock = false;
+      if (!(await this._canBind(p))) continue;
+      this._records.set(p, { port: p, role: rangeKey, owner, createdAt: Date.now() });
+      this._save();
+      return { port: p, mode: 'allocated' };
     }
+    return null;
+  }
+
+  /** 池内最小空闲分配（公开：自持锁）。 */
+  async _allocFree(rangeKey, range, owner, o) {
+    await this._acquireAlloc();
+    try { return await this._allocFreeCore(rangeKey, range, owner, o); }
+    finally { this._allocLock = false; }
   }
 
   /* ═══════ 动态分配 ═══════ */
@@ -308,17 +371,21 @@ class PortRegistry {
     });
   }
 
-  /** 在指定段分配空闲端口并登记（owner 绑定）。互斥防并发同端口。
-   *  候选判占 = 端口登记 ∪ TCP connect 探测 ∪ bind 探测（三重，防隐藏占用）。 */
+  /** 在指定逻辑段分配空闲端口并登记（owner 绑定）。互斥防并发同端口。
+   *  候选判占 = 端口登记 ∪ TCP connect 探测 ∪ bind 探测（三重，防隐藏占用）。
+   *  工业标准：返回「最小空闲」确定性端口；池满返回 null（调用方应转显式满错误 + 告警）。
+   *  opts.skipFirst 保留兼容（跳过池内首个候选，供特殊场景）。 */
   async allocate(rangeKey, owner, opts) {
-    const range = RANGES[rangeKey];
+    const range = this.rangeOf(rangeKey);
     if (!range) throw new Error('ports.allocate: 未知端口段 ' + rangeKey);
-    const start = (opts && opts.skipFirst) ? 1 : 0;
+    const o = opts || {};
+    const anchor = (o.range) ? 0 : this._anchorOffset(rangeKey);
+    const start = anchor + ((o.skipFirst) ? 1 : 0);
     while (this._allocLock) { await new Promise((r) => setTimeout(r, 10)); }
     this._allocLock = true;
     try {
-      for (let i = start; i < range.count; i++) {
-        const p = range.base + i;
+      for (let n = 0; n < range.count; n++) {
+        const p = range.base + ((start + n) % range.count);
         if (this._records.has(p)) continue;      // 已登记（含持久化恢复的绑定）
         if (await this.isTaken(p)) continue;
         if (!(await this._canBind(p))) continue; // 残留/隐藏占用：connect 探测不可见但 bind 会失败
@@ -341,6 +408,35 @@ class PortRegistry {
     }
   }
 
+  /** 池容量视图（工业标准：可观测性）。每个物理池返回 { base, size, used, free, utilization }。 */
+  capacity() {
+    const out = {};
+    for (const [pool, rng] of Object.entries(this._pools)) {
+      let used = 0;
+      for (const r of this._records.values()) {
+        if (r.port >= rng.base && r.port < rng.base + rng.count) used += 1;
+      }
+      const free = Math.max(0, rng.count - used);
+      out[pool] = {
+        base: rng.base, size: rng.count, used, free,
+        utilization: rng.count > 0 ? Number((used / rng.count).toFixed(4)) : 0,
+      };
+    }
+    return out;
+  }
+
+  /** 逻辑段当前可用量（调用方分配前判断/告警）。 */
+  available(segment) {
+    const pool = SEGMENT_POOL[segment] || 'managed';
+    const cap = this.capacity()[pool];
+    return cap ? cap.free : this.rangeOf(segment).count;
+  }
+
+  /** 明确判断某逻辑段是否已满（供调用方给出显式错误而非静默 null）。 */
+  isFull(segment) {
+    return this.available(segment) <= 0;
+  }
+
   /** 全部端口快照（固定/用户/分配，供审计）。 */
   snapshotAll() {
     const byRole = (fn) => [...this._records.values()].filter(fn).map((r) => r.port).sort((a, b) => a - b);
@@ -355,4 +451,4 @@ class PortRegistry {
 // 单例：全系统共享（supervisor 构造时注入 file 路径）
 const shared = new PortRegistry();
 
-module.exports = { PortRegistry, shared, RANGES };
+module.exports = { PortRegistry, shared, DEFAULT_POOLS, SEGMENT_POOL };

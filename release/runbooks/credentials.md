@@ -9,7 +9,8 @@
 - npm 发布 scope：`@dsh-sup`，四平台子包 `dsh-core-<os>-<arch>`：
   `dsh-core-linux-x64` · `dsh-core-darwin-arm64` · `dsh-core-darwin-x64` · `dsh-core-win-x64`
   （scope 已单源声明于 `package.json → npmPublish.scope = "@dsh-sup"`，`publish-core.sh` 优先读它）。
-- 发布通道：本机一键（`release:core:publish`）+ 私有仓 CI 四平台矩阵（tag 触发）。
+- 发布通道（2026-09-10 分工定案）：**linux-x64 由本机一键发布**（`release:core:publish`，Linux 机器，认证见下方「本机侧」）；
+  **darwin-arm64 / darwin-x64 / win-x64 由私有仓 CI 矩阵**（tag 触发）发布。
 - 热更新：npm 平台子包经 self-update 执行器安装——发布令牌即上表 npm 子包发布权限。
 
 ## 令牌总览与最小权限（收紧到上述形态）
@@ -18,7 +19,7 @@
 |---|---|---|---|
 | GitHub PAT（fine-grained） | 本机 `git push` 私有内核仓 | **仅** `lobbowen/dsh-supervisor` 一个仓库；`Contents: Read/Write`；无 admin/org/其它仓 | 本机 git credential helper / gh（**不内嵌 remote URL**） |
 | GitHub Actions `GITHUB_TOKEN` | CI 挂 GitHub Release 附件 | 自动注入，仅当前仓 | 不需配置 |
-| NPM token（automation） | 真发 `@dsh-sup/dsh-core-*` 四子包 | `Automation` 粒度；**仅`@dsh-sup` scope 的 `dsh-core-*` 子包**发包 | CI：仓库 Secrets `NPM_TOKEN`；本机：`~/.npmrc`（0600） |
+| NPM token（automation） | 真发 `@dsh-sup/dsh-core-*` 子包（CI 发 mac/win，本机发 linux） | `Automation` 粒度；**仅`@dsh-sup` scope 的 `dsh-core-*` 子包**发包 | CI：仓库 Secrets `NPM_TOKEN`；本机：环境变量 `NPM_TOKEN`（经临时 userconfig 注入，不写入 `~/.npmrc`）或 `npm login` 官方源 |
 
 > 曾发现：git remote URL 内嵌过明文 fine-grained PAT（`github_pat_…`）——**已从 remote 脱敏**。
 > 该 token 已暴露，**必须在 GitHub 上撤销并重新签发**；新 token 改用 credential helper 保存，禁止再写进 remote URL。
@@ -27,25 +28,35 @@
 
 GitHub 仓库 `lobbowen/dsh-supervisor` → **Settings → Secrets and variables → Actions**：
 
-- `NPM_TOKEN` ← npmjs automation token（真发四子包必需，scope `@dsh-sup`）
+- `NPM_TOKEN` ← npmjs automation token（CI 真发 mac/win 三子包必需，scope `@dsh-sup`）
 - `GITHUB_TOKEN` 无需配置（Actions 自动注入，`softprops/action-gh-release` 用它挂 Release）
 
 接线点（已就位，值都在 Secrets 里）：
-- `.github/workflows/build.yml`：tag `v<内核>` 触发 → 4 平台矩阵各自 `ci-core.sh`；
+- `.github/workflows/build.yml`：tag `v<内核>` 触发 → **mac/win 三平台矩阵**各自 `ci-core.sh`（linux 已改本地生产，不在矩阵内）；
   **仅当 `NPM_TOKEN` 存在时** `--publish` 真发 npm 子包 + 挂 GitHub Release。
 - 配置方法：GitHub 网页 Secrets 中新增 `NPM_TOKEN`（不由仓库内脚本管理）。
 - npm 侧若需校验发包权限：`npm token list --registry=https://registry.npmjs.org/`（应只见 automation token）。
 
 ## 本机侧（开发机 / 一键发布）
 
-### NPM
+### NPM（**认证单源**，2026-09-10 标准化）
 ```bash
-# 方式一（推荐，值只进 ~/.npmrc 0600）：
-npm login --registry=https://registry.npmjs.org/
-# 方式二（CI/无头环境，经环境变量，值不入对话）：
+# 规范配置：写入「真实用户 home」下的 .npmrc（0600）——任何沙箱/shell 都能被发布脚本读到
 export NPM_TOKEN='<automation token>'
 bash release/scripts/configure-credentials.sh --npm
+# 自检（只读、不含值，且与发布脚本用同一解析器判定）
+bash release/scripts/configure-credentials.sh --check
+# 临时方案（不落盘）：仅本次会话有效
+export NPM_TOKEN='<automation token>' && npm run release:core:publish
 ```
+> **为什么要「真实 home」**：DSH 沙箱把 `$HOME` 指向实例数据目录。若认证只看 `$HOME`，
+> 同一台机器上会「A 沙箱能发版、B 沙箱报 ENEEDAUTH」——这正是此前的真实故障
+> （token 曾散落在某个实例的 home 下，只有在那一个沙箱里发布才成功）。
+>
+> 解析顺序（`release/scripts/_npm-auth.sh` **单源实现**）：
+> `DSH_NPMRC` → `NPM_CONFIG_USERCONFIG` → `NPM_TOKEN`(临时 userconfig) → **真实 home/.npmrc** → `$HOME/.npmrc`。
+>
+> 2026-09-10 起发布脚本**不再**执行 `npm config set`（不改开发机全局 registry、不把 token 写入 `~/.npmrc`）。
 
 ### GitHub git push
 ```bash
@@ -59,7 +70,7 @@ git push   # 首次会提示输入用户名 + PAT（PAT 仅作为密码）
 
 ### 一键编排如何消费
 - `npm run release:core`（dry-run）：**不需要任何令牌**（构建/打包/检查都在本机）。
-- `npm run release:core:publish`：需要 ① git 认证（credential helper 或 gh）② npm 认证（~/.npmrc）。缺任一即失败于对应步骤。
+- `npm run release:core:publish`：需要 ① git 认证（credential helper 或 gh）② npm 认证（`NPM_TOKEN` 环境变量或 `~/.npmrc` 登录态）。缺任一即失败于对应步骤。**仅限 Linux 机器**（非 Linux 直接拒绝，见 release/README.md 平台分工）。
 
 ## 最小权限自查清单（发布前）
 - [ ] GitHub PAT 只绑定 `lobbowen/dsh-supervisor`、仅 `Contents: Read/Write`，未出现在 `git remote -v`。

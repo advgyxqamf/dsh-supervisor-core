@@ -29,8 +29,15 @@ const ICON_DIR = path.join(os.homedir(), '.local', 'share', 'icons');
 const DESKTOP_TEMPLATE = path.join(ROOT, 'desktop', 'dsh-supervisor.desktop');
 const AUTOSTART_TEMPLATE = path.join(ROOT, 'desktop', 'dsh-supervisor-gui-autostart.desktop');
 const AUTOSTART_FILE = path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
-const BIN_DIR = path.join(os.homedir(), '.local', 'bin');
-const BIN_PATH = path.join(BIN_DIR, 'dsh-supervisor');
+// 跨平台命令行入口（P1 审计修复）：
+//   Unix    ：~/.local/bin/dsh-supervisor（软链到包内脚本，无扩展名）。
+//   Windows ：%APPDATA%\npm 下的 .cmd 垫片——Windows 可执行须有扩展名，且创建**符号链接**
+//             需管理员/开发者模式（普通用户 EPERM）→ 用 .cmd 而非 symlink。
+const IS_WINDOWS = process.platform === 'win32';
+const BIN_DIR = IS_WINDOWS
+  ? path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'npm')
+  : path.join(os.homedir(), '.local', 'bin');
+const BIN_PATH = path.join(BIN_DIR, IS_WINDOWS ? 'dsh-supervisor.cmd' : 'dsh-supervisor');
 
 // ---- 配置解析 ----
 // 解析顺序：DSH_SUPERVISOR_CONFIG 环境变量 → -c 参数 → 用户默认配置。
@@ -275,14 +282,26 @@ function printStatus(s) {
 }
 
 function cmdControl(action) {
-  apiRequest('POST', '/' + action).then((r) => {
-    if (r.error) {
-      console.log(r.error);
-      process.exitCode = 1; // 拒绝（如 desired=stopped 时 restart）以非零退出
-    } else {
-      console.log('ok — desired=' + r.desired + ' phase=' + r.phase);
+  // 唯一入口（R3 C3-5a）：main 启停经统一生命周期 /lifecycle/dsh/{start|stop|restart}；
+  // 旧 /start|/stop|/restart 路由已删除——CLI 曾直打旧路由 → 恒 404（2026-09 修复）。
+  // 兼容性：新版 daemon 走 /lifecycle/dsh/*；对旧版 daemon（仅旧路由）做一次回退。
+  const primary = '/lifecycle/dsh/' + action;
+  apiRequest('POST', primary).then((r) => {
+    if (r && r.error === 'not found') {
+      // 旧版 daemon 回退（过渡期）：仅当明确 404 语义时
+      return apiRequest('POST', '/' + action).then(finishControl);
     }
+    finishControl(r);
   });
+}
+
+function finishControl(r) {
+  if (!r || r.error) {
+    console.log((r && r.error) || '请求失败');
+    process.exitCode = 1; // 拒绝（如 desired=stopped 时 restart）以非零退出
+  } else {
+    console.log('ok — desired=' + r.desired + ' phase=' + r.phase);
+  }
 }
 
 function cmdInstall() {
@@ -295,13 +314,19 @@ function cmdInstall() {
   } else {
     console.log('[install] 配置文件已存在，跳过: ' + USER_CONFIG);
   }
-  // 命令行 symlink
+  // 命令行入口：Unix 软链 / Windows .cmd 垫片（见 BIN_PATH 注释）
   fs.mkdirSync(BIN_DIR, { recursive: true });
-  try {
-    fs.unlinkSync(BIN_PATH);
-  } catch {}
-  fs.symlinkSync(path.join(__dirname, 'dsh-supervisor'), BIN_PATH);
-  console.log('[install] 命令行链接: ' + BIN_PATH + ' → ' + __dirname + '/dsh-supervisor');
+  try { fs.unlinkSync(BIN_PATH); } catch {}
+  if (IS_WINDOWS) {
+    // .cmd 垫片：用当前 Node 直接执行包内脚本（无需 symlink 特权，跨 Windows 版本可用）
+    const target = path.join(__dirname, 'dsh-supervisor');
+    const shim = '@echo off\r\n"' + process.execPath + '" "' + target + '" %*\r\n';
+    fs.writeFileSync(BIN_PATH, shim);
+    console.log('[install] 命令行垫片: ' + BIN_PATH + ' → ' + target);
+  } else {
+    fs.symlinkSync(path.join(__dirname, 'dsh-supervisor'), BIN_PATH);
+    console.log('[install] 命令行链接: ' + BIN_PATH + ' → ' + __dirname + '/dsh-supervisor');
+  }
   // systemd unit（2026-09-05 修复：npm 平台子包只含 bin/ 无 systemd/desktop 模板 → 降级跳过部署而非 exit 1）
   if (!fs.existsSync(UNIT_TEMPLATE)) {
     console.warn('[install] 未找到 systemd 模板（' + UNIT_TEMPLATE + '）——npm 内核包形态，跳过系统服务部署。');
@@ -333,13 +358,17 @@ function cmdInstall() {
 }
 
 // 桌面菜单入口 + 图标（从仓库模板部署，@HOME@ 占位符替换）
+// 双仓拆分（2026-09 定稿）：壳源码已不在本仓（src-tauri/ 不存在）——
+// 图标改从独立壳 checkout（.shell-work/src-tauri 或 $DSH_SHELL_DIR）取，缺失时仅告警不阻断。
 function installDesktopEntry() {
   try {
     if (!fs.existsSync(DESKTOP_TEMPLATE)) return;
     fs.mkdirSync(ICON_DIR, { recursive: true });
-    const iconSrc = path.join(ROOT, 'src-tauri', 'icons', '128x128.png');
+    const shellSrc = (process.env.DSH_SHELL_DIR && fs.existsSync(path.join(process.env.DSH_SHELL_DIR, "src-tauri")) ? path.join(process.env.DSH_SHELL_DIR, "src-tauri") : path.join(ROOT, '.shell-work', 'src-tauri'));
+    const iconSrc = fs.existsSync(shellSrc) ? path.join(shellSrc, 'icons', '128x128.png') : null;
     const iconDst = path.join(ICON_DIR, 'dsh-supervisor.png');
-    if (fs.existsSync(iconSrc)) fs.copyFileSync(iconSrc, iconDst);
+    if (iconSrc && fs.existsSync(iconSrc)) fs.copyFileSync(iconSrc, iconDst);
+    else console.warn('[install] 未找到壳图标（' + path.join(shellSrc, 'icons', '128x128.png') + '），桌面图标缺失；请安装壳后重装或忽略。');
     fs.mkdirSync(DESKTOP_DIR, { recursive: true });
     const entry = fs.readFileSync(DESKTOP_TEMPLATE, 'utf8').replace(/@HOME@/g, os.homedir());
     const dst = path.join(DESKTOP_DIR, 'dsh-supervisor.desktop');

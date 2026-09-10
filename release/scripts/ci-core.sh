@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# 内核发布产线（CI 核心逻辑单源）——供 .github/workflows/build.yml 逐平台矩阵调用，亦可本地复跑。
+# 内核发布产线（CI 核心逻辑单源）——供 .github/workflows/build.yml 的 mac/win 矩阵调用，
+# 同时是**本地 Linux 生产**的实际构建+发布体（由 release-core.sh 编排调用）。
 # 用法: release/scripts/ci-core.sh [--publish]
-#   - 无 --publish = 只验证（verify-versions --core → build-ui → npm test → build:launcher → 子包 dry-run）
-#   - --publish    = 验证通过后追加真发布（需 NPM_TOKEN / ~/.npmrc 官方 registry token）
-#   - 平台由本机 node process.platform/arch 自动识别（矩阵各 runner 各自跑自己的平台）
+#   - 无 --publish = 只验证（verify:versions → build-ui → npm test → build:launcher → 子包 dry-run）
+#   - --publish    = 验证通过后追加真发布（**本机平台**子包 → 官方 registry）
+#   - 平台由本机 node process.platform/arch 自动识别（每台机器只产自己的平台子包）
 # 版本：从仓库根 package.json 单源注入；launcher 自报版本错配即拒绝（publish-core.sh 内置强制）。
 # 2026-09 定案：全平台弃 SEA（macOS Node SEA 注入后段错误铁证），统一 Node launcher 形态。
-# 2026-09 双仓拆分：壳已剥离至公开仓 dsh-supervisor-launcher（src-tauri 不在本仓）——
-#   壳前端组装/壳集成冒烟为壳仓 CI（launcher-build.yml）职责，核仓产线只管内核 npm 子包。
+# 2026-09 平台分工：linux-x64 本地生产 / win+darwin 由 GitHub CI 生产（额度优化）。
+#
+# 认证（2026-09 修复）：本脚本**不再改动用户全局 npm 配置**。
+#   原实现执行 `npm config set registry` + `npm config set //registry.npmjs.org/:_authToken`
+#   ——前者把开发机的默认 registry 永久改成官方源（用户平时用镜像源），
+#   后者把 token **明文写入 ~/.npmrc**。现改为：有 NPM_TOKEN 就写进**临时 userconfig**
+#   并以 NPM_CONFIG_USERCONFIG 传给子进程（进程结束即删）；无 token 则沿用既有登录态。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -32,11 +38,8 @@ npm run publish:core -s
 ls -lh dist/npm/
 
 if [ "$PUBLISH" = 1 ]; then
-  echo "=== [5/5] 真发布内核子包（官方 registry，需 NPM_TOKEN） ==="
-  npm config set registry https://registry.npmjs.org
-  if [ -n "${NPM_TOKEN:-}" ]; then
-    npm config set //registry.npmjs.org/:_authToken="$NPM_TOKEN"
-  fi
+  echo "=== [5/5] 真发布内核子包（官方 registry；认证由 publish-core.sh 单源处理） ==="
+  export DSH_PUBLISH_REGISTRY="${DSH_PUBLISH_REGISTRY:-https://registry.npmjs.org/}"
   npm run publish:core -- --publish
 else
   echo "=== [5/5] （跳过真发布：加 --publish 即发官方 registry） ==="

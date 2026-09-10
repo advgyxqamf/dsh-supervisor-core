@@ -6,9 +6,10 @@
 #
 # ⚠ 发布通道收敛（2026-09 审计 F6/D1 定案）：本脚本不再是自更新通道——
 #   不再生成 dist/release/manifest.json（曾产出 url=127.0.0.1:39240 污染 manifest）。
-#   内核发布唯一通道 = dist/sea SEA + scripts/publish-core.sh npm 平台子包；
+#   内核发布唯一通道 = build:launcher Node launcher + scripts/publish-core.sh npm 平台子包；
 #   守卫自身更新走同一 npm 执行器（DistributionManager.runNpmInstall + 平台子包）。
 #   本脚本仅保留为「源码打包」出口（人工审计/分发自用），产出自检照旧。
+# 双仓拆分：壳源码不在本仓（见 export-shell.sh 的 DSH_SHELL_DIR 说明），包内只含内核资产。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -18,7 +19,8 @@ PAK="dsh-supervisor-$VER"
 DIR="$DIST/$PAK"
 
 rm -rf "$DIR"; mkdir -p "$DIR"
-for d in bin src systemd desktop src-tauri/icons; do cp -r "$ROOT/$d" "$DIR/"; done
+# 内核资产（双仓拆分后本仓无 src-tauri；壳图标不再随内核源码包分发——内核包用 ui-react 面板）。
+for d in bin src systemd desktop; do [ -e "$ROOT/$d" ] && cp -r "$ROOT/$d" "$DIR/"; done
 # 2026-09-05 清理：不再拷 ROOT/config.json（含构建机绝对路径的死双源）——守卫运行读内嵌 DEFAULT_CONFIG 或用户 ~/.dsh/supervisor/config.json
 cp "$ROOT/package.json" "$DIR/"
 
@@ -53,5 +55,5 @@ echo "tar:      $TAR  ($(du -h "$TAR" | awk '{print $1}'))"
 echo "sha256:   $SHA"
 echo
 echo "说明（D1 定案）：本产物为源码打包，非发布通道。内核发布请走："
-echo "  npm run build:sea    # SEA 单文件二进制"
+echo "  npm run build:launcher  # Node launcher（全平台统一发行形态）"
 echo "  npm run publish:core # npm 平台子包（默认 dry-run，--publish 真发）"

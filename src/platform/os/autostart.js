@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
+const { resolveExecutable } = require('./exec-path');
 
 const isLinux = process.platform === 'linux';
 const isMac = process.platform === 'darwin';
@@ -60,11 +61,12 @@ function setAutostart(on) {
       if (on) {
         const apiPort = process.env.DSH_SUPERVISOR_API_PORT || '36361';
         const daemon = daemonCommand();
+        const guiPath = guiCommand();
         const ps = [
           '$ErrorActionPreference = "SilentlyContinue"',
           '$port = ' + JSON.stringify(String(apiPort)),
           '$daemon = ' + JSON.stringify(String(daemon)),
-          '$gui = Join-Path $env:USERPROFILE ".local\\bin\\dsh-supervisor-gui.exe"',
+          '$gui = ' + JSON.stringify(String(guiPath)),
           '$up = Test-NetConnection -ComputerName 127.0.0.1 -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue',
           'if (-not $up) {',
           '  $p = @(Get-Process -Name dsh-supervisor -ErrorAction SilentlyContinue)',
@@ -77,7 +79,7 @@ function setAutostart(on) {
         fs.mkdirSync(path.dirname(watchdogPs1), { recursive: true });
         const atmp = watchdogPs1 + '.tmp'; fs.writeFileSync(atmp, ps); fs.renameSync(atmp, watchdogPs1); // 原子写
         // (a) 登录启动 GUI（守卫由 GUI 引导拉起）
-        try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + path.join(os.homedir(), '.local', 'bin', 'dsh-supervisor-gui.exe') + '"']); } catch (e) { errors.push('schtasks logon: ' + e.message); }
+        try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']); } catch (e) { errors.push('schtasks logon: ' + e.message); }
         // (b) 每 5 分钟 watchdog 保活（崩溃自动拉起）
         try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor-Watchdog', '/SC', 'MINUTE', '/MO', '5', '/RL', 'HIGHEST', '/F', '/TR', 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + watchdogPs1 + '"']); } catch (e) { errors.push('schtasks watchdog: ' + e.message); }
       } else {
@@ -128,9 +130,31 @@ function setGuiAutostart(on) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-/** 守护进程执行路径（自启/服务定义使用；安装后 ~/.local/bin/dsh-supervisor 或 dataDir 内）。 */
+/** 守护进程执行路径（自启/服务定义使用）。
+ *  P0 修复：旧实现硬拼 ~/.local/bin/dsh-supervisor —— Windows 上**无 .exe 且目录非标准**，
+ *  watchdog 的 Start-Process 静默失败（Windows 崩溃自愈实际不可用）。
+ *  现经跨平台解析：PATH（Windows 含 PATHEXT）→ %APPDATA%\npm → ~/.local/bin → ~/.npm-global/bin。
+ *  仍无命中时回退「平台规范的安装位置」（Windows 带 .exe），保证路径形态正确。 */
 function daemonCommand() {
-  return process.env.DSH_SUPERVISOR_DAEMON || path.join(os.homedir(), '.local', 'bin', 'dsh-supervisor');
+  const hit = resolveExecutable('dsh-supervisor', { envVar: 'DSH_SUPERVISOR_DAEMON' });
+  if (hit) return hit;
+  const exe = isWindows ? 'dsh-supervisor.exe' : 'dsh-supervisor';
+  return path.join(os.homedir(), '.local', 'bin', exe);
+}
+
+/** GUI 壳可执行路径（Windows watchdog 拉起面板用）。
+ *  壳由 launcher 安装器部署，位置随安装方式而异——按 env 覆盖 → 常见安装位置解析。 */
+function guiCommand() {
+  const hit = resolveExecutable(isWindows ? 'dsh-supervisor-gui' : 'dsh-supervisor-gui',
+    { envVar: 'DSH_SHELL_EXE' });
+  if (hit) return hit;
+  const home = os.homedir();
+  const exe = isWindows ? 'dsh-supervisor-gui.exe' : 'dsh-supervisor-gui';
+  const cands = isWindows
+    ? [path.join(home, '.local', 'bin', exe), path.join(home, 'AppData', 'Local', 'Programs', 'dsh-supervisor', exe)]
+    : [path.join(home, '.local', 'bin', exe), '/usr/local/bin/' + exe, '/opt/homebrew/bin/' + exe];
+  for (const c of cands) { try { if (fs.statSync(c).isFile()) return c; } catch {} }
+  return cands[0];
 }
 
 function macPlist(daemon) {
@@ -150,4 +174,4 @@ function macPlist(daemon) {
     + '</dict></plist>\n';
 }
 
-module.exports = { status, setAutostart, setGuiAutostart, daemonCommand };
+module.exports = { status, setAutostart, setGuiAutostart, daemonCommand, guiCommand };

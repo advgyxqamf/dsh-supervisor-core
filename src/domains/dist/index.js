@@ -16,6 +16,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
+// 服务管理器抽象（跨平台审计 §7.1）：分发域不直接调用 systemctl。
+const service = require('../../platform/os/service').current();
 
 // 合法 semver（含 prerelease/build），杜绝脏版本号进比较/安装链路。
 // 收紧：core 段禁止前导零（1.02.3 非法）、pre/build 标识符禁止连续/首尾点（rc..1 非法）
@@ -364,20 +366,19 @@ class DistributionManager {
       socket.once('timeout', () => finish(false));
       socket.once('error', () => finish(false));
     });
-    const unitActive = () => {
-      if (!unit) return true;
-      try {
-        return require('node:child_process').execFileSync('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8' }).trim() === 'active';
-      } catch { return false; }
-    };
+    const unitActive = () => service.isUnitActive(unit); // 平台层判定（无单元视为通过）
     const deadline = Date.now() + (o.timeoutMs || 60000);
     return (async () => {
       while (Date.now() < deadline) {
         if (await portListening() && unitActive()) {
-          // 稳定期预算检查：剩余时间不足 stabilityMs 则不再进入稳定期（避免实际等待溢出 deadline）
-          if (Date.now() + stabilityMs > deadline) break;
-          // 稳定期：插件加载可能在端口监听之后才失败，确认单元在稳定期后仍 active
-          await new Promise((r) => setTimeout(r, stabilityMs));
+          // 稳定期：插件加载可能在端口监听之后才失败，确认单元在稳定期后仍 active。
+          // ⚠ 修复（2026-09，实例升级恒判失败的另一根因）：原实现在「剩余时间 < stabilityMs」时
+          //   直接 break 返回**失败**——但此刻端口/单元明明是健康的（只是探测来得晚）。
+          //   慢启动实例（插件多/首次加载）端口在 25s 后就绪时会被误判「升级后未能启动」→ 触发
+          //   不必要的回滚。现改为：用**剩余预算**做缩短的稳定期复检（不漏判、不超 deadline）。
+          const remain = deadline - Date.now();
+          const wait = Math.max(0, Math.min(stabilityMs, remain));
+          if (wait > 0) await new Promise((r) => setTimeout(r, wait));
           // 稳定期复查必须同时复检端口：只查单元会漏掉 spawn 模式下进程在稳定期内崩溃（端口已空）
           if ((await portListening()) && unitActive()) return { ok: true };
         }

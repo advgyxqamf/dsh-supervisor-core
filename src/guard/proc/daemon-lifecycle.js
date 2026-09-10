@@ -190,29 +190,44 @@ class DaemonLifecycle {
     return { mode: 'started', pid: child.pid };
   }
 
-  /** 周期监督：期望进程失联 → 先验证死透再 replace（死透由 ensureRunning 的 stale/死pid 分支处理）。 */
-  async superviseOnce() {
-    if (!this.expectedPid()) { try { this.reclaimOrphans(); } catch {} }
+  /** 无副作用分类（供监督/审计共用）：当前受管代际与 ctl 属主的真实状态。**绝不 spawn/stop**。
+   *  @returns {{mode:'running'|'external'|'reclaiming'|'barrier'|'absent'|'stopping', pid?, owner?, stale?}}
+   *   - running    : 期望代际存活（ctl 属主=期望 pid，或 ctl 尚未起）
+   *   - external   : ctl 被「异 cmdMark/异代际」进程占用（外部抢占，绝不接管）
+   *   - reclaiming : 期望代际已死但同 cmdMark 残留仍占 ctl（需换代）
+   *   - barrier    : spawn latch 窗口内（等旧代退出）
+   *   - absent     : 无进程、无残留（可 spawn）
+   *   - stopping   : 已进入停止流程
+   *  这是生产监督路径（_orphanAudit / _daemonSuperviseOnce）识别「异主 daemon」的唯一判据——
+   *  ensureRunning 只按 cmdline 判 active，无法区分「本守卫的 daemon」与「外部同名 daemon」。 */
+  classify() {
+    if (this._stopping) return { mode: 'stopping' };
     const exp = this.expectedPid();
     if (exp && this._pidAlive(exp)) {
-      // 期望进程在：仅当 ctl 也起来才算真正 in-service；否则等（ready 窗口内）
       const owner = this._ctlOwnerPid();
-      if (owner && owner !== exp) {
-        // ctl 被异进程占（罕见）：不接管不杀——报告 external
-        return { mode: 'external', owner };
-      }
+      if (owner && owner !== exp) return { mode: 'external', owner, pid: exp };
       return { mode: 'running', pid: exp };
     }
     if (Date.now() < this._spawnWindowUntil) return { mode: 'barrier' };
     const stale = this._ctlOwnerPid();
-    if (stale) {
+    if (stale) return { mode: 'reclaiming', stale };
+    return { mode: 'absent' };
+  }
+
+  /** 周期监督：期望进程失联 → 先验证死透再 replace（死透由 ensureRunning 的 stale/死pid 分支处理）。
+   *  基于 classify() 分类后施加副作用（reclaim/spawn）；分类能力本身无副作用、供审计复用。 */
+  async superviseOnce() {
+    if (!this.expectedPid()) { try { this.reclaimOrphans(); } catch {} }
+    const c = this.classify();
+    if (c.mode === 'running' || c.mode === 'external' || c.mode === 'barrier' || c.mode === 'stopping') return c;
+    if (c.mode === 'reclaiming') {
       // 期望 pid 已死但 ctl 仍被同 cmdMark 残留占着：停残留并等释放（换代）
-      this._stopPid(stale);
+      this._stopPid(c.stale);
       this._spawnWindowUntil = Date.now() + 3000;
-      return { mode: 'reclaiming', stale };
+      return c;
     }
-    if (!this._stopping) return this._spawn();
-    return { mode: 'stopping' };
+    // absent：无进程无残留 → spawn
+    return this._spawn();
   }
 
   /** 停服：TERM → 等死 → 等 ctl 端口释放 → 清身份（绑定注册表由被管进程侧语义保留）。 */
@@ -233,6 +248,10 @@ class DaemonLifecycle {
       this.logger.warn && this.logger.warn('[' + this.name + '] 停止后端口 ' + this.ctlPort + ' 未释放');
     }
     this._clearIdentity();
+    // 复位停止闸门：实例在被 stop 后可再次 ensureRunning（原实现置 true 后永不复位 → 实例被复用则
+    // 永远返回 {mode:'stopping'}，不可恢复的死状态）。2026-09 审计修正。
+    this._stopping = false;
+    this._spawnWindowUntil = 0; // 清 latch，允许下轮直接裁决（不留陈旧 spawn 窗口）
     return { ok: true, stopped };
   }
 

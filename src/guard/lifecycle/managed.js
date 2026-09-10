@@ -34,6 +34,11 @@ class ManagedLifecycle {
     this.id = opts.id || ('lc-' + Math.random().toString(36).slice(2, 8));
     this.kind = opts.kind || 'module';
     this.name = opts.name || this.id;
+    // 能力声明（B1 断点修复：原 MANAGED_KINDS.startable/guardable 声明后无人消费）。
+    //   startable=false → LifecycleManager.start/stop/restart 显式拒绝（不再「返回 ok 但什么都不做」）；
+    //   guardable=false → 构造期锁定 guardian=false（不可被误开为守护）。
+    this.startable = opts.startable !== false;
+    this.guardable = opts.guardable !== false;
     this.logger = opts.logger || null;
     this.events = opts.events || null;
     this._start = opts.start || null;
@@ -49,7 +54,9 @@ class ManagedLifecycle {
     this.error = null;            // 最近一次错误
     this.startedAt = null;
     this.restartCount = 0;        // 守卫代其拉起的累计次数（守护动作侧 +1）
-    this.guardian = opts.guardian === true; // 守护开关：true=健康异常时守卫自动拉起（router/lan/dsh 由 adapters 置 true）；false=仅观测不自动拉起
+    // 守护开关：true=健康异常时守卫自动拉起（router/lan/dsh 由 adapters 置 true）；false=仅观测不自动拉起。
+    // guardable=false 的模块**恒为 false**（能力锁，不依赖调用方自律）。
+    this.guardian = this.guardable && opts.guardian === true;
     this._monitoring = false;     // 是否纳入统一启停管理
   }
 
@@ -68,6 +75,8 @@ class ManagedLifecycle {
       error: this.error,
       restartCount: this.restartCount,
       guardian: this.guardian === true,
+      startable: this.startable, // 能力声明可视化（UI 据此灰化启停入口）
+      guardable: this.guardable,
       monitoring: this._monitoring,
       detail: this._status ? (this._status() || null) : null,
     };

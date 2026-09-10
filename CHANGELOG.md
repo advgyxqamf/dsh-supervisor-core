@@ -4,6 +4,190 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+## [0.1.3-BETA.1]（2026-09-11）
+
+### 关于卡：双版本呈现 + 内核/桌面壳一起检测（2026-09-11）
+- **背景**：本产品由两个独立组件构成、各有独立版本线——桌面壳（Tauri，`dsh-supervisor-gui`）与
+  内核（守卫，`dsh-supervisor`）。原先「关于」只显示一个「当前版本」，语义有歧义。
+- **改造**：
+  - 「关于」拆为两行：**桌面壳版本** 与 **内核版本**；壳版本取 `~/.dsh/shell/identity.json`（经 `/shell/status`），内核版本取 `/guard/version`。
+  - **检查更新改为两者一起检测**：内核走 `/self-update/status`（npm 子包；源码形态回退 git 上游检查），桌面壳走新增的 `/shell/check-update`（查 `@dsh-sup/shell-release` 的 npm latest）。
+  - 两者任一有更新用警示色汇总提示；各自提供独立更新入口。
+  - **版本号不再带 `v` 前缀**（按要求直接显示纯版本号）。
+- **新增后端**：
+  - `domains/shell.checkUpdate(dist, opts)`：复用内核同一份 `semverCompare`，支持「远端更低不报可更新」（不降级）。
+  - `domains/shell.restartShell(opts)`：**应用壳更新 = 重启桌面壳**（壳自更新发生在启动时的门 0）。
+    先 SIGTERM 旧壳 → 有界等待 → 必要时 SIGKILL → 确认退出后才拉起新壳（壳有 single-instance 插件，
+    旧实例未退时新实例会「唤起旧窗口后自行退出」，等于没重启）。新壳 detached + unref。
+  - 新增 API：`POST /shell/check-update`、`POST /shell/restart`（已登记 API 契约面）。
+- **测试**：`test/shell-safety-net-test.js` 扩至 34 断言（新增 R8 版本检测 7 项、R9 重启 3 项）。
+  其中 R9 通过可配置的 `procPattern` 注入不存在的进程名，**确保单元测试不会误杀开发者本机真实运行的壳**。
+- 全量回归：**39 文件 781 passed / 0 failed**；UI typecheck / lint / 15 项单测全绿。
+
+### 本地端到端预演：JS 工具链 ↔ Tauri 契约打通（2026-09-11）
+- **预演目标**：在**不安装、不触碰用户系统**的前提下，证明「我们发布链路产出的东西」正是 **Tauri updater 会接受**的东西。
+- **方法与设计要点**：为使用**Tauri 自己的依赖**做验证（而非我们自己理解的格式）：
+  - 验签用 `minisign-verify` —— 与 `tauri-plugin-updater` 内部**同一个 crate**（其 `verify_signature` 即 base64 解码 → `PublicKey::decode` → `verify`）；
+  - 清单用 `tauri_plugin_updater::RemoteRelease` —— 由 **Tauri 自己的 Deserialize 实现**解析。
+- **新增 `src-tauri/tests/updater_artifacts.rs`（6 项验收，全部通过）**：
+  | # | 验收项 | 结果 |
+  |---|---|---|
+  | V1 | 清单可被 Tauri 的 `RemoteRelease` 解析（平台键/url/signature 齐备） | ✅ |
+  | V2 | 产物签名用 **tauri.conf.json 里的公钥**验证通过（4,546,278 字节） | ✅ |
+  | V3 | **篡改产物 → 验签必须失败**（安全底线） | ✅ |
+  | V4 | **换一把公钥 → 验签必须失败**（防任意密钥绕过） | ✅ |
+  | V5 | 公钥来自配置文件且结构合法（152 字符，可被 minisign-verify 解码） | ✅ |
+  | V6 | **真实工具链往返**：用 `assemble-shell-pkg.js` + `make-manifest.js` 生成的清单被 Tauri 接受，且签名验证通过 | ✅ |
+- **V6 是闭环关键**：它证明 JS 发布工具链的输出与 Tauri 契约**一致**（此前只能靠人工比对格式）。
+- **接入壳仓 CI 作为产物门禁**：新增「产物验收」步骤（`SHELL_REHEARSAL_DIR=dist/npm-shell cargo test --test updater_artifacts`）——**缺签名或格式不符即构建失败，绝不静默发布不可用于自动更新的产物**。
+- **`export-shell.sh` 补携带 `tests/`**：此前只导出 `src capabilities bootstrap icons`，验收测试不会被带到壳仓 CI（会直接失败）。已修正并验证导出结果含 `tests/`。
+- **顺带修掉一个真实的测试 flake**：`test/instance-upgrade-test.js` 原先用**固定端口 35910/35911**，前一次运行的 socket 处于 TIME_WAIT 时触发 `EADDRINUSE`，会**中断整个测试链**（实测发生）。已改为向内核申请空闲端口（`listen(0)`），彻底消除。
+- 全量回归：**39 文件 768 passed / 0 failed**。
+### 内核侧壳更新安全网（P1/P3）落地：闭环完整（2026-09-11）
+- **定位澄清（避免越界）**：内核**不是**壳的更新源（壳直连 npm CDN 自更新，冷启动即可用）；内核做**安全网**：预取 / 备份 / 观察 / **有界回退** / 审计。理由：壳不受监督（无 systemd 单元，崩溃无人拉起），而内核是 `Restart=always` 常驻服务——壳被更新坏掉时内核**很可能仍在运行**，是唯一能救它的角色。
+- **新域 `src/domains/shell/index.js`**（纯函数式，无状态）：
+  - `identity()`：读壳在启动最早期写入的 `~/.dsh/shell/identity.json`（含 `attempt` 自增、`phase`、`version`）——**壳完全起不来时也能判断「该版本反复失败」**，这是回退决策的核心输入。
+  - `markPending(from,to)` / `readJournal()`：维护更新账本 `update-journal.json`（内核权威）。
+  - `evaluate()`：状态机 `idle / pending / confirmed / should-rollback`。
+  - `health()`：壳阶段上报；**`phase=ready` 即更新确认信号**。
+  - `rollback()`：把坏版本加入 `pinnedVersions`（壳门 0 读取后不再尝试）+ 清空账本（**防循环**）。
+- **新 API 域 `src/api/shell.js`** + `surface.js` 契约登记 4 条 + `/shell/` 前缀：`GET /shell/status`、`POST /shell/health`、`POST /shell/update-pending`、`POST /shell/rollback`（写操作走 `originAllowed` 同源校验）。**无** `/shell/update/check`——因为内核不是更新源。
+- **⛔ D6 硬约束以测试固化**：`test/shell-safety-net-test.js` 断言安全网**不 require dist、不调用 runNpmInstall、不写内核版本状态、不触碰内核状态目录**——内核既有四条更新路径零改动。
+- **物理隔离**：壳用 `~/.dsh/shell/`、内核用 `~/.dsh/supervisor/`（测试断言两者不同）。
+- **端到端闭环实测**（隔离 HOME 模拟）：无更新 → idle；安装完成告知 → 账本建立；以目标版本上报 ready → **confirmed**；坏版本（壳起不来，attempt=2）→ **should-rollback**；执行回退 → 坏版本拉黑 + 账本清空 → **回归 idle，不再反复判定**。
+- 新增 `test/shell-safety-net-test.js`（21 断言，覆盖账本/确认/回退/防循环/硬约束/域归属）；全量回归 **39 文件 768 passed / 0 failed**。
+- **待后续（已明确，未仓促实施）**：① 面板展示壳版本与更新状态（`/shell/status` 已就绪，UI 卡片待加）；② 内核**预取**（提前下载壳产物到 `~/.dsh/shell/cache/`，使门 0 从本机秒级完成）；③ 有界回退的**自动触发**（当前 `evaluate()` 已产出 `should-rollback` 判定，尚需接到心跳与通知）。
+### 桌面壳门 0 落地：三平台自更新行为一致（2026-09-11）
+- **依赖**：`tauri-plugin-updater` + `tauri-plugin-process`（`app.restart()`）。
+- **新模块 `src/update.rs`**（236 行）：
+  - `init_identity()`：启动最早写 `~/.dsh/shell/identity.json` + `shell.log`（**壳此前零日志**，任何「打不开」都无法诊断——这是结构性修复）。
+  - `install_kind()`：识别运行时安装形态（deb/rpm/appimage/msi/nsis/app）。
+  - `self_update_capable()`：形态受支持 **且**（Linux）有 pkexec/sudo 提权通道。
+  - **循环护栏**：`attempt` 计数 + `pendingVersion` + `pinned` 黑名单；以非 pending 版本启动即计失败，达 2 次拉黑该版本（防「更新成功但版本比对仍认为需更新」的无限重启）。
+  - `should_check()`：不可自更新/已拉黑/达阈值 → 跳过（**绝不阻断启动**）。
+- **四个命令**：`shell_identity` / `shell_update_check` / `shell_update_apply` / `shell_restart`（+ `shell_set_phase`）。
+  **三平台同一代码路径**：check → download → **minisign 验签（强制）** → 平台安装 → 重启；平台差异（Linux `pkexec dpkg -i` / macOS `.app` 替换 / Windows NSIS `passive`）**全部由插件内部处理，壳侧无平台分支**。
+- **引导页门 0**（`bootstrap.html`）：
+  - 步骤条新增「壳更新」并置于**最前**（壳更新 → 环境 → Node → 内核 → 守卫 → 面板）——新壳才可能带有新的 Node/内核安装要求。
+  - **失败选择页**（用户定案）：显示【重试更新】【继续使用当前版本】；**【继续】始终可用**（有界失败即放行的用户可见形式）。
+  - 离线/清单不可达/已拉黑 → **失败放行**，不阻断。
+  - `stepPanel()` 上报 `phase=ready` = **健康确认信号**（内核据此确认壳更新成功并清 journal）。
+  - 诊断信息扩充：壳版本/安装形态/自更新能力/attempt/pinned/门 0 结果。
+- **无头自检 `--shell-update-plan`**：输出壳更新基线并**实际写一次** identity.json + shell.log，供 CI 冒烟与人工诊断。
+- **端到端实测（deb 内二进制）**：`install_kind=deb`、`self_update_capable=true`、`should_check=true` → **门 0 会在真实安装形态下启用**（裸 `target/release` 二进制为 `unknown/false`，符合预期）；落盘 identity.json + shell.log 验证通过。
+- **构建验证**：`tauri build --bundles deb` 成功，产出 `deb` + `.deb.sig`（正式密钥签名）。
+- 全量回归：**38 文件 747 passed / 0 failed**（先前 8 处失败经单独复跑确认为环境残留，非代码回归）。
+### 桌面壳自更新签名密钥（minisign）正式生成 + 发布链路打通（2026-09-11）
+- **正式密钥已生成并保存**（用户要求用正式密钥，不用测试密钥）：`tauri signer generate` → 私钥 `~/.tauri/dsh-supervisor.key`（0600）、公钥 `~/.tauri/dsh-supervisor.key.pub`（644）。
+- **备份已完成并演练**：`~/.tauri/backup/`（0700）含时间戳副本 + `README.txt`；已比对 sha256 一致性并通过**恢复演练**（用备份解出后指纹一致）。指纹：私钥 `92e3ae43ed4dea58`、公钥 `d5ffd60103af390a`。
+- **防泄漏加固**：两个仓的 `.gitignore` 均加 `*.key` / `*.key.pub`；已核查「导出包/壳仓工作区/git 追踪项」**均无私钥**。
+- **三平台统一配置**（`tauri.conf.json`）：`createUpdaterArtifacts: true` + `plugins.updater.pubkey`(152 字符) + 双 CDN 静态清单端点（unpkg 主 / jsdelivr 备）+ Windows `installMode: passive`。
+- **关键设计修正**：Tauri 的 `{{target}}`(linux|windows|darwin) 与 `{{arch}}`(x86_64|aarch64) **与 npm 包命名不同**（linux|win|darwin、x64|arm64）——把变量直接拼进包名会产生不存在的包。故改用**静态清单**，让 URL 构造只发生在一处。
+- **两个发布工具（单源，内核 `shell-release/`，经 `export-shell.sh` 导出到壳仓）**：
+  - `assemble-shell-pkg.js`：把「安装包 + `.sig`」成对组装为 npm 包；**缺 `.sig` 即失败**（防静默发布不可更新产物）。
+  - `make-manifest.js`：汇总各平台条目 → Tauri 静态清单 `shell-manifest.json`（含平台键映射与签名）。
+- **已用真实产物端到端验证**：`tauri build --bundles deb` → `deb 3.8MB` + `.deb.sig 420B`（base64 minisign）→ 组装为 `@dsh-sup/shell-linux-x64` → 生成清单，`linux-x86_64` 正确映射到 `shell-linux-x64` 的 unpkg URL。
+- **⛔ 实测关键约束**：本密钥为 `rsign encrypted secret key` 格式，**不设 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 会签名失败**（`failed to decode secret key: incorrect updater private key password`）——CI 必须显式提供该 secret（空值也要设）。
+- **CI 补齐发布链**：新增 `version` job（版本单源）与 `publish` job（聚合各平台产物 → 生成并校验清单 → 发布 `@dsh-sup/shell-*` 与 `@dsh-sup/shell-release` 到 npm），仅 tag 触发。
+- **新增运维手册**：`release/runbooks/updater-signing-key.md`（密钥保管、CI 配置、备份验证、轮换代价；**不含私钥内容**）。
+- 全量回归：**38 文件 747 passed / 0 failed**。
+### 壳仓 CI 改造 + 本地端到端验证（2026-09-11）
+- **壳仓 CI 重写**（`src-tauri/launcher-build.yml`，经 `export-shell.sh` 同步到壳仓 `.github/workflows/build.yml`）：
+  - **触发改仅 tag + workflow_dispatch**（F5）——原 `push main` 会每次全平台构建，浪费额度。
+  - **矩阵改为 4 平台**：`ubuntu-22.04`(linux-x64, `deb,rpm`) / `windows-latest`(win-x64, `nsis,msi`) / `macos-latest`(darwin-arm64, `app,dmg`) / **`macos-15-intel`**(darwin-x64, `app,dmg`)。
+  - **Linux 基座固定 `ubuntu-22.04`**（glibc 2.35，F1 修复）+ **`glibc_max: 2.35` 门禁断言**。
+  - **废弃 AppImage**；Linux 安装 `rpm`（供 rpmbuild）；`tauri.conf.json` targets 改 `[deb,rpm,dmg,nsis,msi]`。
+  - **签名接入**：`TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` 环境变量 + `.sig` 收集；**未配密钥时不产 .sig 并 `::warning::`，不阻断构建**（开发/验证友好）。
+  - 产物收集与 Release 挂载同步更新（`.deb/.rpm/.dmg/.app.tar.gz/.exe/.msi/.sig`）。
+- **本地端到端验证（V2）**：`npx @tauri-apps/cli@2 build --bundles deb` **成功（2m37s）**：
+  - 产出 `dsh-supervisor_0.1.0_amd64.deb` **3.8MB**（与预估完全一致）。
+  - `Depends: libayatana-appindicator3-1, libwebkit2gtk-4.1-0, libgtk-3-0`。
+  - **自带 `.desktop` + 图标**（`usr/share/applications/dsh-supervisor.desktop`）→ 印证「标准包应自带桌面集成」。
+  - **证明 Tauri 容忍 config 中跨平台 targets**（Linux 上含 dmg/nsis/msi 不报错）。
+- **🎯 F1 修复机制的直接证明**（严格校验，链接成功且产物 507KB 真实存在）：
+  | 链接目标 | 最高 glibc 需求 | pidfd 符号 |
+  |---|---|---|
+  | 宿主 libc **2.39** | **GLIBC_2.39** ❌ | 2（被解析 → 硬性 verneed） |
+  | **sysroot libc 2.35** | **GLIBC_2.34** ✅ | 2（保持未解析 → 无 verneed） |
+  即：**链接目标降到 2.35，2.39 需求即消失** —— 与「在 ubuntu-22.04 基座构建」等效，修复方案得到本地直接证实。
+- **门禁落地到壳仓**：`ci/check-glibc.sh`（内核 `ci/` 单源 → `export-shell.sh` 导出到壳仓）；已用本地构建产物验证能正确拦截（2.39 > 2.35）。
+- **诚实记录一次自我纠错**：中途一次 sysroot 实验因 `libc.so.6` 路径取错导致链接失败，我的判定脚本误报「证明成功」（空二进制无输出被当成通过）；已修正路径并用「链接成功 + 产物存在性」严格前置校验后重测，得到上述真结论。
+### 构建链路验证：Rust 工具链就绪 + F1 缺陷根因定位（2026-09-11）
+- **Rust 工具链**：本机原无 toolchain（rustup 1.29.0 存在但无 default）。经 **rsproxy 镜像**安装 **rustc/cargo 1.98.1**（官方源实测仅 18KB/s，rsproxy 9MB/s；cargo 镜像配置已存在，未改动用户配置）。
+- **构建验证成功**：`.shell-work/src-tauri` 执行 `cargo build --release` **通过，耗时 3m52s**，产物 8.5MB ELF；系统依赖（libwebkit2gtk-4.1-dev / libgtk-3-dev / libayatana-appindicator3-dev / librsvg2-dev）齐全。
+- **⛔ F1 缺陷决定性确证**：下载 Ubuntu 22.04 的 `libc6 2.35` 并解包，用其 `ld.so` **真实加载**本机构建的产物 → `version GLIBC_2.39 not found` → **确认无法在 Ubuntu 22.04 运行**（非推测）。
+- **🎯 根因定位（最小复现，两行代码）**：`fn main(){}` 仅需 GLIBC_2.34；加入一次 `Command::new("/bin/true").status()` 即跳到 **GLIBC_2.39**（含 2 个 pidfd 弱符号）。根因链：**Rust 官方预编译 std 的 `process` 模块**含对 `pidfd_spawnp`/`pidfd_getpid`（glibc 2.39 新增）的**弱引用**；在 glibc 2.39 基座链接时被本机 `libc.so.6` 解析成功 → 记录**硬性 verneed**；在 2.35 基座上该符号不存在 → 弱引用未被解析 → **不产生版本需求** → 二进制通用于旧系统。排查中**排除**了 tokio（仅注释中提及）、libc crate 与本项目代码。
+- **修复方案确证充分**：CI 基座改 `ubuntu-22.04`（glibc 2.35）——根因是**链接期弱符号解析**，换基座即从根上消除，无需任何 hack。与 Chrome / VS Code 的「在最老受支持基座上构建」一致。
+- **新增防线（已落地并验证）**：`ci/check-glibc.sh`（断言产物最高 GLIBC 符号 ≤ 上限，并用真实产物验证能正确拦截）+ `test/glibc-gate-test.js`（7 断言，含平台守卫）；经 `export-shell.sh` **单源导出**到壳仓 `ci/`，避免两处漂移。
+- 全量回归：**38 文件 747 passed / 0 failed**。
+### 跨平台审计：修正「只按本机 Linux 想」的产品缺陷（用户批评驱动）
+- **缺口承认**：此前方案只按本机（Linux Mint 22.3 / Ubuntu 24.04 基座）考虑，把 Linux 当单一形态，且未展开 macOS/Windows 的构建、签名与自更新全链路。作为一个**公开发行的跨平台桌面产品**，这是缺陷。
+- **⛔ 实测确认的必修缺陷（F1）**：已安装 deb 声明 `Depends: libwebkit2gtk-4.1-0`，且二进制实测要求 **`GLIBC_2.39`**（因在本机 Ubuntu 24.04 基座构建；glibc 前向兼容）。后果：**当前公开 deb 只能装 Ubuntu 24.04+**，把最主流的 **Ubuntu 22.04 LTS（glibc 2.35）与 Debian 12（2.36）用户全部排除**。
+- **修复**：CI 基座改 **`ubuntu-22.04`**——已实测该基座提供 `libwebkit2gtk-4.1-0`（`2.50.4-0ubuntu0.22.04.1`，security/universe），覆盖扩至「Ubuntu 22.04+ / Debian 12+ / Fedora 36+」。
+- **新增门禁（已落地）**：`ci/check-glibc.sh`（断言产物最高 GLIBC 符号 ≤ 上限）+ `test/glibc-gate-test.js`（7 断言，含平台守卫，非 Linux 优雅跳过）。已用当前生产二进制验证：**正确报出 2.39 > 2.35 失败**，防该缺陷回归。
+- **GitHub runner 精确核实**：`ubuntu-22.04` / `ubuntu-22.04-arm` / `macos-latest`(arm64) / **`macos-15-intel`(x64，实测存在)** / `windows-latest` / `windows-11-arm`。据此**修正**「GitHub 已无 Intel macOS runner、darwin-x64 需交叉编译」的旧判断——**可原生构建**，避开交叉编译的签名风险。另注 `macos-14` 已弃用。
+- **额度事实**：壳仓为**公开仓（MIT）→ GitHub Actions 标准 runner 免费**，故跨平台矩阵不受额度约束（可按覆盖优先设计）；只有私有内核仓受额度限制（这也是内核 Linux 本地生产的由来）。
+- **三平台自更新链路明确**：Linux → Tauri `install_deb`（`pkexec dpkg -i`，需一次密码）；macOS → 替换 `~/Applications/*.app`（**必须签名+公证**，硬性）；Windows → NSIS per-user `passive` 静默（**建议代码签名**；WebView2 运行时依赖）。
+- **新增权威文档**：`CROSS-PLATFORM-BUILD-AND-UPDATE.md`（构建矩阵、各平台更新链路、发布流程、风险登记、待实测项）。
+- 新增风险 K15b（glibc 基座）、K16（webkit ABI）、K17（macOS 签名公证）、K18（Windows WebView2）。
+### 决策 D4：Linux 废弃 AppImage，采用标准 Linux 安装包
+- **决策（用户）**：Linux 废弃 AppImage，按**标准 Linux 包机制**（deb，可选 rpm）分发。
+- **与现状契合**：已取证 `dpkg -S /usr/bin/dsh-supervisor-gui` → `dsh-supervisor: /usr/bin/dsh-supervisor-gui`，**当前生产本就是 deb 安装**，D4 让分发与现状一致，无需用户迁移形态。
+- **净收益（实测支撑）**：体积 77MB → **3.8MB（20×）**；更新耗时约 45 秒 → **约 2 秒（20×）**。
+- **自更新仍成立**：Tauri 源码 `Some(Installer::Deb) => self.install_deb(bytes)`（实现为 `pkexec dpkg -i`），代价是**更新时一次密码确认**（标准系统包固有属性）。
+- **同步修正**：内核 `desktop/` 模板指向 `~/.local/bin`，与 deb 的 `/usr/bin` **不一致** → 以 deb 为准修正路径解析并保留用户级回退。
+- **新增权威文档**：`RELEASE-AND-UPDATE-MECHANISM.md` —— 发布与更新机制总纲（两条独立发布链、产物矩阵、端到端时序、与内核更新机制的边界、风险登记）。
+- 新增待实测 V1（Tauri 是否为 deb/rpm 生成 `.sig`；若无则自行 `tauri signer sign`）、V2（deb 缺依赖时的 `dpkg -i` 报错形态）；新增开放项 N2b（是否加 rpm）、N4（是否发布 apt/yum 仓库）。
+### 壳更新通道定案（实测驱动）：npm CDN，而非 GitHub Release
+- **实测结论**：GitHub Release 直连**不可用**——`objects.githubusercontent.com` 15s 完全超时；真实产物下载实测仅 **15–28 KB/s**（3.8MB deb 15.6s 只下 231KB）。77MB AppImage 需约 45 分钟，且 **Tauri 传输超时会先触发 → 更新永远失败**（不是「慢」而是「不成」）。
+- **对照**：npmmirror（内核在用）1.44 MB/s；**npm CDN（unpkg）大文件实测 1.71 MB/s**，与内核镜像同级。这一发现**恰好印证内核既有机制的正确性**——内核/DSH 早就因同样原因走 npm 镜像。
+- **源码级验证**：Tauri `ReleaseManifestPlatform { pub url: Url }` 为**通用 URL、无域名白名单**，且 `verify_signature` 独立于托管位置 → 换 CDN 不影响安全性；同时 `endpoints` 改公网 HTTPS 后**不再需要** `dangerousInsecureTransportProtocol`（去掉一个安全妥协）。
+- **定案**：壳产物发布为 npm 包 `@dsh-sup/shell-<os>-<arch>`，清单 `shell-manifest.json` 经 unpkg/jsdelivr 直链提供；**零新增基础设施**（复用已有 npm 发布流程与凭据）。
+- **重大修正**：先前判断「Linux 只有 AppImage 可自更新、deb 用户出局」**是错的**——Tauri `install_deb` 通过 `pkexec dpkg -i` **支持 deb 自更新**。而 **deb 仅 3.8MB，比 AppImage 小 20 倍**（更新耗时 45 秒 → 约 2 秒），代价是一次密码确认。新增决策项 N2。
+- 新增风险 K13（npm CDN 第三方可用性 → 多 CDN 回退 + 内核本地缓存兜底）、K14（deb 提权被拒 → 选择页重试/继续）。
+### 设计修正（用户确认驱动）：壳更新失败选择页 + 内核更新机制不可触碰
+- **定案 1（用户确认）**：壳更新失败**不静默放行**，改为显示选择页 **【重试】【继续使用当前版本】**；【继续】必须始终可用（有界失败放行的用户可见形式）；离线与 `installKind=deb` 不进选择页，直接放行 + 提示。
+- **定案 2（用户明确要求）**：**不得破坏内核既有更新机制**。已取证内核侧四条更新路径并全部保持原样：① 守卫自更新（**全更新强制语义**：latest > 当前即装，无跳过无降级 + 磁盘版本校验 + 重启后复核）；② 原生 DSH 更新（唯一 `_runInstall` + 自动回滚 + `installedVersion` 校验闭环）；③ 沙箱实例更新（带 `--prefix`，每实例独立）；④ manifest 通道（`selfUpdateManifestUrl` 默认 null，当前未启用）。
+- **发现并修正原方案缺陷**：原 P6.2「`core.rs` 按壳声明选择版本」会**用壳的策略推翻内核的全更新强制语义**（可能把已是最新的内核装上旧版）；原 P6.4「整对回退」会让**壳的故障污染内核版本**。已改为：壳只做兼容性检查、不兼容时**唯一允许动作是先升级壳**；回退时**只回退壳自身**；**禁止互相降级**。
+- **新增隔离保证**：壳用 `~/.dsh/shell/`、内核用 `~/.dsh/supervisor/`（物理隔离）；壳账本 `update-journal.json` 与内核 `_selfUpdateExpectedVersion` 不同命名空间；`pinnedVersions` **只针对壳版本**；P1 复用 `dist` 仅限**只读**能力（`fetchLatestVersion`），**不调用** `runNpmInstall`、不写内核版本状态。
+- **新增风险 K12**：壳侧逻辑越界扰动内核更新 → 以 P6 硬约束 + 隔离保证缓解。
+### 设计：桌面壳稳定与热更新执行方案（含一次架构修正）
+- **定案**：保留 Tauri 原生壳（桌面级产品形态）。产出 `SHELL-STABILITY-AUDIT.md`（故障模式审计）、`SHELL-NATIVE-STABILITY-DECISION.md`（架构决策）、`SHELL-EXECUTION-PLAN.md`（P0–P7 执行方案）。
+- **架构修正（用户质疑驱动）**：原设计把**内核**同时当作「更新权威 + 产物提供方」，却又要求壳**在内核之前**完成自更新——**自相矛盾**：冷启动/内核未安装/内核损坏时内核不在，壳拿不到更新，只能「下次启动生效」，恰在最需要它的时刻失效。
+- **修正**：拆开两个角色——**壳直连公网发布通道自更新**（冷启动即可用；壳本就直连 nodejs.org/npm 镜像，具备 HTTPS 能力）；**内核只做安全网**（预取/备份/观察/有界回退/审计），不再提供 `/shell/update/*` 端点。
+- **净收益**：① 冷启动自洽（满足「启动即更新壳」）；② **不再需要** `dangerousInsecureTransportProtocol`（端点改公网 HTTPS，天然满足 Tauri 的 TLS 强制）；③ 壳与内核之间不再有「更新协议」需同步演进。
+- **引导顺序**（按用户诉求并精化）：只读环境探针 → **门 0 壳自更新** → 门 1 Node → 门 2 内核 → 门 3 守卫/面板。壳更新排在 Node 之前，因为新壳可能带有不同的 Node 要求，且每个写动作都应由最新版本的壳执行。
+- **新增关键约束（已核实）**：Tauri updater 为**原地安装，不保留旧版本** → **更新前必须备份当前产物**，否则新版本坏掉时磁盘上无退路（风险 K11）。另：Tauri 多端点回退**仅对非 2XX 生效**，网络超时不会回退 → 「离线即放行」必须由壳自己控制。
+### 发布认证标准化（2026-09-10）：单一解析器 + 规范位置
+- **真实故障**：npm token 曾散落在某个 DSH 沙箱实例的 home 下（`instances/<id>/data/.npmrc`），只有在那一个沙箱里发布才成功；换沙箱即 `ENEEDAUTH`。根因是认证解析依赖 `$HOME`，而 DSH 沙箱会把 `$HOME` 指向实例数据目录。
+- **单源实现**：新增 `release/scripts/_npm-auth.sh`，`publish-core.sh`（读）与 `configure-credentials.sh`（写/自检）共用同一份解析；解析顺序 `DSH_NPMRC` → `NPM_CONFIG_USERCONFIG` → `NPM_TOKEN`(临时 userconfig) → **真实 home/.npmrc** → `$HOME/.npmrc`。
+- **规范位置**：真实用户 home 下的 `~/.npmrc`（0600）。用 `getent passwd`/`dscl`/`~user` 展开定位，**不受 `$HOME` 覆盖影响**——任何沙箱、任何 shell 下发布行为一致。
+- **自检同源**：`configure-credentials.sh --check` 改用与发布完全相同的解析器判定，消除「自检说没配、发布却成功」的错位。
+- **临时 userconfig 语义修正**：`cleanup` 现在精确**恢复**调用前的 `NPM_CONFIG_USERCONFIG`（原实现只删临时文件，会留下指向已删文件的悬空值）。
+- **真发布缺认证时快速失败**：`publish-core.sh --publish` 无任何认证时立即退出并给出三条配置指引（dry-run 不校验认证）。
+### 发布链路：Linux 改本地生产（GitHub 额度优化，2026-09-10 定案）
+- **平台分工调整**：`linux-x64` 子包改由**本地 Linux 机器**生产（`npm run release:core:publish`：完整门禁 → commit+tag+push → 本地直推 npm），不再消耗 GitHub Actions 额度；`win-x64` / `darwin-arm64` / `darwin-x64` 仍由 CI 矩阵生产。
+- **CI 矩阵去 ubuntu**：`.github/workflows/build.yml` 仅保留 mac/win 三平台；原常驻 `ubuntu-latest` 的 `ui-verify` 作业移入本地 `release-core.sh`（每次发布必跑，不漏跑）。Linux launcher 构建物不再挂 GitHub Release（npm 即其分发通道）。
+- **真发布平台闸**：`release-core.sh --publish` 在非 Linux 平台直接拒绝（exit 2）并提示走 tag 触发 CI——防止与 CI 形成同平台二次发布（npm 同版本不可重发）。
+- **发布顺序可回退**：改为「先 tag+push（标签可删；CI 需时间）→ 再本地发 linux 子包」，避免旧的「先发 npm 后 push」一旦 push 失败即「已发布但无 tag」的不可补救状态。
+- **认证不再污染开发机**（安全修复）：原 `ci-core.sh` 执行 `npm config set registry` + `npm config set //registry.npmjs.org/:_authToken`——前者把开发机默认 registry 永久改成官方源（用户平时用镜像源），后者把 token **明文写入 `~/.npmrc`**。现认证单源收敛到 `publish-core.sh`：有 `NPM_TOKEN` 则写入**临时 userconfig**（`NPM_CONFIG_USERCONFIG`，退出即删），否则沿用既有登录态；发布脚本不再改动全局 npm 配置。
+
+### 修复：实例管理 / 原生 DSH「检测到新版本却始终升级失败」
+- **实例升级根因 R1（主因）**：`startInstance()` 的并发守卫 `tasks.isBusy('instance', id)` 会**挡住升级作业自身**——升级走到「装完 → 重启并验证」时调用 `startInstance(id)` 返回 `{ok:true}` 却**从未拉起 systemd 单元**，于是等端口 40s 判「升级后实例未能启动」→ 回滚 → 回滚同样被挡 → 最终「升级失败」。修复：新增 `fromUpgrade` 直通，升级与回滚两处显式传入（非升级路径的并发互斥语义不变）。
+- **实例升级根因 R2**：`waitPortHealthy()` 在「剩余时间 < stabilityMs」时**直接 break 判失败**——端口其实已健康（只是探测来得晚），慢启动实例被误判并触发不必要回滚。修复：改用剩余预算做缩短稳定期复检；实例升级验证窗口 40s → 120s（与原生 `verifyDeadlineMs` 同量级）。
+- **误导性错误文案**：删去「可能是新版 DSH 与已装插件不兼容」的归因（真实原因是单元从未启动）。
+
+### 修复：远程控制 · 公网访问（FRP）「配了 frps 却始终不运行」
+- **根因 RC1**：UI 的「保存并应用」**从不提交 `enabled`**（后端 `syncFromInstances` 要求 `settings.enabled === true`）→ 恒为默认 false。
+- **根因 RC2**：**无实例级「公网暴露」UI 入口**——后端 `/lan/frp/expose` 全仓零消费者 → `[[proxies]]` 数恒为 0。
+- **根因 RC3**：**无访问令牌 UI 入口**，而公网暴露有安全闸（无令牌拒绝暴露）。
+- **根因 RC4**：后端 `list()` 不下发 `frpEnabled/frpRemotePort`，`listLan` 白名单会剥离字段 → UI 无法回读状态。
+- **健壮性**：`frpc` 默认 `loginFailExit=true` → 连不上 frps 即退出且**不重试**（隧道永久失效）；显式写 `loginFailExit = false`（frp 原生自愈）+ 新增非预期退出的**有界退避自动重拉**（2s→60s，最多 5 次，稳定 60s 后重置）。
+- **安全**：`frpc.toml` 含 auth.token 明文但实测权限为 `664`（同机他用户可读）→ 构造时经平台层 `fileProtect` 加固为 `0600`（Unix chmod / Windows icacls）。
+- UI 新增：公网访问**总闸开关**、每实例**公网暴露**（远端端口 + 开关）、**访问令牌设置**（含 `tokenSet` 状态提示）。
+
 ## [0.1.2-BETA.7]（2026-09-09）
 
 ### 双仓拆分定稿（2026-09-09）：壳/核彻底分离，发布永不错位
