@@ -48,13 +48,33 @@ dsh_npmrc_has_token() {
 # 规范 npmrc 路径（真实 home 下）。
 dsh_canonical_npmrc() { printf "%s\n" "$(dsh_real_home)/.npmrc"; }
 
-# 记录调用前的 NPM_CONFIG_USERCONFIG（供 cleanup 精确恢复，避免留下悬空/污染值）。
+# ⚠ 必须同时管理**大小写两种**变量（2026-09-11 实测修复）：
+#   npm 把环境变量按 `npm_config_*`（不分大小写）映射为配置项，二者都落到 `userconfig`，
+#   而**小写 npm_config_userconfig 会胜出**。
+#   致命场景：CI 里 `npm run publish:core` 由 npm 自身注入 `npm_config_userconfig=$HOME/.npmrc`；
+#   我们的 `export NPM_CONFIG_USERCONFIG=<临时文件>` 因此被忽略 → npm 去读 runner 的 ~/.npmrc
+#   （无 token）→ **ENEEDAUTH**。本地因 `~/.npmrc` 恰好有 token 而完全掩盖此缺陷。
+#   实测（同一台机）：仅大写 → npm whoami 成功；再叠加小写指向无 token 文件 → need auth。
+#   故：写入时两种都设，恢复时两种都还原。
+
+# 记录调用前的 userconfig（大写 + 小写），供 cleanup 精确恢复，避免留下悬空/污染值。
 dsh_npm_auth__snapshot() {
   if [ -n "${NPM_CONFIG_USERCONFIG:-}" ]; then
     DSH_NPM_AUTH_PREV_SET=1; DSH_NPM_AUTH_PREV="${NPM_CONFIG_USERCONFIG}"
   else
     DSH_NPM_AUTH_PREV_SET=0; DSH_NPM_AUTH_PREV=""
   fi
+  if [ -n "${npm_config_userconfig:-}" ]; then
+    DSH_NPM_AUTH_PREVL_SET=1; DSH_NPM_AUTH_PREVL="${npm_config_userconfig}"
+  else
+    DSH_NPM_AUTH_PREVL_SET=0; DSH_NPM_AUTH_PREVL=""
+  fi
+}
+
+# 应用 userconfig：大小写同时设置（见上方说明，否则小写会覆盖大写）。
+dsh_npm_auth__apply() {
+  export NPM_CONFIG_USERCONFIG="$1"
+  export npm_config_userconfig="$1"
 }
 
 # 建立发布认证环境：成功则 export NPM_CONFIG_USERCONFIG 并返回 0，失败返回 1。
@@ -64,12 +84,14 @@ dsh_npm_auth_setup() {
   # 1) 显式 npmrc
   if [ -n "${DSH_NPMRC:-}" ]; then
     if dsh_npmrc_has_token "$DSH_NPMRC"; then
-      export NPM_CONFIG_USERCONFIG="$DSH_NPMRC"; DSH_NPM_AUTH_SOURCE="DSH_NPMRC"; return 0
+      dsh_npm_auth__apply "$DSH_NPMRC"; DSH_NPM_AUTH_SOURCE="DSH_NPMRC"; return 0
     fi
     echo "  警告：DSH_NPMRC=$DSH_NPMRC 不含 token" >&2
   fi
   # 2) npm 原生标准（已设置则尊重；未设时不主动读取进程内可能残留的同名变量）
   if [ -n "${NPM_CONFIG_USERCONFIG:-}" ] && dsh_npmrc_has_token "$NPM_CONFIG_USERCONFIG"; then
+    # 已由外部正确指定：仍要同步小写，避免 `npm run` 注入的小写值把它顶掉。
+    dsh_npm_auth__apply "$NPM_CONFIG_USERCONFIG"
     DSH_NPM_AUTH_SOURCE="NPM_CONFIG_USERCONFIG"; return 0
   fi
   # 3) 环境变量 token → 临时 userconfig（不落盘）
@@ -78,7 +100,7 @@ dsh_npm_auth_setup() {
     local tmp; tmp="$(mktemp)" || return 1
     chmod 600 "$tmp"
     printf "//registry.npmjs.org/:_authToken=%s\n" "$tok" > "$tmp"
-    export NPM_CONFIG_USERCONFIG="$tmp"
+    dsh_npm_auth__apply "$tmp"
     DSH_NPM_AUTH_TMP="$tmp"
     DSH_NPM_AUTH_SOURCE="NPM_TOKEN(临时 userconfig)"
     return 0
@@ -86,11 +108,11 @@ dsh_npm_auth_setup() {
   # 4) 规范位置（真实 home）
   local canon; canon="$(dsh_canonical_npmrc)"
   if dsh_npmrc_has_token "$canon"; then
-    export NPM_CONFIG_USERCONFIG="$canon"; DSH_NPM_AUTH_SOURCE="真实 home ($canon)"; return 0
+    dsh_npm_auth__apply "$canon"; DSH_NPM_AUTH_SOURCE="真实 home ($canon)"; return 0
   fi
   # 5) 兜底：$HOME（沙箱内旧副本）
   if [ "$HOME" != "$(dsh_real_home)" ] && dsh_npmrc_has_token "$HOME/.npmrc"; then
-    export NPM_CONFIG_USERCONFIG="$HOME/.npmrc"; DSH_NPM_AUTH_SOURCE="沙箱 \$HOME ($HOME/.npmrc)"; return 0
+    dsh_npm_auth__apply "$HOME/.npmrc"; DSH_NPM_AUTH_SOURCE="沙箱 \$HOME ($HOME/.npmrc)"; return 0
   fi
   DSH_NPM_AUTH_SOURCE=""
   return 1
@@ -105,6 +127,12 @@ dsh_npm_auth_cleanup() {
     export NPM_CONFIG_USERCONFIG="${DSH_NPM_AUTH_PREV:-}"
   else
     unset NPM_CONFIG_USERCONFIG 2>/dev/null || true
+  fi
+  # 小写同理（否则会留下指向已删临时文件的悬空值，同进程后续 npm 调用会莫名失败）
+  if [ "${DSH_NPM_AUTH_PREVL_SET:-0}" = 1 ]; then
+    export npm_config_userconfig="${DSH_NPM_AUTH_PREVL:-}"
+  else
+    unset npm_config_userconfig 2>/dev/null || true
   fi
 }
 

@@ -55,6 +55,10 @@ console.log('== R3 NPM_TOKEN 临时 userconfig ==');
   const lib = path.join(S, '_npm-auth.sh');
   const script = [
     'source "' + lib + '"',
+    // 记录调用前的**小写**值：经 `npm test`/`npm run` 运行时，npm 自身会注入
+    // npm_config_userconfig=$HOME/.npmrc —— 这正是 CI 里顶掉我们大写变量的元凶。
+    // 故断言应是「cleanup 还原到调用前的值」，而非固定为 unset。
+    'echo "PRE_LOWER=${npm_config_userconfig:-unset}"',
     'unset NPM_CONFIG_USERCONFIG',
     'NPM_TOKEN=secret-xyz dsh_npm_auth_setup >/dev/null',
     'echo "SRC=$(dsh_npm_auth_describe)"',
@@ -63,9 +67,16 @@ console.log('== R3 NPM_TOKEN 临时 userconfig ==');
     //   旧写法只有 GNU 版，导致该断言在 macOS CI 上恒为空 → 失败（实测 CI #16）。
     'echo "PERM=$(stat -c %a "$DSH_NPM_AUTH_TMP" 2>/dev/null || stat -f %Lp "$DSH_NPM_AUTH_TMP" 2>/dev/null)"',
     'echo "HAS=$(grep -c secret-xyz "$DSH_NPM_AUTH_TMP")"',
+    // ⚠ 大小写必须同时设置：npm 把两者都映射为 userconfig，**小写优先**。
+    //   CI 中 `npm run` 会注入 npm_config_userconfig=$HOME/.npmrc，若我们只设大写就会被它顶掉
+    //   → npm 去读无 token 的文件 → **ENEEDAUTH**（mac/win 发布长期失败的真正根因）。
+    //   注意：以下三项必须在 cleanup **之前**采样。
+    'echo "LOWER=${npm_config_userconfig:-unset}"',
+    'echo "BOTH_SAME=$([ "${NPM_CONFIG_USERCONFIG:-x}" = "${npm_config_userconfig:-y}" ] && echo yes || echo no)"',
     'dsh_npm_auth_cleanup',
     'echo "GONE=$([ -f "$DSH_NPM_AUTH_TMP" ] && echo no || echo yes)"',
     'echo "ENVRESTORED=${NPM_CONFIG_USERCONFIG:-unset}"',
+    'echo "LOWER_AFTER=${npm_config_userconfig:-unset}"',
   ].join(String.fromCharCode(10));
   const out = runBash(script);
   check('R3-a 命中 NPM_TOKEN 路径', /SRC=NPM_TOKEN/.test(out), (out.match(/^SRC=(.*)$/m) || [])[1]);
@@ -73,6 +84,14 @@ console.log('== R3 NPM_TOKEN 临时 userconfig ==');
   check('R3-c token 已写入临时文件', /HAS=1/.test(out), (out.match(/^HAS=(.*)$/m) || [])[1]);
   check('R3-d cleanup 删除临时文件', /GONE=yes/.test(out), (out.match(/^GONE=(.*)$/m) || [])[1]);
   check('R3-e cleanup 精确恢复 env', /ENVRESTORED=unset/.test(out), (out.match(/^ENVRESTORED=(.*)$/m) || [])[1]);
+  check('R3-f 小写 npm_config_userconfig 也已设置（防被 npm run 顶掉）', /^LOWER=\/tmp|^LOWER=\/var\/folders|^LOWER=\/private\/var/m.test(out) || /^LOWER=(?!unset).+$/m.test(out), (out.match(/^LOWER=(.*)$/m) || [])[1]);
+  check('R3-g 大小写指向同一文件', /BOTH_SAME=yes/.test(out), (out.match(/^BOTH_SAME=(.*)$/m) || [])[1]);
+  // 还原语义：cleanup 后小写必须等于调用前的值（而不是残留我们设的临时文件）。
+  const preLower = (out.match(/^PRE_LOWER=(.*)$/m) || [])[1];
+  const afterLower = (out.match(/^LOWER_AFTER=(.*)$/m) || [])[1];
+  check('R3-h cleanup 后小写还原为调用前的值（不残留临时文件）',
+    preLower !== undefined && afterLower !== undefined && preLower === afterLower,
+    'pre=' + preLower + ' after=' + afterLower);
 }
 
 // ── R4 规范位置命中 ──
