@@ -1,0 +1,15 @@
+name: quota-probe
+# 一次性探针：验证新账号 Actions 能否分配 runner（成本约 1 分钟 Linux 额度）。
+# 验证后立即删除，不留在仓库。
+on:
+  workflow_dispatch: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 探针
+        run: |
+          echo "runner-allocated OK"
+          echo "os=$RUNNER_OS arch=$RUNNER_ARCH"
+          node --version || true
+          git --version
