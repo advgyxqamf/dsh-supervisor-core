@@ -26,17 +26,25 @@ function guiFile() {
 /** 当前自启状态。 */
 function status() {
   if (isWindows) {
-    // 自启 = ONLOGON(GUI) + Watchdog(崩溃自拉) 双任务任一存在即视为已配置
-    let on = false, watchdog = false;
-    try {
-      const out = execFileSync('schtasks', ['/Query', '/TN', 'DSH-Supervisor'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-      on = out.includes('DSH-Supervisor');
-    } catch {}
-    try {
-      const w = execFileSync('schtasks', ['/Query', '/TN', 'DSH-Supervisor-Watchdog'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-      watchdog = w.includes('Watchdog');
-    } catch {}
-    return { kind: 'schtasks', on: on || watchdog, gui: on, watchdog };
+    // 三个任务的**职责分离**（2026-09-11 架构修正）：
+    //   DSH-Supervisor          -> 守卫守护进程（**由桌面壳建立**；壳的 schtasks /Run 指向它）
+    //   DSH-Supervisor-GUI      -> 登录时打开桌面壳（本文件的 autostart 开关管理）
+    //   DSH-Supervisor-Watchdog -> 每 5 分钟保活（崩溃自拉）
+    //
+    // ⚠ 旧实现把 DSH-Supervisor 指向 **GUI 壳**，而壳的 start_guard_service() 执行
+    //   `schtasks /Run /TN DSH-Supervisor` —— 于是「启动守卫」实际只是再开一次壳
+    //   （被单实例插件折回焦点），**守卫永远不会被启动**。现已改名分离，彻底消除该错位。
+    let guard = false, gui = false, watchdog = false;
+    const has = (tn) => {
+      try {
+        const out = execFileSync('schtasks', ['/Query', '/TN', tn], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+        return out.includes(tn);
+      } catch { return false; }
+    };
+    guard = has('DSH-Supervisor');
+    gui = has('DSH-Supervisor-GUI');
+    watchdog = has('DSH-Supervisor-Watchdog');
+    return { kind: 'schtasks', on: guard || gui || watchdog, gui, watchdog, guard };
   }
   if (isMac) {
     const on = fs.existsSync(laFile('com.dsh.supervisor'));
@@ -78,13 +86,17 @@ function setAutostart(on) {
         ].join(String.fromCharCode(13, 10));
         fs.mkdirSync(path.dirname(watchdogPs1), { recursive: true });
         const atmp = watchdogPs1 + '.tmp'; fs.writeFileSync(atmp, ps); fs.renameSync(atmp, watchdogPs1); // 原子写
-        // (a) 登录启动 GUI（守卫由 GUI 引导拉起）
-        try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']); } catch (e) { errors.push('schtasks logon: ' + e.message); }
+        // (a) 登录启动 GUI（任务名与「守卫服务」分离，避免覆盖壳建立的守卫任务）
+        try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor-GUI', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']); } catch (e) { errors.push('schtasks gui: ' + e.message); }
+        // (c) 守卫任务（DSH-Supervisor）由**桌面壳**建立；这里只负责「开机自启」语义的启用
+        try { execFileSync('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/ENABLE']); } catch {}
         // (b) 每 5 分钟 watchdog 保活（崩溃自动拉起）
         try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor-Watchdog', '/SC', 'MINUTE', '/MO', '5', '/RL', 'HIGHEST', '/F', '/TR', 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + watchdogPs1 + '"']); } catch (e) { errors.push('schtasks watchdog: ' + e.message); }
       } else {
         try { execFileSync('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-Watchdog', '/F']); } catch {}
-        try { execFileSync('schtasks', ['/Delete', '/TN', 'DSH-Supervisor', '/F']); } catch {}
+        try { execFileSync('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-GUI', '/F']); } catch {}
+        // 守卫任务不删除（它是**服务定义**，删了壳的 /Run 会再次失败）；只停用开机自启。
+        try { execFileSync('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/DISABLE']); } catch {}
         try { fs.unlinkSync(watchdogPs1); } catch {}
       }
     } catch (e) { errors.push('watchdog setup: ' + e.message); }

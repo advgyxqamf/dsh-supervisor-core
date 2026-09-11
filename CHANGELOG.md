@@ -6,6 +6,34 @@
 
 ## [未发布]
 
+### 修复：桌面壳与内核的完整流程审计 —— 守卫服务注册断裂（架构级）
+
+用户要求「把整个桌面壳调查清楚，从检测环境到自动下载运行环境、桌面壳自更新、
+内核拉取更新，这些流程是不是都是通的」。逐环节审计后确认：**原设计在首次安装场景下必然断裂**。
+
+**核心发现**：壳只**启动**服务、从不**建立**服务定义；而内核的 `install` 子命令
+（唯一会写 systemd unit / LaunchAgent / schtasks 的入口）**不会被任何环节自动调用**，
+且 npm 发行包**不含**模板文件。于是全新机器上：守卫服务不存在 → 壳 start 失败 →
+引导卡在「守卫就绪」。
+
+**实测证据**：
+- 已发布 npm 包内 `systemd/`、`desktop/` 目录均为 0 个文件，无 postinstall；
+- 干净 HOME 下实跑 `dsh-supervisor install`：打印「跳过系统服务部署」后返回，服务目录为空；
+- 壳仓全部历史中写服务定义的提交数为 **0**（不是回归，是从未通过）。
+
+**本仓（内核）侧改动**：
+- `src/platform/os/autostart.js`：Windows 任务名**职责分离** ——
+  `DSH-Supervisor` 改由壳建立并指向**守卫守护进程**（原先指向 GUI 壳，导致壳的
+  `schtasks /Run` 只会再开一次壳、守卫永远起不来）；GUI 自启改用 `DSH-Supervisor-GUI`。
+  关闭 autostart 时改为 `/DISABLE` 守卫任务而非删除（它是服务定义）。
+- `bin/dsh-supervisor`：**包根解析 off-by-one** —— 发行态（esbuild bundle）下 `__dirname`
+  是包根而非 `bin/`，旧实现 `path.join(__dirname, "..")` 指向包外，导致模板路径错位、
+  `BIN_PATH` 指向不存在的文件。改为逐级向上找 `package.json` 定位包根，两种形态均正确。
+
+**壳仓侧改动**（详见壳仓 CHANGELOG）：新增 `service.rs` 自持三平台服务定义 + spawn 兜底；
+macOS Node 安装改用 `.pkg`（原 `.tar.gz` 与 `installer -pkg` 格式不匹配必然失败）；
+下载超时 60 秒 → 15 分钟（安装包 30-90 MB）；前端开始消费 Node 最低门槛；
+内核 `--version` 探测加超时；Windows `.cmd` 垫片的 `--prefix` 推导修复。
 ### 双仓隔离：壳资产全部移出内核仓（用户 2026-09-11 指出严重违规）
 
 **问题**：内核仓持有大量本应属于壳仓的资产，违反「壳与内核是两个仓」的既定架构。

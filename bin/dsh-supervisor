@@ -7,7 +7,24 @@ const os = require('node:os');
 const http = require('node:http');
 const { execFileSync } = require('node:child_process');
 
-const ROOT = path.join(__dirname, '..');
+// 包根解析（2026-09-11 修复 off-by-one）：
+//   本文件有两种运行形态，__dirname 语义不同：
+//     源码态：node <repo>/bin/dsh-supervisor            -> __dirname = <repo>/bin
+//     发行态：esbuild 打成 core.cjs 后 require 执行      -> __dirname = <pkg>（core.cjs 旁）
+//   旧实现硬写 path.join(__dirname, '..')：源码态正确，发行态却指向**包外**，
+//   导致 systemd 模板/desktop 模板路径错位、BIN_PATH 指向不存在的文件。
+//   现从 __dirname 逐级向上找含 package.json 的目录作为包根，两种形态均正确。
+function findPackageRoot(start) {
+  let d = start;
+  for (let i = 0; i < 6; i += 1) {
+    try { if (fs.existsSync(path.join(d, 'package.json'))) return d; } catch {}
+    const up = path.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return path.join(__dirname, '..');
+}
+const ROOT = findPackageRoot(__dirname);
 const SUPERVISOR_DIR = path.join(os.homedir(), '.dsh', 'supervisor');
 const USER_CONFIG = path.join(SUPERVISOR_DIR, 'config.json');
 
@@ -319,12 +336,12 @@ function cmdInstall() {
   try { fs.unlinkSync(BIN_PATH); } catch {}
   if (IS_WINDOWS) {
     // .cmd 垫片：用当前 Node 直接执行包内脚本（无需 symlink 特权，跨 Windows 版本可用）
-    const target = path.join(__dirname, 'dsh-supervisor');
+    const target = path.join(ROOT, 'bin', 'dsh-supervisor');
     const shim = '@echo off\r\n"' + process.execPath + '" "' + target + '" %*\r\n';
     fs.writeFileSync(BIN_PATH, shim);
     console.log('[install] 命令行垫片: ' + BIN_PATH + ' → ' + target);
   } else {
-    fs.symlinkSync(path.join(__dirname, 'dsh-supervisor'), BIN_PATH);
+    fs.symlinkSync(path.join(ROOT, 'bin', 'dsh-supervisor'), BIN_PATH);
     console.log('[install] 命令行链接: ' + BIN_PATH + ' → ' + __dirname + '/dsh-supervisor');
   }
   // systemd unit（2026-09-05 修复：npm 平台子包只含 bin/ 无 systemd/desktop 模板 → 降级跳过部署而非 exit 1）
