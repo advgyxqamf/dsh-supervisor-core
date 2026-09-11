@@ -8,6 +8,62 @@
 
 （下一版本待记）
 
+### 修复：全平台发布的时序竞态 —— 本地发布与 CI 同时 PUT 同一包（409 Conflict）
+
+#### 问题（本次发布实测撞到）
+
+`v0.1.5-BETA.1` 发布时，`win-x64` 报错：
+
+```
+npm error 409 Conflict - PUT https://registry.npmjs.org/@dsh-sup%2fdsh-core-win-x64
+npm error Cannot publish over previously staged version "0.1.5-BETA.1"
+```
+
+**根因是 `release-core.sh` 的时序**：旧实现「**先 tag+push，再本地发布**」。
+tag 一推，CI 的 build 矩阵立即启动；而 CI 在「tag 触发 + 有 `NPM_TOKEN`」时会执行
+`ci-core.sh --publish` —— 即 **CI 会真发布自己平台的子包**。
+于是本地与 CI 同时 PUT 同一个包 → 409。
+
+实测发生顺序（时间戳为证）：
+
+| 平台 | 发布者 | 时间（UTC） |
+|---|---|---|
+| darwin-arm64 | **CI** | 08:53:58 |
+| darwin-x64 | **CI** | 08:55:41 |
+| linux-x64 | 本地 | 08:57:34 |
+| win-x64 | **CI** | 08:58:51（本地于此之前 PUT 撞车） |
+
+darwin 两个平台因**幂等跳过**（本地发现已存在 → 视为成功）才没报错；
+win-x64 恰好同时到达，才暴露了竞态。**这不是偶发，是设计缺陷**。
+
+#### 修复：改为「先发布、后 tag」
+
+```
+旧：[3/5] 构建 → [4/5] tag+push → [5/5] 本地发布   ← CI 与本地竞态
+新：[3/5] 构建 → [4/5] 本地发布 → [5/5] tag+push   ← 无竞态
+```
+
+改后两种模式都正确：
+- **全平台模式**：tag 前 4 平台已全部发布 → CI 的 `precheck` 判定「已全发布」→
+  **跳过整个 mac/win 矩阵**（既省额度、又彻底无竞态）；
+- **单平台模式**：本地只发 linux → CI `precheck` 判定需补 → 矩阵发 mac/win
+  （平台不同，天然无竞态）。
+
+代价：若 push 失败会短暂处于「已发布但无 tag」。该状态**可恢复**（版本已在 npm，
+tag 可随后单独补推 `git push origin v$VER`）。相比 409 导致的**发布不完整**，此代价更小。
+
+#### 附带确认（同一批次）
+
+`v0.1.5-BETA.1` 的 CI **在真实 Windows runner 上全绿**，含此前失败的 `build (windows-latest)` ——
+即 CRLF 修复（见上一条）已获真机验证。四平台最终状态：
+
+```
+linux-x64      ✅ beta=0.1.5-BETA.1
+darwin-arm64   ✅ beta=0.1.5-BETA.1
+darwin-x64     ✅ beta=0.1.5-BETA.1
+win-x64        ✅ beta=0.1.5-BETA.1
+```
+
 ## [0.1.5-BETA.1]（2026-09-11）
 
 ### 清理：内核仓彻底剥离壳残留 + 本地工作区清理（用户要求）

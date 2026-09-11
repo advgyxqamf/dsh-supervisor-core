@@ -84,9 +84,36 @@ else
 fi
 
 if [ "$PUBLISH" = 1 ]; then
-  # 时序（可回退优先）：先 tag+push（标签可删），再本地发子包。
-  # 若反过来（先发 npm 后 push），一旦 push 失败即「已发布但无 tag」——同版本不可重发，无法补救。
-  echo "=== [4/5] 提交 + 打 tag + 推送 ==="
+  # ── 时序（2026-09-11 修正：**先发布、后 tag**）──
+  #
+  # ⚠ 旧实现是「先 tag+push 再本地发布」，这与 CI **正面竞态**：
+  #   tag 一推，CI 的 build 矩阵立刻启动；其步骤在「tag 触发 + 有 NPM_TOKEN」时执行
+  #   `ci-core.sh --publish`，即 CI 会**真发布**自己平台的子包 ——
+  #   于是本地与 CI 同时 PUT 同一个包，npm 返回：
+  #     `409 Conflict - Cannot publish over previously staged version`
+  #   实测已发生：v0.1.5-BETA.1 的 win-x64 因此撞车（darwin 两个平台则被 CI 抢先，
+  #   本地靠幂等跳过才没报错）。
+  #
+  # 改为「先本地发布 → 再 tag+push」后，两种模式都正确：
+  #   · 全平台模式：tag 前 4 平台已全部发布 → CI 的 precheck 判定「已全发布」→
+  #     **跳过整个 mac/win 矩阵**（既省额度、又彻底无竞态）；
+  #   · 单平台模式：本地只发 linux → CI precheck 判定需补 → 矩阵发 mac/win
+  #     （平台不同，天然无竞态）。
+  #
+  # 代价：若 push 失败会短暂处于「已发布但无 tag」。该状态**可恢复** ——
+  #   版本已在 npm，tag 可在修复 push 后单独补推（`git push origin v$VER`）。
+  #   相比 409 竞态导致的**发布不完整**，此代价明显更小。
+  if [ "$ALL_PLATFORMS" = 1 ]; then
+    echo "=== [4/5] 全平台本地发布（4 个平台，官方 registry） ==="
+    echo "  ⚠ 必须在 tag 之前完成：这样 CI 的 precheck 会判定「已全发布」并跳过矩阵，避免竞态。"
+    echo "  ⚠ 幂等：已存在的平台会自动跳过并核对体积，可安全重跑。"
+    npm run publish:core -- --publish --all-platforms
+  else
+    echo "=== [4/5] 本地发布 $HOST_OS-$HOST_ARCH 子包（官方 registry） ==="
+    npm run publish:core -- --publish
+  fi
+
+  echo "=== [5/5] 提交 + 打 tag + 推送 ==="
   if [ -n "$(git status --porcelain)" ]; then
     git add -A && git commit -m "release: v$VER"
   else
@@ -105,16 +132,6 @@ if [ "$PUBLISH" = 1 ]; then
     echo "     CI 将构建其余平台并发布子包。"
   fi
 
-  if [ "$ALL_PLATFORMS" = 1 ]; then
-    echo "=== [5/5] 全平台本地发布（4 个平台，官方 registry） ==="
-    echo "  ⚠ 幂等：已存在的平台会自动跳过并核对体积，可安全重跑。"
-    npm run publish:core -- --publish --all-platforms
-  else
-    echo "=== [5/5] 本地发布 $HOST_OS-$HOST_ARCH 子包（官方 registry） ==="
-    echo "  ⚠ 若此处失败：tag 已推送；本步可单独重跑："
-    echo "     npm run publish:core -- --publish"
-    npm run publish:core -- --publish
-  fi
 else
   echo "=== [4/5] （dry-run：未 commit/tag/push） ==="
   echo "=== [5/5] （dry-run：未发布） ==="

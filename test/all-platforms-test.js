@@ -65,6 +65,16 @@ console.log('== T2 脚本已接入 --all-platforms ==');
   check('T2-e release-core 接受 --all-platforms', /--all-platforms\)/.test(rel), 'ok');
   check('T2-f release-core 全平台走 ci-core --all-platforms', /ci-core\.sh --all-platforms/.test(rel), 'ok');
   check('T2-g release-core 全平台发布走 publish:core --all-platforms', /publish:core -- --publish --all-platforms/.test(rel), 'ok');
+  // T2-j 发布时序：**必须先发布、后 tag**（2026-09-11 修复 409 竞态）。
+  //   旧顺序「先 tag+push 再本地发布」会让 CI 的 build 矩阵与本地**同时 PUT 同一个包**：
+  //   tag 一推 CI 立刻启动，而 CI 在（tag 触发 + 有 NPM_TOKEN）时会执行 ci-core --publish。
+  //   实测 v0.1.5-BETA.1 的 win-x64 即因此报 409 Conflict。
+  //   断言用**行号先后**判定，防止有人把顺序改回去。
+  const idxPublish = rel.indexOf('publish:core -- --publish --all-platforms');
+  const idxTag = rel.indexOf('git tag "v$VER"');
+  check('T2-j release-core 先发布后 tag（防与 CI 竞态）',
+    idxPublish > 0 && idxTag > 0 && idxPublish < idxTag,
+    'publish@' + idxPublish + ' tag@' + idxTag);
   // 平台清单一律来自 _platforms.sh，不得在别处硬编码平台列表
   check('T2-h build-launcher 从 _platforms.sh 取矩阵', /\. "\$ROOT\/release\/scripts\/_platforms\.sh"/.test(build), 'ok');
   check('T2-i publish-core 从 _platforms.sh 取矩阵', /\. "\$ROOT\/release\/scripts\/_platforms\.sh"/.test(pub), 'ok');
