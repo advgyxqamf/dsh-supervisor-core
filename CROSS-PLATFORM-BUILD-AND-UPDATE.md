@@ -147,7 +147,9 @@ $ bash ci/check-glibc.sh <binary> 2.35
 
 - 已用**真实产物**验证：能正确报出并拦截
 - 已接入内核测试链：`test/glibc-gate-test.js`（7 断言，含平台守卫，非 Linux 优雅跳过）
-- **单源同步**：内核 `ci/check-glibc.sh` 经 `export-shell.sh` 导出到壳仓 `ci/`（避免两处漂移）
+- **同步方式（2026-09-11 变更）**：`export-shell.sh` 已随双仓隔离删除，两仓不再自动同步。
+  内核 `ci/check-glibc.sh` 与壳仓同名脚本现为**各自维护**（内容当前一致）；
+  如需再单源化，应改用显式同步手段而非隐式导出目录。
 
 ### 2.8 至此确认的结论
 

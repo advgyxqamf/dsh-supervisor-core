@@ -2,14 +2,12 @@
 screenshots/
 **/screenshots/
 
-# build 产物（shell 壳 + 内核 SEA + npm 子包组装，全部可重新生成，绝不入库）
-src-tauri/target
-src-tauri/gen/schemas
-src-tauri/frontend
+# build 产物（内核 SEA + npm 子包组装，全部可重新生成，绝不入库）
+# 注：src-tauri/* 与 dist/export-shell 条目已于 2026-09-11 清理 —— 前者属壳仓（本仓不得存在
+#     src-tauri 目录），后者的 export-shell.sh 脚本已随双仓隔离删除。
 dist/release
 dist/sea
 dist/npm
-dist/export-shell
 **/dist/
 # React UI 构建产物（release.sh 从 ui/dist 构建后镜像，不入库）
 ui-react/
@@ -42,15 +40,13 @@ MIGRATION.md
 docs/
 **/docs/
 
-# 本地审计/取证报告（不入库）
-dsh-supervisor-AUDIT-REPORT.md
-dsh-supervisor-REPAIR-PLAN.md
-
 # 签名密钥（绝不入库）
 *.key
 *.key.pub
 
-# 内核仓不得包含壳仓（本地克隆目录；曾误被 git add -A 收为 gitlink）
+# 内核仓不得包含壳仓（防呆：曾误被 git add -A 收为 gitlink）。
+# 2026-09-11：壳 checkout 已移出本仓目录（现位于 ../dsh-supervisor-launcher），
+# 此条目保留为纵深防御 —— 若再次在本仓内克隆壳仓，至少不会被提交。
 .shell-work/
 
 # 临时文件（发布提交时曾被误纳入）

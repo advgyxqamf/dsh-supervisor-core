@@ -375,17 +375,20 @@ function cmdInstall() {
 }
 
 // 桌面菜单入口 + 图标（从仓库模板部署，@HOME@ 占位符替换）
-// 双仓拆分（2026-09 定稿）：壳源码已不在本仓（src-tauri/ 不存在）——
-// 图标改从独立壳 checkout（.shell-work/src-tauri 或 $DSH_SHELL_DIR）取，缺失时仅告警不阻断。
+//
+// 双仓隔离（2026-09-11 清理）：壳源码**不在本仓**，也不再假设它躺在内核仓目录内
+// （旧代码回退到 `<内核仓>/.shell-work/src-tauri` —— 那是双仓拆分未彻底的残留，
+//   等于内核仓隐式依赖一个「壳仓 checkout 恰好放在自己目录下」的布局）。
+// 现只认显式环境变量 DSH_SHELL_DIR；缺失则告警跳过，不阻断（图标非功能项）。
 function installDesktopEntry() {
   try {
     if (!fs.existsSync(DESKTOP_TEMPLATE)) return;
     fs.mkdirSync(ICON_DIR, { recursive: true });
-    const shellSrc = (process.env.DSH_SHELL_DIR && fs.existsSync(path.join(process.env.DSH_SHELL_DIR, "src-tauri")) ? path.join(process.env.DSH_SHELL_DIR, "src-tauri") : path.join(ROOT, '.shell-work', 'src-tauri'));
-    const iconSrc = fs.existsSync(shellSrc) ? path.join(shellSrc, 'icons', '128x128.png') : null;
+    const shellDir = process.env.DSH_SHELL_DIR || null;
+    const iconSrc = shellDir ? path.join(shellDir, 'src-tauri', 'icons', '128x128.png') : null;
     const iconDst = path.join(ICON_DIR, 'dsh-supervisor.png');
     if (iconSrc && fs.existsSync(iconSrc)) fs.copyFileSync(iconSrc, iconDst);
-    else console.warn('[install] 未找到壳图标（' + path.join(shellSrc, 'icons', '128x128.png') + '），桌面图标缺失；请安装壳后重装或忽略。');
+    else console.warn('[install] 未找到壳图标（可设 DSH_SHELL_DIR 指向壳 checkout），桌面图标缺失；不影响功能。');
     fs.mkdirSync(DESKTOP_DIR, { recursive: true });
     const entry = fs.readFileSync(DESKTOP_TEMPLATE, 'utf8').replace(/@HOME@/g, os.homedir());
     const dst = path.join(DESKTOP_DIR, 'dsh-supervisor.desktop');

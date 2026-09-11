@@ -8,6 +8,88 @@
 
 （下一版本待记）
 
+## [0.1.5-BETA.1]（2026-09-11）
+
+### 清理：内核仓彻底剥离壳残留 + 本地工作区清理（用户要求）
+
+用户指出「内核仓有报错、东西不知道在哪、完全是乱的」，要求对内核仓做准确清理，
+保证**内核仓干净 + 本地干净**，且**删除不再需要的测试文件、不留残留**。
+
+#### 一、仓库归属（先讲清楚，此前从未说明）
+
+两个仓在**两个不同的 GitHub 账号**下 —— 这是「看不到仓库」的直接原因：
+
+| 仓 | 地址 | 可见性 |
+|---|---|---|
+| **内核** | `advgyxqamf/dsh-supervisor-core` | 🔒 私有 |
+| **桌面壳** | `wasi7mglns/dsh-supervisor-launcher` | 🌐 公开 |
+
+按用户决定：**保持两账号不变，不做迁移**。
+
+#### 二、安全隐患：仓目录内曾有 3 把 SSH 私钥
+
+`<内核仓>/.ssh/` 下存有 `id_ed25519_advgyxqamf` / `id_ed25519_oldcore` / `id_ed25519_wasi7`
+三把**未加密私钥**（虽被 `.gitignore` 忽略、未被跟踪，但放在仓目录内属重大风险 ——
+本仓曾发生私钥被 `git add -A` 误提交的事故）。
+
+已迁移到标准位置 `~/.ssh/`（复制 → 哈希校验 → 更新两仓 `core.sshCommand` →
+`ls-remote` 连通验证 → 删除仓内副本）。
+
+#### 三、双仓隔离的最后残留（本次清掉）
+
+| 项 | 处理 |
+|---|---|
+| `.shell-work/`（壳仓 checkout 嵌在内核仓目录内） | 移到 `~/develop/dsh-supervisor-launcher`，推送通道验证正常 |
+| `bin/dsh-supervisor` 图标回退路径 | 删除对 `<内核仓>/.shell-work/src-tauri` 的隐式依赖，改为**只认 `DSH_SHELL_DIR`** |
+| `test/session-lifecycle-test.js` 的 6 条断言 | 删除 —— 它们**从内核仓跨仓读取壳仓源码**（`.shell-work/src-tauri/src/*.rs`），属隔离残留；且 P0 修复后语义已过时（壳现在确实会 spawn 兜底，逻辑已迁至 `service.rs`）。壳侧不变量由壳仓自身测试保证 |
+| `.gitignore` | 移除 `src-tauri/*`（本仓不得有该目录）与 `dist/export-shell`（脚本已删）条目 |
+
+#### 四、本地工作区清理（释放 53 MB）
+
+| 项 | 原因 |
+|---|---|
+| `.ssh/` | 见上（安全） |
+| `.dsh/`（21 MB agent 记忆库） | 非项目内容 |
+| `dist/` | 构建产物；且**含陈旧 0.1.3 版本目录** —— 正是它导致 T6-e 一致性断言假失败（旧版 4 份 + 新版 4 份） |
+| `ui-react/`、`ui/dist/` | UI 构建产物（gitignored，`build-ui.sh` 再生） |
+| `.darm-fail.log` / `.dx64-fail.log` / `.mac-fail.log` / `.poll4.log` | 陈旧构建失败日志 |
+| `dsh-supervisor-AUDIT-REPORT.md` / `dsh-supervisor-REPAIR-PLAN.md` | 陈旧未跟踪审计报告（9-08，已被后续审计取代） |
+
+保留 `ui/node_modules/`（标准依赖缓存，删除会让每次构建都要重装）。
+
+#### 五、测试文件清理（用户特别要求）
+
+对 56 个测试文件做**归属审计**（哪些在测试链上、哪些被 require、哪些是孤儿）：
+
+**结果：无孤儿，无需删除** —— 但发现并修正了**两类真问题**：
+
+1. **`sigterm-desired-test.js` 从未被执行**（不在 `npm test` 链、也不被任何 script 引用），
+   但它验证的是一条**硬契约**：「守卫被 SIGTERM 停止后 DSH 的 desired 状态必须保持」。
+   连跑 3 次稳定通过（4 断言）→ 已**挂入测试链**（而非删除）。
+2. 另 6 个未在链上的文件确认为**辅助模块**（`mock-target.js` 被 7 个测试引用、
+   `dry-run-proxy.js` 被 2 个等）或**独立 script 驱动**（`native-test.js` 等），均保留。
+
+清理后：测试链 **47 段**、**无断链**、**无无归属文件**。
+
+#### 六、文档纠错
+
+- **`release/runbooks/publish-and-verify.md` 整篇重写** —— 原版基于已废弃架构，通篇是
+  `build:sea`（全平台弃 SEA 后已不存在）、`export-shell.sh`（已删）、错误的仓库名
+  （`lobbowen/dsh-supervisor`）、过期的待办（`lobbowen` 的 Secrets）；
+- `README.md`：`DESIGN.md` **断链**（该文件不在本仓）→ 指向实际存在的架构文档；
+  `build:sea` → `build:launcher`；`verify:shell` → 正确命令；
+  「跨平台打包」段由**描述壳仓内容**改为**指向壳仓**；
+- `CROSS-PLATFORM-BUILD-AND-UPDATE.md`：删除「经 `export-shell.sh` 单源同步」的说法（脚本已删）；
+- `test/core-test.js`：UI 缺失时的失败信息改为**可操作**（原先只打印 `undefined`，
+  让人误以为 CSP 逻辑坏了；实为未先执行 `build-ui.sh`）；
+- `release/README.md` 与 `LICENSE` 中正确说明壳许可的部分保留。
+
+#### 验证
+
+- 全量回归 **839 passed / 0 failed**（43 个结果文件；较清理前少 6 条 = 删除的跨仓断言）；
+- 内核仓目录内**已无** `.ssh` / `.shell-work` / `dist` / `.dsh` / `*.log` / 陈旧审计文档；
+- 两仓 `ls-remote` 连通正常（`~/.ssh` 标准位置）。
+
 ### 修复：Windows CI 失败 —— 测试用 `\n` 锚定正则解析 workflow，CRLF 检出下失配（本人引入）
 
 #### 事实澄清（先纠正我的失误）

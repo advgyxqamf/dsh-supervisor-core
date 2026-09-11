@@ -1,68 +1,118 @@
-# 发布与验收：内核/壳双轨操作指南（目标环境执行）
+# 发布与验收：内核操作指南（2026-09-11 重写）
 
-> 产品方向（已拍板）：**私有 GitHub 存开发源码；公开 npm 发布内核构建物（SEA 字节码二进制）做热更新；壳开源引流**。
-> 内核=`dsh-supervisor` 二进制（SEA），壳=Tauri 图形引导器（不参与热更新）。所有本地工程/测试/取证已在仓库完成（`npm run verify:shell` 一键全绿）。
+> **本文件已于 2026-09-11 重写**。原版基于「SEA 二进制 + export-shell.sh 导出壳仓」的旧架构，
+> 该架构已废：SEA 全平台弃用（macOS 上游缺陷）、壳已彻底独立成仓、`export-shell.sh` 已删。
 
-## 第 1 步：构建内核构建物（SEA，逐平台）
+## 仓库位置（两仓完全独立，不同账号）
+
+| 仓 | 地址 | 可见性 | 内容 |
+|---|---|---|---|
+| **内核** | `advgyxqamf/dsh-supervisor-core` | 🔒 私有 | `bin/` `src/` `ui/` `test/` `release/` + 内核文档 |
+| **桌面壳** | `wasi7mglns/dsh-supervisor-launcher` | 🌐 公开 | `src-tauri/`（Tauri 引导器，MIT）+ 壳文档与脚本 |
+
+两仓**不共享目录**：壳的构建、签名、发布、测试全部由壳仓自持；
+内核仓只保留对接代码（`src/domains/shell/`、`src/api/shell.js`）。
+
+## 内核发布：全平台本地构建（推荐，零 GitHub Actions 额度）
+
 ```bash
-# 在对应平台机器执行（无交叉编译；CI 矩阵见 .github/workflows）
-npm run build:sea                 # release/scripts/build-sea.sh：bundle→V8 code cache→postject→self-check 冒烟
-ls -lh dist/sea/dsh-supervisor-*  # 产物：dsh-supervisor-<ver>-<platform>-<arch>（字节码，无 class 明文）
-# 冒烟（脚本已自带）应输出：guardVersion=... node=... platform=... self-check: OK
+# 一条命令走完：门禁 → 构建 → 派生 4 平台 → tag/push → 直推 npm
+npm run release:core:all:publish
 ```
 
-## 第 2 步：npm 发布内核子包（热更新通道）
+**为什么一台 Linux 就能产出四平台**：launcher 是**纯 JS 产物**（内核运行时依赖为 0、
+产物中 `.node` 文件为 0），平台差异**仅**体现在 npm 的 `os`/`cpu` 元数据与目录名。
+同一 bundle 在 linux / win32 / darwin 三种覆盖下 sha256 完全一致（已逐一验证）。
+
+**为什么不走 CI**：私有仓 Actions 按倍率计费（macOS 10x、Windows 2x），
+本仓 mac/win 矩阵约 110 分钟/次，免费额度 2000 分钟/月仅够约 18 次 —— 曾实测耗尽。
+本地全平台生产把额度消耗降为 0。
+
+### 分步执行（如需手动控制）
+
 ```bash
-# 在对应平台机器（无交叉编译；本机 Linux 已 dry-run 验证通过）：
-npm run build:sea                       # 先出 SEA 二进制
-npm run publish:core                    # 组装子包 + npm publish --dry-run（推荐先跑）
-npm run publish:core -- --publish       # 真发（需 npm 登录且 scope 权限）
-# 每个子包：name=@dsh-sup/dsh-core-<os>-<arch>（scope 单源=package.json.npmPublish.scope），version=单源注入裸版本（与内核同号），
-#   os/cpu 字段平台过滤，bin 指向 SEA 二进制（win 为 dsh-supervisor.exe），安装即用。
-# 发布后：self-update 引擎接 npm 通道（registry latest + integrity → 二进制/平台子包替换）——用户明确「先不急」。
+# 1) 提升版本（单源 = package.json.version，只允许递增）
+bash release/scripts/bump.sh --core 0.1.5-BETA.1
+#    然后整理 CHANGELOG.md：[未发布] → [0.1.5-BETA.1]
+
+# 2) dry-run（完整门禁 + 组装 + 打印计划，不 tag 不发布）
+npm run release:core:all
+
+# 3) 真发布（内部会 tag + push + 4 平台直推 npm）
+npm run release:core:all:publish
 ```
 
-## 第 3 步：GitHub 双仓库（私有内核仓 + 公开壳仓引流）
-```bash
-# 1) 私有内核仓：push 到 <owner>/dsh-supervisor（Private）——存内核/测试/CI（SEA+npm 产线）
-# 2) 公开壳仓（引流）：bash release/scripts/export-shell.sh git@github.com:<owner>/dsh-supervisor-launcher.git
-#    → dist/export-shell/ 组装（壳源码+产品主页 README+MIT LICENSE+公开仓 CI），commit 后 push；
-#    GitHub 拉取后确保仓库设为 Public。公开仓 clone 即 cargo build（已验证）。
-# 3) 壳 Release（公开仓）：tag v<壳版本> 触发 launcher-build.yml → 三平台 Tauri bundle 挂 Release；壳版本独立（0.1.0 起，release/scripts/bump.sh --shell）
-# 4) 内核 Release（私有仓）：tag v<内核版本> 触发 build.yml → 内核 SEA 挂 Release + npm 子包 --publish（NPM_TOKEN）；壳仅集成冒烟不发布
-# 5) 配置守卫自更新源（config.json）：{ selfUpdateManifestUrl, selfUpdateDir }——内核走 npm 后保留为离线备源
+### 门禁内容（`ci-core.sh`）
+
+```
+verify:versions → build-ui（ui-react/ 为测试与产物依赖）→ npm test → build:launcher → 子包 dry-run
 ```
 
-## 第 4 步：桌面真机验收（桌面会话）
-按 `release/runbooks/verify-desktop.md` 清单执行：
-- 场景 A：全新环境无 Node → 壳引导页 → 一键装官方最新 LTS → 自动拉起守卫 → 面板 200；
-- 场景 B：已有旧版 Node → 引导页「升级到官方最新 LTS」+ 可「跳过并使用现有版本」；
-- 场景 C：自更新（npm 内核通道或本地源）→ 状态/应用/重启钳制；
-- 托盘/关窗隐藏/设置页「环境与自更新」卡交互。
+> ⚠ **`build-ui` 不可跳过**：`npm test` 中的面板响应头断言与 launcher 携带的 UI 均依赖
+> `ui-react/`（gitignored 构建产物）。直接跑 `npm test` 会得到 503「UI not built」。
+
+## 兜底路径：CI 补平台（消耗额度）
+
+tag 推送仍会触发 `.github/workflows/build.yml`。其 `precheck` 会先判断「该版本是否已在 npm 全部发布」：
+- **已全部发布** → 跳过整个 mac/win 矩阵（约 1 分钟 ubuntu 探测，1x 计费）；
+- **未全发布** → 由矩阵补齐 mac/win（macOS 按 10x 计费）。
+
+因此无论走哪条路径，tag 都能收敛到「四平台齐备」。
+
+## 壳的发布（在壳仓执行，本仓不参与）
+
+```bash
+cd <壳仓>
+bash scripts/bump-shell.sh 1.0.5        # 三处互锁：Cargo.toml / tauri.conf.json / Cargo.lock
+git commit && git tag v1.0.5 && git push origin main && git push origin v1.0.5
+```
+
+公开仓 tag 触发 `launcher-build.yml` → 四平台 Tauri bundle 挂 GitHub Release + 发布 npm 壳包 + 生成
+`shell-manifest.json`（Tauri updater 静态清单）。**壳仓是公开仓，Actions 额度不受限**。
+
+## 桌面真机验收
+
+按 `release/runbooks/verify-desktop.md` 清单执行。核心链路（对应壳 1.0.4 的服务定义修复）：
+
+| 场景 | 通过标志 |
+|---|---|
+| 全新环境无 Node | 壳引导页 → 自动装 Node → 自动拉起守卫 → 面板 200 |
+| 守卫服务定义 | 首启后 `systemctl --user status dsh-supervisor` 存在且 enabled（macOS/Windows 对应 launchd/schtasks） |
+| 自更新 | 壳检测到新版本 → 下载 → 验签 → 安装 → 重启 |
+| 托盘/关窗/设置页 | 交互正常；Windows 无隐形边框、托盘右键可用 |
+
+无 GUI 自检入口（诊断用，任何平台）：
+
+```bash
+dsh-supervisor-gui --service-plan                # 只报告服务定义状态
+dsh-supervisor-gui --service-plan --service-apply # 实际建立服务定义
+```
 
 ## 验收退出标准
+
 | 项 | 通过标志 |
 |---|---|
-| 内核（SEA） | 三平台 `build:sea` 自举 `self-check` OK；npm 子包安装即 `dsh-supervisor self-check` |
-| 壳 | 三平台可构建、xvfb/桌面可启动、无 Node 环境引导闭环；版本独立（0.1.0 起） |
-| Node | 官方最新 LTS 一键装/升级，SHA256 校验，授权弹窗一次 |
-| 自更新 | npm 内核通道状态/应用/回滚/重启钳制全通（Release 源为离线备源） |
-| DSH | 检测判定 + 一键装入口（面板） |
-| 稳定性 | npm test 全绿、零泄漏、生产端口表不被污染 |
+| 内核 | 四平台 `core.cjs` 同源（sha256 一致）；npm 子包安装后 `dsh-supervisor self-check` OK |
+| 壳 | 四平台可构建；无 Node 环境引导闭环；服务定义能建立（P0） |
+| Node | 多镜像并行测速选最快，SHA256 校验，最低门槛 v22.12 生效 |
+| 自更新 | 壳自更新：检测 → 下载 → minisign 验签 → 安装 → 重启 |
+| 稳定性 | `npm test` 全绿；零端口泄漏；测试端口不落在 OS 动态范围 |
 
-## 状态追踪
-- [x] SEA 内核构建物化（Linux x64 验证通过：注入 done、self-check OK、strings 无 class 明文）
-- [x] **版本管理规范 v2**（DESIGN §16）：单一事实源 package.json；壳同号跟随内核；bump.sh 一处改三处；verify-versions 三处同号校验；SEA __DSH_VERSION__ 注入自包含（孤立目录实证 0.10.0）
-- [x] **publish-core.sh**（npm 平台子包，单源注入裸版本 + os/cpu 过滤 + self-check 错配拒绝；Linux dry-run 验证通过）
-- [x] **双仓库方案 A 落地**：壳解耦（resources 仅 bootstrap/icons；main.rs 定位已安装内核）；export-shell.sh（导出目录独立构建验证通过）；许可（内核 UNLICENSED / 壳 MIT）
-- [x] **凭据管理落地（2026-09-09）**：令牌值不入库（CI Secrets `NPM_TOKEN` + 本机 credential helper / 0600）；scope 单源化 `@dsh-sup`（package.json.npmPublish.scope）；remote URL 已脱敏（旧内嵌 PAT 报废）；最小权限规格见 credentials.md
-- [x] **本机 git/npm 认证接通（2026-09-09）**：git credential store 0600 + npm login 均验证通过（git ls-remote / npm whoami→lob.bowen）
-- [x] **linux-x64 发布成功（2026-09-09）**：`@dsh-sup/dsh-core-linux-x64@0.1.2-BETA.5` 已发布 npm registry（os:['linux'] cpu:['x64'] bin:dsh-supervisor 校验通过）——发布产线端到端真实验证
-- [x] **launcher 统一形态发布验证（2026-09-09）**：`@dsh-sup/dsh-core-linux-x64@0.1.2-BETA.6` 与 `@dsh-sup/dsh-core-darwin-arm64@0.1.2-BETA.6` 已发布 npm（全平台弃 SEA 后干净版本，darwin 首次可用）
-- [x] **darwin SEA 段错误根因定论（铁证）**：最小 hello-world SEA 在 macOS 注入后即崩（与 codecache/codesign/Node 版本/postject 均无关）→ Node SEA 的 macOS 上游缺陷 → 全平台弃 SEA 改 Node launcher（build-launcher.sh）
-- [ ] **darwin-x64/win-x64 待补发**：代码侧已修（darwin-x64 arch_override 在 macos-14 arm64 runner 构建；win pgrepList Windows 实现 + SIGTERM/0600/libuv 测试平台化）；遇 GitHub Actions 瞬时基础设施故障（所有 job 2-10s setup 失败、日志 BlobNotFound、ui-verify 2s 失败证明非本仓代码问题）——待 GH 恢复后重跑 tag 补发
-- [ ] **GitHub Secrets `NPM_TOKEN`**：在 lobbowen/dsh-supervisor → Settings → Secrets → Actions 新增（值=`@dsh-sup` scope 的 automation token）——待用户网页配置
-- [ ] 公开壳仓 push + 设为 Public（需你的 GitHub 操作）
+## 状态追踪（2026-09-11）
+
+- [x] **全平台本地生产落地**：`release:core:all:publish` 零 GitHub 额度；四平台 `core.cjs` 同源验证
+- [x] **双仓彻底隔离**：壳资产全部移出本仓（含 `export-shell.sh`、`shell-release/`、壳设计文档、
+      `bump.sh --shell`、跨仓测试断言）；壳 checkout 已移出本仓目录
+- [x] **版本管理规范**：内核单源 `package.json.version`；壳版本由壳仓 `bump-shell.sh` 三处互锁
+- [x] **凭据管理**：令牌不入库（CI Secrets + 本机 0600）；scope 单源 `@dsh-sup`；
+      推送改用**仓库部署密钥**（fine-grained PAT 无法管理账号级 SSH key）
+- [x] **测试端口纪律**：安全段 28000-28999 + 门禁（防落 OS 动态端口范围）
+- [x] **工作流解析行尾归一化**：修复 Windows CRLF 导致的 CI 假失败 + 门禁
+- [x] **npm 认证大小写修复**：`NPM_CONFIG_USERCONFIG` 与 `npm_config_userconfig` 双写
+- [x] 已发布：`@dsh-sup/dsh-core-{linux-x64,darwin-arm64,darwin-x64,win-x64}@0.1.4-BETA.1`
+- [ ] **`v0.1.4-BETA.1` 的 CI 红叉**：Windows job 因 CRLF 假失败（已修，见 CHANGELOG [未发布]）；
+      修复在 `master` 上，下次发版自然验证
+- [ ] **用户侧人工项**：删除 `wasi7mglns` 账号中已泄露的 SSH 公钥 `dsh-push-443-20260910`；
+      吊销两把已泄露的 PAT
 - [ ] self-update 引擎接 npm 通道（用户：先不急）
-- [ ] 私有源码仓库 + 公开壳仓库（需用户账号/凭据）
-- [ ] GUI 真机验收（verify-desktop.md 清单）
+- [ ] Windows 真机验收（托盘右键 / 隐形边框 / 守卫拉起）

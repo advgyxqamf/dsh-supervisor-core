@@ -130,18 +130,12 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     check('P2-D 显式启动后拉起', spawned >= 1, 'spawned=' + spawned);
   }
 
-  // ── 5) V1：壳不直接 spawn 守卫（若壳 checkout 存在）──
-  console.log('== V1 壳所有权（可选，壳 checkout 存在时校验）==');
-  const shellMain = path.join(ROOT, '.shell-work', 'src-tauri', 'src', 'main.rs');
-  if (fs.existsSync(shellMain)) {
-    const shell = fs.readFileSync(shellMain, 'utf8');
-    check('V1a 壳不再直接 spawn 守卫 daemon', !/Command::new\(&bin\)[\s\S]{0,120}arg\("daemon"\)/.test(shell), 'ok');
-    check('V1b 壳经所有者启停（systemctl/launchctl/schtasks）', /start_guard_service|stop_guard_service/.test(shell), 'ok');
-    check('V1c 壳退出握手用 /session/stop', shell.includes('/session/stop'), 'ok');
-    check('V1d 壳已无 /shutdown 旧调用', !shell.includes('post_local(port, "/shutdown")'), 'ok');
-  } else {
-    check('V1 壳 checkout 不存在，跳过（内核侧不变量已覆盖）', true, 'skip');
-  }
+  // ── 5) V1 段已移除（2026-09-11 清理）──
+  // 该段读 `<内核仓>/.shell-work/src-tauri/src/main.rs` —— 即**从内核仓跨仓读取壳仓源码**，
+  // 是双仓隔离未彻底的残留（壳 checkout 本就不该出现在内核仓目录内）。
+  // 且其断言在内核 P0 修复后已**语义过时**：壳现在确实会 spawn 守卫作为服务管理器不可用时的兜底，
+  // 且该逻辑已从 main.rs 迁至 service.rs（断言仍在查 main.rs）。
+  // 壳侧不变量由**壳仓自身**的测试保证（bootstrap_flow.rs 的 B13/B14 等），内核仓不再越界。
 
   // ── 6) /session API 契约 ──
   console.log('== /session API ==');
@@ -178,12 +172,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     check('P3-F 前端 types 声明 sessionState', /sessionState\?:\s*SessionState/.test(typesTs) && /export type SessionState/.test(typesTs), 'ok');
   }
 
-  // 壳握手增强（静态契约）
-  if (fs.existsSync(shellMain)) {
-    const shell = fs.readFileSync(shellMain, 'utf8');
-    check('P3-G 壳握手含 sessionState 轮询', shell.includes('get_session_state') && shell.includes('/session/status'), 'ok');
-    check('P3-H 壳请求带超时（防守卫挂起阻塞）', shell.includes('post_local_timeout') && shell.includes('set_read_timeout'), 'ok');
-  }
+  // P3-G / P3-H 段已移除（2026-09-11 清理）：原为跨仓静态断言（读壳仓源码字符串），
+  // 属双仓隔离残留。壳的握手/超时契约由壳仓自身测试保证。
 
   // ── 8) 阶段 4：遗留债清零 ──
   console.log('== 阶段 4 遗留债 ==');
@@ -204,14 +194,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     check('P4-D EventReader.readVisible 过滤 internal 且同 EventHub 语义', rd.readVisible(0, 50).every((e) => e.type !== 'shadow_beat'), JSON.stringify(rd.readVisible(0, 50)));
     check('P4-E EventReader.seq 透传本地事件流', rd.seq === 7, 'seq=' + rd.seq);
   }
-  if (fs.existsSync(shellMain)) {
-    const envRs = path.join(ROOT, '.shell-work', 'src-tauri', 'src', 'env.rs');
-    if (fs.existsSync(envRs)) {
-      const envSrc = fs.readFileSync(envRs, 'utf8');
-      check('P4-F 壳 closeAction 用真 JSON 解析（serde_json）', /from_str::<serde_json::Value>/.test(envSrc), 'ok');
-      check('P4-G 壳 closeAction 已无字符串扫描 (find pat)', !/for pat in \[/.test(envSrc), 'ok');
-    }
-  }
+  // P4-F / P4-G 段已移除（2026-09-11 清理）：同样是从内核仓跨仓读取壳仓 env.rs，
+  // 属双仓隔离残留。壳的 closeAction 实现细节由壳仓自身测试保证。
 
   // ── 9) P2：B1 能力元数据执法 + C1/A5 前端接线 ──
   console.log('== P2 B1 能力执法 ==');

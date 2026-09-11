@@ -153,8 +153,18 @@ async function testApiSecurity() {
 
   // CSP 与静态资源
   r = await req(port, 'GET', '/', {});
-  check('面板带 CSP 头', typeof r.headers['content-security-policy'] === 'string' && r.headers['content-security-policy'].length > 10, String(r.headers['content-security-policy']));
-  check('nosniff 头存在', r.headers['x-content-type-options'] === 'nosniff');
+  // ⚠ UI 是**构建产物**（ui-react/ 由 release/scripts/build-ui.sh 生成，gitignored）。
+  //   本测试依赖它存在 —— 流水线顺序为 verify → build-ui → npm test（见 ci-core.sh）。
+  //   若直接跑 `npm test` 而未先 build-ui，会得到 503「UI not built」，
+  //   而旧断言只打印 `undefined`，让人误以为是 CSP 逻辑坏了。此处给出**可操作**的失败信息。
+  const uiMissing = r.code === 503 || /UI not built/.test(String(r.body));
+  check('面板带 CSP 头',
+    typeof r.headers['content-security-policy'] === 'string' && r.headers['content-security-policy'].length > 10,
+    uiMissing
+      ? 'UI 未构建（HTTP 503）—— 请先执行 bash release/scripts/build-ui.sh（或设 DSH_UI_DIR）'
+      : String(r.headers['content-security-policy']));
+  check('nosniff 头存在', r.headers['x-content-type-options'] === 'nosniff',
+    uiMissing ? '同上：UI 未构建，安全头未走到静态分支' : undefined);
 
   // 静态穿越防护
   r = await req(port, 'GET', '/%2e%2e/package.json', {});

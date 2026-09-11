@@ -2,7 +2,8 @@
 
 DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级守卫进程，负责 **启动、存活监测、故障自动重启** 被监管目标（默认 `dsh web`），并支持主动停止/恢复（期望状态语义）。
 
-完整设计见 [DESIGN.md](DESIGN.md)。
+完整设计见 [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) 与
+[ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md)。
 
 ## 桌面面板（原生 Linux 应用）
 
@@ -45,14 +46,19 @@ xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
 
 > **弃 SEA 原因（铁证）**：Node SEA 单文件二进制在 macOS 上注入后 `self-check` 即段错误——即使最小 hello-world SEA 亦崩（CI 双 arch 验证，与 useCodeCache/codesign/Node 版本均无关，为 Node SEA 的 macOS 上游缺陷）。为彻底消除平台差异、保证 macOS/Windows（产品主力）可用，全平台改发 Node launcher。
 
-- **构建**：`npm run build:sea`（=`build:launcher`，`release/scripts/build-launcher.sh`）→ esbuild CJS bundle（`--define:__DSH_VERSION__` 注入版本）→ 组装 `bin/dsh-supervisor`（node 启动脚本）+ `core.cjs` + `ui-react/` → 自带冒烟（self-check + fresh-HOME daemon + UI 服务断言）。
+- **构建**：`npm run build:launcher`（`release/scripts/build-launcher.sh`）→ esbuild CJS bundle（`--define:__DSH_VERSION__` 注入版本）→ 组装 `bin/dsh-supervisor`（node 启动脚本）+ `core.cjs` + `ui-react/` → 自带冒烟（self-check + fresh-HOME daemon + UI 服务断言）。
 - **产物**：`dist/launcher/dsh-supervisor-<ver>-<platform>-<arch>/`（bin + core.cjs + ui-react + version.txt），整包发布可辨识。
 - **运行时依赖**：Node.js ≥18（launcher 需目标机 node；SEA 免运行时优势已弃，换取三端可运行可发布）。
-- **版本自包含**：esbuild 编译期注入 `__DSH_VERSION__`，launcher 任意 cwd 自报正确版本——版本规范见 [DESIGN.md §16](DESIGN.md)；提升走 `release/scripts/bump.sh`。
+- **版本自包含**：esbuild 编译期注入 `__DSH_VERSION__`，launcher 任意 cwd 自报正确版本；提升走 `release/scripts/bump.sh --core`（单源 = `package.json.version`）。
 - **平台命名**：npm 内核子包按平台分（`@scope/dsh-core-linux-x64` / `darwin-arm64` / `darwin-x64` / `win-x64`；`process.platform` 的 `win32` 需映射 `win`）。各平台在对应平台机器上各自构建（无交叉编译）。
 - **平台生产分工（2026-09 定案，GitHub 额度优化）**：**linux-x64 本地生产**——Linux 机器执行 `npm run release:core:publish` 走完整门禁后直推 npm；**win-x64 / darwin-arm64 / darwin-x64 由 GitHub CI** 在 tag 触发后生产。故 CI 矩阵不含 ubuntu，本地真发布有平台闸（非 Linux 直接拒绝，防与 CI 二次发布）。
 - **许可**：内核 **UNLICENSED**（闭源构建物，主 `package.json`/`LICENSE` 声明）；壳 **MIT**（`src-tauri/LICENSE`）。
-- **双仓库（壳开源引流）**：壳源码随公开仓库 `dsh-supervisor-launcher`（MIT）发布——`release/scripts/export-shell.sh` 导出（clone 即 `cargo build`）；本仓库保持私有存内核。
+- **双仓库（壳开源引流）**：壳源码位于公开仓库 `wasi7mglns/dsh-supervisor-launcher`（MIT 许可）；
+  本仓库为内核（私有，`advgyxqamf/dsh-supervisor-core`）。两仓**完全独立**——
+  本仓不持有任何壳资产（无 `src-tauri/`、无片面的壳打包工具/设计文档），
+  壳相关工具与文档均在壳仓自身。
+- **跨仓协作方式**：内核侧仅保留**对接代码**（`src/domains/shell/`、`src/api/shell.js` ——
+  内核需展示桌面版本并观测壳健康，属内核职责）；壳的构建、签名、发布、测试全部由壳仓自持。
 - **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/` 发布脚本集 + `release/scripts/ci-core.sh` 产线核心 + `release/scripts/release-core.sh` 一键编排 + `release/runbooks/` 操作手册 + `release/README.md` SOP）。一键发布见 `npm run release:core`（dry-run）/ `npm run release:core:publish`（真发，仅 Linux）。
 
 ## 架构
@@ -268,13 +274,19 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 - **发布通道（D1，2026-09 定案）**：守卫自身更新统一走 npm 平台子包（`DistributionManager.runNpmInstall` + `@dsh-core/<os>-<arch>`）；`release/scripts/release.sh` 不再产出自更新 manifest，仅作源码打包出口。
 - 底层执行器：`src/domains/dist/self-update.js`（tar 解包/SHA256 校验/`current` 软链原子翻转/剪枝；guard-update-test 全量覆盖，作回归保留，非发布通道）。
 - 接入：配置 `selfUpdateManifestUrl` / `selfUpdateDir`；API `GET /self-update/status`、`POST /self-update/apply`。
-- 内核发布：`npm run build:sea` + `npm run publish:core`（SEA 单文件 + npm 平台子包，见「内核发布」节）；推荐一键：`npm run release:core` / `npm run release:core:publish`。
+- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）；推荐一键：`npm run release:core:all` / `npm run release:core:all:publish`。
 - 环境状态：`GET /env/status`（node/npm/git 探针 + 壳写入的 runtime.json）、`GET /env/dsh`（DSH 本体安装/纳管判定）。
 
-### 跨平台打包
-- `src-tauri/tauri.conf.json`：`bundle.active=true`，frontendDist 指向 `frontend/`（= ui-react 面板产物 + bootstrap 引导页，完整壳内嵌 UI）；Linux 已验证产出 deb（`cargo tauri build --bundles deb`）；macOS/Windows 目标（dmg/msi）在对应平台构建（同一份配置）。
-- `Cargo.toml` feature `embedded-panel`（默认开）：完整壳；公开壳导出（`release/scripts/export-shell.sh`）自动去默认 feature 且 frontendDist→bootstrap（MIT 引导器，可独立编译）。
-桌面实机验收清单（引导页 / Node 一键装 / 自更新场景）：`release/runbooks/verify-desktop.md`；壳无头冒烟：`npm run verify:shell`。
+### 跨平台打包（**已移至壳仓**）
+
+壳（Tauri 引导器）的打包配置、`Cargo.toml`、`src-tauri/` 全部位于**壳仓**
+`wasi7mglns/dsh-supervisor-launcher`（MIT），本仓不再持有任何壳资产。
+
+壳仓产线：四平台矩阵（`ubuntu-22.04` glibc 2.35 基座 / `macos-latest` arm64 /
+`macos-15-intel` x64 / `windows-latest`）→ Tauri bundle → GitHub Release + npm 壳包 +
+`shell-manifest.json`（Tauri updater 静态清单）。详见壳仓 `README.md`。
+
+桌面实机验收清单：`release/runbooks/verify-desktop.md`（内核侧视角）。
 
 ## 边界与非目标（v1）
 
