@@ -36,7 +36,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { execFileSync } = require('node:child_process');
+// ⚠ 统一子进程执行器（2026-09-11）：本文件原有 11 处 execFileSync **无 timeout**，
+//   systemctl / schtasks 在 dbus 无响应或服务管理器挂起时即无限期阻塞守卫事件循环。
+const ex = require('../exec');
 const { resolveExecutable } = require('./exec-path');
 
 const isLinux = process.platform === 'linux';
@@ -123,8 +125,8 @@ function status() {
     let guard = false, gui = false, watchdog = false;
     const has = (tn) => {
       try {
-        const out = execFileSync('schtasks', ['/Query', '/TN', tn], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-        return out.includes(tn);
+        const out = ex.runOut('schtasks', ['/Query', '/TN', tn], { stdio: ['ignore', 'pipe', 'ignore'] });
+        return !!out && out.includes(tn);
       } catch { return false; }
     };
     guard = has('DSH-Supervisor');
@@ -150,8 +152,8 @@ function status() {
   }
   // Linux
   let unit = 'unknown';
-  try { unit = execFileSync('systemctl', ['--user', 'is-enabled', 'dsh-supervisor.service'], { encoding: 'utf8' }).trim(); }
-  catch (e) { unit = ((e && e.stdout) || 'disabled').trim() || 'disabled'; }
+  const en = ex.runDetail('systemctl', ['--user', 'is-enabled', 'dsh-supervisor.service']);
+  unit = String(en.stdout || en.stderr || 'disabled').trim() || 'disabled';
   return { kind: 'systemd', unit, on: unit === 'enabled', gui: fs.existsSync(guiFile()) };
 }
 
@@ -190,16 +192,18 @@ function setAutostart(on) {
         fs.mkdirSync(path.dirname(watchdogPs1), { recursive: true });
         const atmp = watchdogPs1 + '.tmp'; fs.writeFileSync(atmp, ps); fs.renameSync(atmp, watchdogPs1); // 原子写
         // (a) 登录启动 GUI（任务名与「守卫服务」分离，避免覆盖壳建立的守卫任务）
-        try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor-GUI', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']); } catch (e) { errors.push('schtasks gui: ' + e.message); }
+        { const r = ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-GUI', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']);
+          if (!r.ok) errors.push('schtasks gui: ' + (r.error || '执行失败')); }
         // (c) 守卫任务（DSH-Supervisor）由**桌面壳**建立；这里只负责「开机自启」语义的启用
-        try { execFileSync('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/ENABLE']); } catch {}
+        ex.run('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/ENABLE']);
         // (b) 每 5 分钟 watchdog 保活（崩溃自动拉起）
-        try { execFileSync('schtasks', ['/Create', '/TN', 'DSH-Supervisor-Watchdog', '/SC', 'MINUTE', '/MO', '5', '/RL', 'HIGHEST', '/F', '/TR', 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + watchdogPs1 + '"']); } catch (e) { errors.push('schtasks watchdog: ' + e.message); }
+        { const r = ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-Watchdog', '/SC', 'MINUTE', '/MO', '5', '/RL', 'HIGHEST', '/F', '/TR', 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + watchdogPs1 + '"']);
+          if (!r.ok) errors.push('schtasks watchdog: ' + (r.error || '执行失败')); }
       } else {
-        try { execFileSync('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-Watchdog', '/F']); } catch {}
-        try { execFileSync('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-GUI', '/F']); } catch {}
+        ex.run('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-Watchdog', '/F']);
+        ex.run('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-GUI', '/F']);
         // 守卫任务不删除（它是**服务定义**，删了壳的 /Run 会再次失败）；只停用开机自启。
-        try { execFileSync('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/DISABLE']); } catch {}
+        ex.run('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/DISABLE']);
         try { fs.unlinkSync(watchdogPs1); } catch {}
       }
     } catch (e) { errors.push('watchdog setup: ' + e.message); }
@@ -230,9 +234,12 @@ function setAutostart(on) {
     return { ok: errors.length === 0, errors, ...status() };
   }
   // Linux（systemd --user + linger + GUI desktop）
-  try { execFileSync('systemctl', ['--user', 'daemon-reload']); } catch (e) { errors.push('daemon-reload: ' + e.message); }
-  try { execFileSync('systemctl', ['--user', on ? 'enable' : 'disable', 'dsh-supervisor.service']); } catch (e) { errors.push((on ? 'enable' : 'disable') + ': ' + e.message); }
-  try { execFileSync('loginctl', [on ? 'enable-linger' : 'disable-linger', os.userInfo().username]); } catch (e) { if (on) errors.push('enable-linger: ' + e.message); }
+  { const r = ex.runDetail('systemctl', ['--user', 'daemon-reload']);
+    if (!r.ok) errors.push('daemon-reload: ' + (r.error || '执行失败')); }
+  { const r = ex.runDetail('systemctl', ['--user', on ? 'enable' : 'disable', 'dsh-supervisor.service']);
+    if (!r.ok) errors.push((on ? 'enable' : 'disable') + ': ' + (r.error || '执行失败')); }
+  { const r = ex.runDetail('loginctl', [on ? 'enable-linger' : 'disable-linger', os.userInfo().username]);
+    if (!r.ok && on) errors.push('enable-linger: ' + (r.error || '执行失败')); }
   const g = setGuiAutostart(on);
   if (!g.ok) errors.push(g.error);
   return { ok: errors.length === 0, errors, ...status() };

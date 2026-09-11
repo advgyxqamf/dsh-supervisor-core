@@ -14,7 +14,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const exec = require('../exec');
 
 /** 平台不具备该能力时抛出（调用方据此给出明确提示，而非 catch 后误报「启动失败/端口冲突」）。 */
 class CapabilityError extends Error {
@@ -24,7 +24,9 @@ class CapabilityError extends Error {
 const PLATFORM = process.platform;
 
 function run(cmd, args, opts) {
-  return execFileSync(cmd, args, Object.assign({ stdio: 'ignore' }, opts || {}));
+  // ⚠ 经统一执行器（默认 15s 硬超时 + SIGKILL）—— 防 systemd/dbus 挂起时无限阻塞。
+  //   调用方传的 timeoutMs 仍生效（exec.options 会用它覆盖默认值）。
+  return exec.run(cmd, args, Object.assign({ stdio: 'ignore' }, opts || {}));
 }
 
 /* ── Linux：systemd --user ── */
@@ -41,7 +43,7 @@ const systemd = {
   resetFailed(unit) { try { run('systemctl', ['--user', 'reset-failed', unit], { timeout: 10000 }); return true; } catch { return false; } },
   isUnitActive(unit) {
     if (!unit) return true; // 无单元约束 → 视为通过（调用方语义）
-    try { return execFileSync('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8', timeout: 8000 }).trim() === 'active'; }
+    try { return (run('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8', timeoutMs: 8000 }) || '').toString().trim() === 'active'; }
     catch { return false; }
   },
   /** transient 单元文件路径（systemd 特有布局）。 */
@@ -71,7 +73,7 @@ const systemd = {
     for (const [k, v] of Object.entries(opts.env || {})) args.push('--setenv=' + k + '=' + v);
     if (opts.workingDir) args.push('--working-directory=' + opts.workingDir);
     args.push('--', ...(opts.cmd || []));
-    execFileSync('systemd-run', args, { stdio: 'ignore', timeout: opts.timeoutMs || 20000 });
+    run('systemd-run', args, { stdio: 'ignore', timeoutMs: opts.timeoutMs || 20000 });
     return true;
   },
 };

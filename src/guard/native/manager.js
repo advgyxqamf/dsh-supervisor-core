@@ -12,7 +12,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
+const ex = require('../../platform/exec');
 const { semverCompare, VERSION_RE } = require('../../domains/dist/index');
 
 class NativeManager {
@@ -162,12 +163,14 @@ class NativeManager {
   /* ═══════ 环境检查 ═══════ */
   checkEnvironment() {
     const errors = [];
-    try { const v = execFileSync('node', ['--version'], { encoding: 'utf8' }).trim(); if (!v) errors.push('node 不可用'); }
-    catch { errors.push('node 未安装或不可执行'); }
-    try { const v = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim(); if (!v) errors.push('npm 不可用'); }
-    catch { errors.push('npm 未安装或不可执行'); }
+    // ⚠ 经统一执行器（2026-09-11）：原为裸 execFileSync **无 timeout** ——
+    //   npm/node 在 PATH 指向网络盘、或 npm 因缓存锁挂起时会无限阻塞守卫事件循环。
+    const nv = ex.runOut('node', ['--version']);
+    if (!nv || !nv.trim()) errors.push('node 未安装或不可执行');
+    const npmv = ex.runOut('npm', ['--version']);
+    if (!npmv || !npmv.trim()) errors.push('npm 未安装或不可执行');
     let npmRoot = this.npmRoot;
-    if (!npmRoot) { try { npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim(); } catch {} }
+    if (!npmRoot) { const r = ex.runOut('npm', ['root', '-g']); if (r) npmRoot = r.trim(); }
     return { ok: errors.length === 0, errors, npmRoot };
   }
 
@@ -201,7 +204,7 @@ class NativeManager {
     let npmRoot = this.npmRoot;
     let pkgDir = null;
     try {
-      if (!npmRoot) npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8' }).trim();
+      if (!npmRoot) { const r = ex.runOut('npm', ['root', '-g']); if (r) npmRoot = r.trim(); }
       pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh');
     } catch {}
     this._saveManifest({

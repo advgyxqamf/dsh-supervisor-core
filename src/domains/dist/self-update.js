@@ -7,7 +7,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFileSync } = require('node:child_process'); // sanityCheck 的 node --check 语法自检用
+const exec = require('../../platform/exec'); // 统一有界执行（sanityCheck 语法自检等）
 const { extractTarGz } = require('../../platform/fs-utils');
 
 async function httpGetBytes(url, timeoutMs = 30000) {
@@ -90,7 +90,9 @@ function extractArchive(file, destDir) {
 function sanityCheck(versionDir) {
   const bin = path.join(versionDir, 'bin', 'dsh-supervisor');
   if (fs.existsSync(bin)) {
-    execFileSync(process.execPath, ['--check', bin], { stdio: 'pipe' }); // 零依赖：语法自检即冒烟
+    // 有界（2026-09-11，门禁 G9）：自更新解包出的脚本若异常（巨型文件/挂起），
+    //   同步 execFileSync 无超时会冻结整个守卫。经统一执行器（默认 15s + SIGKILL）。
+    exec.run(process.execPath, ['--check', bin], { stdio: 'pipe' }); // 零依赖：语法自检即冒烟
   }
   const pkg = path.join(versionDir, 'package.json');
   if (fs.existsSync(pkg)) JSON.parse(fs.readFileSync(pkg, 'utf8')); // 结构自检

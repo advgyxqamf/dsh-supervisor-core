@@ -9,7 +9,8 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { execFile } = require('node:child_process');
-const { execFileSync } = require('node:child_process');
+const ex = require('../../platform/exec');
+const netInfo = require('../../platform/os/netinfo');
 const { EnvCatalog } = require('../../platform/env-catalog');
 const { semverCompare } = require('../../domains/dist/index');
 const deploy = require('../../platform/deploy'); // 拆分携带：自更新形态判定（deploy.detect）
@@ -223,8 +224,7 @@ class SettingsView {
     const dep = deploy.detect();
     if (dep.form !== 'sea-binary' || !dep.runningTarget) return null;
     try {
-      const { execFileSync } = require('node:child_process');
-      const out = execFileSync(dep.runningTarget, ['--version'], { timeout: 20000, encoding: 'utf8' });
+      const out = ex.runOut(dep.runningTarget, ['--version'], { timeoutMs: 20000 });
       const m = /dsh-supervisor v([^s]+)/.exec(out);
       return m ? m[1] : null;
     } catch { return null; }
@@ -272,10 +272,10 @@ class SettingsView {
   guardVersionLocal() {
     const root = this._vcsRoot();
     let commit = null;
-    try { commit = execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim(); } catch {}
+    commit = (ex.runOut('git', ['-C', root, 'rev-parse', '--short', 'HEAD']) || '').trim() || null;
     let upstream = 'local';
     try {
-      const up = execFileSync('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}'], { encoding: 'utf8' }).trim();
+      const up = (ex.runOut('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}']) || '').trim();
       if (up) upstream = 'git-repo';
     } catch {}
     // version = 进程运行版本（启动时固化，SEA 为编译期常量）——语义明确标注（A3）。
@@ -303,7 +303,8 @@ class SettingsView {
     if (!fetchOk) return base; // fetch 失败：保持本地视图，不误报
     let updateAvailable = false;
     try {
-      const ahead = execFileSync('git', ['-C', root, 'rev-list', '--count', 'HEAD..@{u}'], { encoding: 'utf8' }).trim();
+      // git 可能因网络盘/凭证助手挂起 → 必须有界（原为裸 execFileSync，无 timeout）。
+      const ahead = (ex.runOut('git', ['-C', root, 'rev-list', '--count', 'HEAD..@{u}']) || '').trim();
       updateAvailable = parseInt(ahead, 10) > 0;
     } catch {}
     // A3：磁盘运行位实况版本 vs 进程运行版本——不一致 = 「更新已安装、待重启生效」
@@ -322,40 +323,20 @@ class SettingsView {
     // 取「走默认路由的真实出口网卡」的 IPv4，过滤虚拟网桥(virbr*/veth*/docker*/br-*)。
     const ips = [];
     if (enabled) {
-      try {
-        const { execFileSync } = require('node:child_process');
-        // 1) 先找默认路由关联的出口网卡名
-        let dev = null;
-        try {
-          const def = execFileSync('ip', ['route', 'show', 'default'], { encoding: 'utf8' });
-          dev = (def.match(/dev\s+(\S+)/) || [])[1] || null;
-        } catch {}
-        // 2) 枚举各网卡 IPv4（记录 secondary/dynamic 标志——DHCP 动态地址优先排除）
-        const out = execFileSync('ip', ['-o', 'addr', 'show'], { encoding: 'utf8' }).trim();
-        const collected = {}; // iface -> [{ addr, dyn }]
-        for (const line of out.split('\n')) {
-          const m = line.match(/^\d+:\s+(\S+?)(@\S+)?\s+inet\s+([0-9.]+)\//);
-          if (!m) continue;
-          const iface = m[1];
-          const addr = m[3];
-          const dyn = /(?:secondary|dynamic)/.test(line);
-          if (addr.startsWith('127.') || addr.startsWith('169.254.')) continue;
-          if (/^(virbr|veth|docker|vmnet|br-|lo)/.test(iface)) continue;
-          (collected[iface] = collected[iface] || []).push({ addr, dyn });
-        }
-        // 3) 每网卡取 1 个首选地址（静态优先；无静态才用 DHCP）；默认路由网卡排最前。
-        const firstOf = (arr) => {
-          const stat = arr.find((x) => !x.dyn);
-          return (stat || arr[0]).addr;
-        };
-        if (dev && collected[dev]) {
-          ips.push(firstOf(collected[dev]));
-          delete collected[dev];
-        }
-        for (const iface of Object.keys(collected)) ips.push(firstOf(collected[iface]));
-      } catch (e) { this.logger && this.logger.warn && this.logger.warn('lan ips: ' + e.message); }
+      // ★ 平台化（2026-09-11 修 K8）：原实现**直接**调用 `ip` (iproute2) ——
+      //   这是 Linux 专有命令；在 macOS/Windows 上抛异常后被 catch 吞掉，
+      //   于是 ips 恒为空 → 面板显示「开关已开但没有任何可访问地址」，
+      //   且**不报错**（静默降级）。同时它也是裸 execFileSync（无超时）。
+      //   现下沉到 platform/os/netinfo（三平台实现 + 经 platform/exec 有界）。
+      ips.push(...netInfo.lanAddresses());
+      if (!ips.length) {
+        this.logger && this.logger.warn && this.logger.warn(
+          "lan ips: 未枚举到可用局域网地址（platform=" + netInfo.PLATFORM +
+          ", supported=" + netInfo.supported + "）"
+        );
+      }
     } else {
-      ips.push('127.0.0.1');
+      ips.push("127.0.0.1");
     }
     // 去重保持稳定顺序
     const unique = [...new Set(ips)];
