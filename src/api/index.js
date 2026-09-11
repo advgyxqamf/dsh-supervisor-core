@@ -112,14 +112,56 @@ function collectBody(req, res, maxBytes, onDone) {
   req.on('error', () => {});
   req.on('end', () => { if (!over) onDone(body); });
 }
-// CSRF 深化校验（第二层）：带 Origin 的写请求须与本服务同源。
-// 职责单一：只防"用户浏览器里的恶意网页驱动 API"——访问者身份已由 identity.js
-// 的 socket 层事实判定，本函数不做（也不需要做）来源可信性判断。
+// CSRF 深化校验（第二层）：请求须与本服务**同源且同主机**。
+//
+// ⚠ 2026-09-11 修复（安全，K6）：旧实现**只比较端口** ——
+//   恶意页可从 `http://任意域:36360` 发起请求：Origin 端口匹配即放行；
+//   而 socket 层看到的是回环（浏览器代发）→ identity.loopback=true →
+//   连 apiAccessKey 都被豁免。CORS 只挡**读取**，不挡 CSRF 的**副作用**，
+//   于是 stop / upgrade / uninstall / restart-guard / settings 全可被驱动。
+//
+//   同时 identity.js:7-8 明确声称「Host 头：仅用于防 DNS-rebinding 的深化校验」，
+//   但**实现里从未读取过 req.headers.host** —— 又一处「注释声称、代码没有」。
+//
+// 现按声称补齐双闸：
+//   ① Host 头（若有）必须是回环名 —— 防 DNS-rebinding
+//      （攻击者把 evil.com 解析到 127.0.0.1，浏览器会带 `Host: evil.com`）；
+//   ② Origin（只影响带 Origin 的请求）：
+//      · 壳内 webview（tauri://localhost）→ 合法（面板就在壳里）；
+//      · 其余必须是回环名 + 本服务端口。
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/** 是否为本机回环主机名（含 IPv6 方括号形态）。 */
+function isLoopbackHost(h) {
+  if (!h) return false;
+  return LOOPBACK_HOSTS.has(String(h).toLowerCase());
+}
+
+/** 壳（Tauri webview）的来源：唯一被接受的非 HTTP 来源。 */
+function isShellOrigin(protocol, hostname) {
+  if (protocol !== 'tauri:') return false;
+  return hostname === 'localhost' || /(^|\.)tauri\.localhost$/.test(hostname);
+}
+
 function originAllowed(req, apiPort) {
+  // ── 闸 ①：Host 头（防 DNS-rebinding）──
+  //   浏览器会把 URL 里的域名放进 Host；若它不是回环名，
+  //   说明请求来自「被解析到 127.0.0.1 的外部域名」→ 拒绝。
+  const host = req.headers.host;
+  if (host) {
+    // Host 形如 `127.0.0.1:36360` / `[::1]:36360` / `evil.com`
+    const m = /^(\[[^\]]+\]|[^:]+)(?::\d+)?$/.exec(String(host).trim());
+    const hostname = m ? m[1] : String(host).trim();
+    if (!isLoopbackHost(hostname)) return false;
+  }
+
+  // ── 闸 ②：Origin（哪些页面能驱动本 API）──
   const o = req.headers.origin;
   if (!o) return true; // curl / CLI / 同源 GET 无 Origin
   try {
     const u = new URL(o);
+    if (isShellOrigin(u.protocol, u.hostname)) return true;
+    if (!isLoopbackHost(u.hostname)) return false;
     const port = u.port === '' ? (u.protocol === 'https:' ? '443' : '80') : u.port;
     return port === String(apiPort);
   } catch {
@@ -325,4 +367,7 @@ function serveStatic(res, file, corsOrigin) {
   }
 }
 
-module.exports = { createServer };
+// `originAllowed` 一并导出：**供测试直接做行为断言**。
+//   仅做源码正则断言不够 —— 本仓已有「注释声称、代码没有」的先例（K6 本身），
+//   正则同样可能被注释里的示例骗过。行为断言才是不变量 C5 要求的证据形式。
+module.exports = { createServer, originAllowed, isLoopbackHost, isShellOrigin };

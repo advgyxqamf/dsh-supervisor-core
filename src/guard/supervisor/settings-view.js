@@ -225,7 +225,10 @@ class SettingsView {
     if (dep.form !== 'sea-binary' || !dep.runningTarget) return null;
     try {
       const out = ex.runOut(dep.runningTarget, ['--version'], { timeoutMs: 20000 });
-      const m = /dsh-supervisor v([^s]+)/.exec(out);
+      // ⚠ 2026-09-11 修复（K9）：原为 /dsh-supervisor v([^s]+)/ —— 字符类 [^s] 的意图
+      //   是「非空白」，却写成了「非字母 s」：版本串里一旦出现 s 就截断，
+      //   且 \n 不在排除集内，正则会跨行吞字符。结果污染 self-update 的 verified 判定。
+      const m = /dsh-supervisor v([^\s]+)/.exec(out);
       return m ? m[1] : null;
     } catch { return null; }
   }

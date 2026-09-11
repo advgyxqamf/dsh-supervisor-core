@@ -8,6 +8,7 @@
 // 记录结构：{ port, role, owner, createdAt }
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const probe = require('../monitor/probe'); // 同层依赖（infra/probe），不依赖上层 domain/monitor（消除越界）
 
@@ -43,7 +44,12 @@ const SEGMENT_POOL = {
 
 class PortRegistry {
   constructor(opts) {
-    this._file = (opts && opts.file) || path.join(process.env.HOME || '/tmp', '.dsh', 'supervisor', 'ports.json');
+    // ⚠ 2026-09-11 修复（K7）：原为 `process.env.HOME || '/tmp'` ——
+    //   Windows **没有 HOME**（用 USERPROFILE），于是端口注册表落到 /tmp（当前盘的 \tmp），
+    //   与其它状态文件**不在同一目录**：state.json 在 %USERPROFILE%\.dsh\supervisor\，
+    //   ports.json 却在 \tmp\。后果：端口记录与守卫状态分裂，卸载/迁移时残留。
+    //   os.homedir() 是三平台正确来源（Windows 用 USERPROFILE，Unix 用 HOME）。
+    this._file = (opts && opts.file) || path.join(os.homedir(), '.dsh', 'supervisor', 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
     this._allocLock = false;     // 分配互斥：isTaken(await) 窗口内并发调用必须串行
     // 物理池（可配置）：opts.pools 覆盖默认（config.portPools 注入）；键缺失回退默认。

@@ -661,11 +661,20 @@ class NativeManager {
       if (m.packageDir) rm(m.packageDir);
       if (m.binPath) rm(m.binPath);
       for (const p of (m.dataPaths || [])) rm(p);
-    } else if (exitCode !== 0) {
-      // npm 卸载失败：仅清 manifest（避免残留锁死后续安装），数据路径保留并如实上报
-      this.logger.warn && this.logger.warn('npm uninstall exit ' + exitCode + '，数据路径保留');
     }
-    rm(this.manifestFile);
+    // ⚠ 2026-09-11 修复（K10）：**卸载失败时不得删除 manifest**。
+    //   旧实现在 exitCode!==0 时只打日志，随后**无条件** rm(manifestFile)。
+    //   而 npm uninstall 非 0（离线/权限/包被占用）时包其实**还在**：
+    //   记录一旦丢失，之后即使卸载成功也不再知道要清哪些残留
+    //   （packageDir / binPath / dataPaths），也无法向用户说明「上次卸载失败了」。
+    //   正确语义：成功 → 清 manifest（已无残留可追）；失败 → **保留**以便重试与如实上报。
+    if (exitCode === 0) {
+      rm(this.manifestFile);
+    } else {
+      this.logger.warn && this.logger.warn(
+        'npm uninstall exit ' + exitCode + '，保留 manifest 以便重试（数据路径未删）'
+      );
+    }
     this.uninstalling = null;
     this.lastUninstall = { ok: exitCode === 0, removed, error: exitCode === 0 ? null : ('npm uninstall 退出码 ' + exitCode), at: new Date().toISOString() };
     if (this.events) this.events.append('native_uninstalled', { removed });
