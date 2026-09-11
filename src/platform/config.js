@@ -59,13 +59,17 @@ const DEFAULTS = {
   selfUpdateDir: null,
   pluginsProfileName: 'web',
   packageName: '@deepseek-ai/dsh',
-  // 默认候选镜像源 = 预设全集（npm官方/国内三大镜像）。自动模式按延迟测速选最快可达，
-  // 与 UI 预设保持一致——系统任何 npm 拉包/更新都从这组候选选源。
+  // 默认候选镜像源。自动模式按延迟测速选最快可达，与 UI 预设/壳 mirror.rs 保持同一集合。
+  // ⚠ 每一项都经**真实 tarball 下载验证**（2026-09-11）——仅「元数据可读」不足以判定可用，
+  //   部分镜像只代理元数据、不代理 tarball。
+  //   已排除：mirrors.aliyun.com/npm、mirrors.tuna.tsinghua.edu.cn/npm（元数据不可用）。
   registries: [
     'https://registry.npmmirror.com',
     'https://registry.npmjs.org',
-    'https://mirrors.cloud.tencent.com/npm',
     'https://repo.huaweicloud.com/repository/npm/',
+    'https://mirrors.cloud.tencent.com/npm',
+    'https://npmreg.proxy.ustclug.org',
+    'https://r.cnpmjs.org',
   ],
   updateCheckEnabled: true,
   updateCheckIntervalMs: 3600000,

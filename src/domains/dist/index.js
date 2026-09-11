@@ -64,11 +64,14 @@ function semverCompare(a, b) {
  * 注意：仅收录经 -/ping 实测可达的镜像（npm官方/国内主流三大）。
  * 网易/USTC/SJTUG/阿里云等曾提供但已下线或 /-/ping 不可达——加入会污染自动测速
  * 与手动固定（用户可能选到死源），故不收录；需要额外源请用面板「添加」自定义。 */
+// 全部经真实 tarball 下载验证（2026-09-11）。面板「镜像源」卡即展示这一组。
 const REGISTRY_PRESETS = [
   { label: 'npm 官方', origin: 'https://registry.npmjs.org' },
   { label: 'npmmirror（国内·淘宝）', origin: 'https://registry.npmmirror.com' },
-  { label: '腾讯云镜像', origin: 'https://mirrors.cloud.tencent.com/npm' },
   { label: '华为云镜像', origin: 'https://repo.huaweicloud.com/repository/npm/' },
+  { label: '腾讯云镜像', origin: 'https://mirrors.cloud.tencent.com/npm' },
+  { label: '中科大镜像', origin: 'https://npmreg.proxy.ustclug.org' },
+  { label: 'cnpmjs 镜像', origin: 'https://r.cnpmjs.org' },
 ];
 
 /**
