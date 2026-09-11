@@ -79,7 +79,8 @@ console.log('== A1 能力字段完整性（无遗漏 / 无 undefined）==');
 console.log('== A4 autostart 跨平台行为一致性 ==');
 {
   // 壳自启：声明必须与行为一致
-  const expectShellAutostart = { linux: true, darwin: false, win32: true };
+  // 三平台**均已实现**（darwin 于 2026-09-11 补齐独立 LaunchAgent）。
+  const expectShellAutostart = { linux: true, darwin: true, win32: true };
   for (const pl of PLATFORMS) {
     const claimed = capabilityProfile(pl, 'x64').shellAutostart;
     check('A4 ' + pl + ' shellAutostart 声明与 capabilityProfile 一致', claimed === expectShellAutostart[pl], 'claimed=' + claimed);
@@ -155,10 +156,17 @@ console.log('== A2 声明能力必须有实现产物 ==');
 console.log('== A5 自愈机制真实性 ==');
 {
   const asSrc = readOs('autostart.js');
-  // 守卫自愈：macOS KeepAlive
-  const plist = asSrc.match(/function macPlist[\s\S]*?\n}/);
-  check('A5 macOS 守卫自愈 plist 含 KeepAlive', !!plist && /KeepAlive/.test(plist[0]), 'ok');
-  check('A5 macOS 守卫自愈 plist 含 RunAtLoad', !!plist && /RunAtLoad/.test(plist[0]), 'ok');
+  // 守卫 plist 的定义**归桌面壳**（所有权矩阵）—— 内核不再持有该模板，故跨仓读壳的 service.rs。
+  const shellSvc = path.join(ROOT, '..', 'dsh-supervisor-launcher', 'src-tauri', 'src', 'service.rs');
+  if (fs.existsSync(shellSvc)) {
+    const svc = fs.readFileSync(shellSvc, 'utf8');
+    check('A5 守卫 plist 含 KeepAlive（守卫崩溃自愈）', /KeepAlive/.test(svc), 'ok');
+    check('A5 守卫 plist 含 RunAtLoad（登录即启动）', /RunAtLoad/.test(svc), 'ok');
+    // ⚠ 所有权不变量：内核**不得**再写守卫 plist（双写会让两模板漂移 + 关闭自启不生效）
+    check('A5 内核不再持有守卫 plist 模板（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
+  } else {
+    console.log('SKIP A5 守卫 plist 断言（壳仓不在同级目录）');
+  }
   // 壳自愈 Windows：shell 检查必须**独立于** `if (-not $up)` 块
   const ps = asSrc.match(/const ps = \[[\s\S]*?\]\.join/);
   check('A5 Windows watchdog 脚本存在', !!ps, 'ok');
@@ -206,9 +214,10 @@ console.log('== A7 壳自愈：声明 ↔ 实现 ==');
   }
   // 未知平台不得声称具备
   check('A7 未知平台 shellSelfHeal 为 false', capabilityProfile(UNKNOWN, 'x64').shellSelfHeal === false);
-  // darwin 原生自启仍未实现 —— 新增看护不得让它误报为「有原生机制」
-  check('A7 darwin shellAutostart 仍为 false（看护 ≠ 原生机制，二者不可互替）',
-    capabilityProfile('darwin', 'arm64').shellAutostart === false);
+  // darwin 原生自启已于 2026-09-11 补齐 —— 但必须是**独立 LaunchAgent**，
+  // 不得复用守卫的 plist（那是壳的产权）。下面的 A8 组验证该分离。
+  check('A7 darwin shellAutostart 为 true（2026-09-11 补齐）',
+    capabilityProfile('darwin', 'arm64').shellAutostart === true);
   if (hasWd) {
     check('A7 看护覆盖三平台（不按平台分支）', !/process\.platform/.test(wd), '纯策略，平台差异在 desktop.js');
     check('A7 看护有宽限期（避让壳自更新空窗）', /graceMs/.test(wd) && /updateGraceMs/.test(wd), 'ok');
@@ -222,6 +231,39 @@ console.log('== A7 壳自愈：声明 ↔ 实现 ==');
   } else {
     console.log('SKIP A7 跨仓 exe 断言（壳仓不在同级目录）');
   }
+}
+
+// ── A8 自启所有权：内核不越权 + GUI 产物与守卫分离 ──
+console.log('== A8 自启所有权不变量 ==');
+{
+  const asSrc = readOs('autostart.js');
+  // 1) 内核不得写/删守卫的 plist（macOS）—— 那条路径上只允许 enable/disable + bootstrap/bootout
+  const guardLabelRe = /GUARD_LABEL\s*=\s*'([^']+)'/;
+  const guardLabel = (asSrc.match(guardLabelRe) || [])[1];
+  const guiLabel = (asSrc.match(/GUI_LABEL\s*=\s*'([^']+)'/) || [])[1];
+  check('A8 守卫与 GUI 使用**不同**的 LaunchAgent 标签',
+    !!guardLabel && !!guiLabel && guardLabel !== guiLabel, guardLabel + ' / ' + guiLabel);
+  check('A8 GUI 标签是守卫标签的子域（com.dsh.supervisor.gui）',
+    guiLabel === guardLabel + '.gui', String(guiLabel));
+  // 内核 macOS 分支不得出现写守卫 plist 或删除它的调用
+  const macBranch = asSrc.slice(asSrc.indexOf('if (isMac) {'), asSrc.indexOf('// Linux（systemd'));
+  check('A8 内核 macOS 分支不写守卫 plist', !/writeFileSync\(atmp,\s*(plist|macPlist)/.test(macBranch), 'ok');
+  check('A8 内核 macOS 分支不删除守卫 plist（否则关闭自启不生效）',
+    !/unlinkSync\(file\)/.test(macBranch), 'ok');
+  check('A8 内核用 launchctl enable/disable 持久化开关（关闭自启可生效）',
+    /launchctl/.test(asSrc) && /on \? 'enable' : 'disable'/.test(asSrc), 'macSetEnabled');
+  // 2) GUI plist 内容约束
+  const guiPlist = asSrc.match(/function macGuiPlist[\s\S]*?\n}/);
+  check('A8 GUI plist 存在（macOS 原生壳自启的产物）', !!guiPlist, 'ok');
+  if (guiPlist) {
+    check('A8 GUI plist 含 RunAtLoad（登录即启动）', /RunAtLoad/.test(guiPlist[0]), 'ok');
+    check('A8 GUI plist **不含** KeepAlive（崩溃由守卫看护负责，避免两套机制争抢）',
+      !/KeepAlive/.test(guiPlist[0]), 'ok');
+    check('A8 GUI plist 限定 Aqua 会话（与实际图形会话判定同语义）',
+      /LimitLoadToSessionType/.test(guiPlist[0]) && /Aqua/.test(guiPlist[0]), 'ok');
+  }
+  // 3) 内核不再持有守卫 plist 模板
+  check('A8 内核已删除 macPlist（守卫定义归壳）', !/function macPlist/.test(asSrc), 'ok');
 }
 
 const failed = results.filter((r) => !r);

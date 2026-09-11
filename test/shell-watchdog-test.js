@@ -142,9 +142,11 @@ const mk = (opts) => {
       check('W4-f ' + pl + ' shellSelfHeal 声称为 true（本次实现）',
         capabilityProfile(pl, 'x64').shellSelfHeal === true, String(capabilityProfile(pl, 'x64').shellSelfHeal));
     }
-    // darwin 的原生自启仍未实现 —— 不得因新增看护而误报为有原生机制
-    check('W4-g darwin shellAutostart 仍如实为 false（原生机制缺失）',
-      capabilityProfile('darwin', 'arm64').shellAutostart === false);
+    // darwin 原生自启已于 2026-09-11 补齐（独立 LaunchAgent）——
+    // 「原生自启」与「崩溃自愈」是两个独立字段，此处断言二者**同时**成立。
+    check('W4-g darwin 原生自启与崩溃自愈**同时**成立（互补而非替代）',
+      capabilityProfile('darwin', 'arm64').shellAutostart === true &&
+      capabilityProfile('darwin', 'arm64').shellSelfHeal === true);
   }
 
   // ── W5 壳侧：identity.json 必须记录 exe（看护的路径来源）──

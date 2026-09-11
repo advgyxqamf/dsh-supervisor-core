@@ -1,10 +1,37 @@
 'use strict';
 
-// 平台化开机自启：三端同一 setAutostart(on)/status()。
-// - Linux：systemd --user enable/disable + linger + GUI desktop（原 host-service 逻辑迁移）；
-// - macOS：LaunchAgent plist（RunAtLoad + KeepAlive）+ 登录面板（同 plist 附带）；
-// - Windows：schtasks ONLOGON 登录任务（/RL HIGHEST）。
-// 全部 execFileSync 外置 try/catch（平台能力缺失 → 明确错误返回）。
+// ═══════════════════════════════════════════════════════════════════════════
+// 平台化开机自启（三端同一 setAutostart(on) / status()）
+//
+// ## 所有权矩阵（2026-09-11 定案 —— 此前**没有**矩阵，导致两个写入方争同一文件）
+//
+// | 产物                          | 唯一所有者        | 依据 |
+// |-------------------------------|-------------------|------|
+// | 守卫服务**定义**              | **桌面壳**        | 引导顺序：壳是安装器，装内核后立即建立（service.rs）|
+// |   · Linux  ~/.config/systemd/user/dsh-supervisor.service
+// |   · macOS  ~/Library/LaunchAgents/com.dsh.supervisor.plist
+// |   · Windows 计划任务 DSH-Supervisor
+// | 守卫自启**开关**（enable/disable）| **内核**（面板）| 用户可见设置项在面板 |
+// | 壳（GUI）自启产物              | **内核**          | 同上；与守卫自启同属「整链自启」语义 |
+// | 壳崩溃自愈                    | **守卫看护**      | 壳不能自监督（domains/shell/watchdog）|
+//
+// ### 修复的历史缺陷（本次定案的原因）
+//
+// 1. **双写冲突**：内核曾与壳**同时写** macOS 的 com.dsh.supervisor.plist ——
+//    两个模板各自演进必然漂移；且内核 disable 时 `unlink` 该文件，
+//    而壳下次启动会**重建并 bootstrap** → **用户「关闭自启」不生效**。
+//    现内核**只做 enable/disable + bootstrap/bootout，绝不写/删该文件**（launchctl enable/disable 持久化到 launchd 覆盖库）。
+// 2. **macOS 无壳自启**：旧注释谎称「同 plist 附带」，实测 plist 只含守卫；
+//    现新增独立 LaunchAgent com.dsh.supervisor.gui（壳所有者的产物，内核创建）。
+//
+// ## 平台机制
+// - Linux  ：systemd --user enable/disable + linger + XDG autostart .desktop（GUI）
+// - macOS  ：launchctl enable/disable + bootstrap/bootout
+//            （守卫 plist 由壳建立；GUI 用独立 plist com.dsh.supervisor.gui）
+// - Windows：schtasks ONLOGON（GUI）+ MINUTE watchdog（崩溃自拉）+ /Change /ENABLE|/DISABLE（守卫）
+//
+// 全部 execFileSync 外置 try/catch（平台能力缺失 → 明确错误返回，绝不静默成功）。
+// ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,8 +43,67 @@ const isLinux = process.platform === 'linux';
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
 
+const GUARD_LABEL = 'com.dsh.supervisor';
+const GUI_LABEL = 'com.dsh.supervisor.gui';
+
 function laFile(name) {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', name + '.plist');
+}
+
+// ── macOS launchctl 助手 ──
+// 设计：**内核只做 enable/disable + bootstrap/bootout，绝不写/删守卫的 plist**
+//   （守卫定义归桌面壳，见文件头所有权矩阵）。
+//   `launchctl enable/disable` 会持久化到 launchd 覆盖库 —— 这正是「关闭自启」能生效的机制；
+//   而旧实现用 `unlink` 删文件，壳下次启动即重建并 bootstrap，导致关闭不生效。
+function macUid() { return (typeof process.getuid === 'function') ? process.getuid() : 0; }
+const MAC_T = 8000;
+
+/** 服务是否已被 launchd 载入（RunAtLoad 服务载入即运行）。 */
+function macLoaded(label) {
+  try {
+    execFileSync('launchctl', ['print', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeout: MAC_T });
+    return true;
+  } catch { return false; }
+}
+function macSetEnabled(label, on) {
+  try { execFileSync('launchctl', [on ? 'enable' : 'disable', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeout: MAC_T }); return true; }
+  catch { return false; }
+}
+function macBootstrap(file) {
+  try { execFileSync('launchctl', ['bootstrap', 'gui/' + macUid(), file], { stdio: 'ignore', timeout: MAC_T }); return true; }
+  catch { return false; }
+}
+function macBootout(label) {
+  try { execFileSync('launchctl', ['bootout', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeout: MAC_T }); return true; }
+  catch { return false; }
+}
+
+/**
+ * 桌面壳（GUI）的 LaunchAgent plist —— **内核所有**（面板开关创建/删除）。
+ *
+ * ⚠ 关键设计：**不加 KeepAlive**。
+ *   壳的崩溃恢复由「守卫看护」（domains/shell/watchdog）负责 —— 它会先确认图形会话、
+ *   有宽限期、有界重试。若此处再加 KeepAlive，两套机制会互相争抢拉起，
+ *   且 launchd 的 KeepAlive 在 GUI 应用上可能造成无退避的重启循环。
+ *   故本 plist 只表达「**登录时启动**」这一件事。
+ *
+ * LimitLoadToSessionType=Aqua：只在实际图形会话中加载（守规矩的做法，
+ *   与 domains/shell/watchdog 的 sessionAvailable 判定语义一致）。
+ */
+function macGuiPlist(guiExe) {
+  const log = path.join(os.homedir(), '.dsh', 'shell', 'gui-stdio.log');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+    + '<plist version="1.0"><dict>\n'
+    + '  <key>Label</key><string>' + GUI_LABEL + '</string>\n'
+    + '  <key>ProgramArguments</key>\n'
+    + '  <array><string>' + String(guiExe).replace(/"/g, '\\"') + '</string></array>\n'
+    + '  <key>RunAtLoad</key><true/>\n'
+    + '  <key>LimitLoadToSessionType</key><string>Aqua</string>\n'
+    + '  <key>ProcessType</key><string>Interactive</string>\n'
+    + '  <key>StandardOutPath</key><string>' + log + '</string>\n'
+    + '  <key>StandardErrorPath</key><string>' + log + '</string>\n'
+    + '</dict></plist>\n';
 }
 function guiFile() {
   return path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
@@ -47,13 +133,20 @@ function status() {
     return { kind: 'schtasks', on: guard || gui || watchdog, gui, watchdog, guard };
   }
   if (isMac) {
-    const on = fs.existsSync(laFile('com.dsh.supervisor'));
-    // ⚠ gui 必须**如实**（2026-09-11 审计修复）：
-    //   LaunchAgent plist 只含守卫（ProgramArguments = <daemon> daemon），**不含桌面壳**。
-    //   旧实现返回 `gui: on`（把「守卫自启」当成「壳自启」），使面板显示「开机自启已开启」
-    //   而壳实际不会自启。这是「静默成功」的同一类缺陷，直接违反本仓已声明的不变量：
-    //     service.js: 「未实现的能力**显式抛 CapabilityError**（绝不静默失败）」。
-    return { kind: 'launchagent', on, gui: false, guiSupported: false };
+    // 守卫定义**由桌面壳建立**（service.rs）—— 内核只读其存在性 + 查询载入状态。
+    const guardDefined = fs.existsSync(laFile(GUARD_LABEL));
+    const guardLoaded = guardDefined && macLoaded(GUARD_LABEL);
+    const guiFile_ = laFile(GUI_LABEL);
+    const guiDefined = fs.existsSync(guiFile_);
+    return {
+      kind: 'launchagent',
+      on: guardLoaded,
+      gui: guiDefined && macLoaded(GUI_LABEL),
+      guiSupported: true,          // 2026-09-11 起 macOS 有壳自启（独立 LaunchAgent）
+      guardDefined,                // 供面板解释「定义缺失 → 请先启动一次桌面壳」
+      guardLabel: GUARD_LABEL,
+      guiLabel: GUI_LABEL,
+    };
   }
   // Linux
   let unit = 'unknown';
@@ -113,18 +206,27 @@ function setAutostart(on) {
     return { ok: errors.length === 0, errors, ...status() };
   }
   if (isMac) {
+    // ⚠ 守卫的 plist 由**桌面壳**建立（所有权矩阵见文件头）—— 内核**不写、不删**。
+    //   内核只做：`launchctl enable/disable`（持久化到 launchd 覆盖库）+ bootstrap/bootout。
+    //   修掉的历史缺陷：旧实现在 disable 时 `unlink` 该文件，而壳下次启动会重建并 bootstrap →
+    //   **用户「关闭自启」不生效**。
     try {
-      const file = laFile('com.dsh.supervisor');
+      const file = laFile(GUARD_LABEL);
       if (on) {
-        const plist = macPlist(daemonCommand());
-        fs.mkdirSync(path.dirname(file), { recursive: true });
-        const atmp = file + '.tmp'; fs.writeFileSync(atmp, plist); fs.renameSync(atmp, file); // 原子写
-        try { execFileSync('launchctl', ['bootstrap', 'gui/' + process.getuid(), file]); } catch {}
+        if (!fs.existsSync(file)) {
+          errors.push('守卫服务定义缺失（' + file + '）：定义由桌面壳建立，请先启动一次桌面壳');
+        } else {
+          if (!macSetEnabled(GUARD_LABEL, true)) errors.push('launchctl enable 失败');
+          if (!macLoaded(GUARD_LABEL) && !macBootstrap(file)) errors.push('launchctl bootstrap 失败');
+        }
       } else {
-        try { execFileSync('launchctl', ['bootout', 'gui/' + process.getuid(), 'com.dsh.supervisor']); } catch {}
-        try { fs.unlinkSync(file); } catch {}
+        if (macLoaded(GUARD_LABEL)) macBootout(GUARD_LABEL);
+        if (!macSetEnabled(GUARD_LABEL, false)) errors.push('launchctl disable 失败');
+        // 刻意**不删除 plist**：定义属壳；删掉会被壳重建 → 关闭不生效。
       }
     } catch (e) { errors.push('launchagent: ' + e.message); }
+    const g = setGuiAutostart(on, 'darwin');
+    if (!g.ok) errors.push(g.error || 'GUI 自启设置失败');
     return { ok: errors.length === 0, errors, ...status() };
   }
   // Linux（systemd --user + linger + GUI desktop）
@@ -136,25 +238,46 @@ function setAutostart(on) {
   return { ok: errors.length === 0, errors, ...status() };
 }
 
-/** GUI（桌面壳）登录自启 —— 平台差异**如实声明**（2026-09-11 审计修复）。
+/** GUI（桌面壳）登录自启 —— **三平台均已实现**（2026-09-11 补齐 macOS）。
  *
- *  linux  —— ✅ XDG autostart .desktop（本函数实现）
+ *  linux  —— ✅ XDG autostart .desktop（Exec 按实际安装解析）
+ *  darwin —— ✅ 独立 LaunchAgent com.dsh.supervisor.gui（RunAtLoad，无 KeepAlive）
  *  win32  —— ✅ schtasks 任务 DSH-Supervisor-GUI（由 setAutostart 建立；本函数不重复实现）
- *  darwin —— ❌ **未实现**
  *
- * ⚠ 历史错误（本项目奠基提交 8867942 起即存在，直到 2026-09-11 审计才被发现）：
- *   旧注释声称「mac 由 LaunchAgent 一并代管」，而 macPlist 从奠基提交至今**逐字节未变**、
- *   只含守卫。旧实现据此对非 Linux 平台直接 `return { ok: true }` —— **静默成功**，
- *   调用方与用户都以为壳已配置自启。
- *   现改为对未实现平台**显式报告**（ok:false + unsupported），与 service.js 的 CapabilityError 同规。
+ * ⚠ 历史错误（奠基提交 8867942 起，2026-09-11 审计发现）：
+ *   旧注释声称「mac 由 LaunchAgent 一并代管」，而 macPlist 从奠基至今逐字节未变、只含守卫；
+ *   旧实现据此对非 Linux 平台直接 `return { ok: true }` —— **静默成功**。
+ *   现已实现，且实现方式仍遵循不变量：**未实现的能力必须显式报告**（见下方未知平台分支）。
  */
 function setGuiAutostart(on, platform) {
   const pl = platform || process.platform;
   if (pl === 'darwin') {
-    return {
-      ok: false, unsupported: true, platform: pl, enabled: false,
-      error: 'macOS 桌面壳登录自启未实现（LaunchAgent plist 仅含守卫，不含壳）',
-    };
+    // macOS 原生壳自启（**内核所有**的产物；守卫的 plist 归壳，两者标签分离）。
+    try {
+      const file = laFile(GUI_LABEL);
+      if (on) {
+        const gui = guiCommand();
+        if (!gui || !fs.existsSync(gui)) {
+          // 不盲写一个指向不存在文件的 plist（否则登录时 launchd 静默失败）。
+          return { ok: false, platform: pl, enabled: false,
+                   error: '未定位到桌面壳可执行文件，无法配置自启：' + gui };
+        }
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const atmp = file + '.tmp';
+        fs.writeFileSync(atmp, macGuiPlist(gui));
+        fs.renameSync(atmp, file);            // 原子写
+        macSetEnabled(GUI_LABEL, true);
+        const loaded = macLoaded(GUI_LABEL) || macBootstrap(file);
+        return { ok: true, platform: pl, enabled: true, via: 'launchagent',
+                 label: GUI_LABEL, file, exe: gui, loaded };
+      }
+      if (macLoaded(GUI_LABEL)) macBootout(GUI_LABEL);
+      macSetEnabled(GUI_LABEL, false);
+      try { fs.unlinkSync(file); } catch {}   // GUI 产物属内核 → 关闭即删除是干净的
+      return { ok: true, platform: pl, enabled: false, via: 'launchagent', label: GUI_LABEL };
+    } catch (e) {
+      return { ok: false, platform: pl, enabled: false, error: e.message };
+    }
   }
   if (pl === 'win32') {
     // Windows 的壳自启由 setAutostart 的 schtasks DSH-Supervisor-GUI 承担（职责分离，见本文件顶部注释）。
@@ -218,21 +341,13 @@ function guiCommand() {
   return cands[0];
 }
 
-function macPlist(daemon) {
-  return '<?xml version="1.0" encoding="UTF-8"?>\n'
-    + '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-    + '<plist version="1.0"><dict>\n'
-    + '  <key>Label</key><string>com.dsh.supervisor</string>\n'
-    + '  <key>ProgramArguments</key>\n'
-    + '  <array><string>' + daemon.replace(/"/g, '\\"') + '</string><string>daemon</string></array>\n'
-    + '  <key>RunAtLoad</key><true/>\n'
-    + '  <key>KeepAlive</key><true/>\n'
-    + '  <key>ProcessType</key><string>Interactive</string>\n'
-    // 系统日志框架（目录收敛 §8）：守卫 stdout/stderr 落入独立 log/guard-stdio.log（launchd 重定向），
-    // 不与 createLogger(log/guard.log) 同一文件——避免双写交错/轮转竞态（旧布局曾落 supervisor.log 根目录）。
-    + '  <key>StandardOutPath</key><string>' + path.join(os.homedir(), '.dsh', 'supervisor', 'log', 'guard-stdio.log') + '</string>\n'
-    + '  <key>StandardErrorPath</key><string>' + path.join(os.homedir(), '.dsh', 'supervisor', 'log', 'guard-stdio.log') + '</string>\n'
-    + '</dict></plist>\n';
-}
+// ⚠ `macPlist()` 已删除（2026-09-11）：守卫的 plist 定义**归桌面壳**（service.rs），
+//   内核不再写它（所有权矩阵见文件头）。保留一个不再使用的模板只会与壳的模板漂移。
+//   守卫 plist 的 KeepAlive 断言现由 test/platform-capability-audit-test.js 跨仓读壳的
+//   service.rs 验证（与本文件对壳 exe 字段的断言同一模式）。
+//
+// 以下为 **GUI** 的 plist（内核所有的产物），故保留在核仓。
+//
+// （原 `macPlist()` 函数体已删除 —— 守卫 plist 归桌面壳；保留一份副本只会与壳的模板漂移。）
 
 module.exports = { status, setAutostart, setGuiAutostart, daemonCommand, guiCommand };

@@ -57,7 +57,7 @@ macOS 的**壳自启 / 壳自愈从项目奠基提交（`8867942`, 2026-09-01）
 | C10 | 沙箱多实例（transient） | ✅ `systemd-run` | ❌ **显式** | ❌ **显式** | `platform/os/service.js` | A3 |
 | C11 | **守卫**开机自启 | ✅ systemd + linger | ✅ LaunchAgent | ✅ schtasks | `platform/os/autostart.js` | A2 |
 | C12 | **守卫**崩溃自愈 | ✅ `Restart=always` | ✅ `KeepAlive` | ✅ Watchdog 每 5 min | `platform/os/autostart.js` | A5 |
-| C13 | **壳**开机自启（原生机制） | ✅ XDG `.desktop` | ❌ **未实现** | ✅ schtasks `DSH-Supervisor-GUI` | `platform/os/autostart.js` | A4 |
+| C13 | **壳**开机自启（原生机制） | ✅ XDG `.desktop` | ✅ LaunchAgent `com.dsh.supervisor.gui` | ✅ schtasks `DSH-Supervisor-GUI` | `platform/os/autostart.js` | A4 · A8 · P1–P5 |
 | C14 | **壳**崩溃自愈 | ✅ 守卫看护 | ✅ 守卫看护 | ✅ 守卫看护 | `domains/shell/watchdog.js` | A7 · W1–W5 · E2E |
 
 **运行时声明**：`capabilityProfile()` 输出 `guardAutostart` / `guardSelfHeal` / `shellAutostart` / `shellSelfHeal`
@@ -153,18 +153,54 @@ if (-not $up) {                       # 仅当「守卫也不可达」时才进�
 | `test/shell-watchdog-test.js`（W1–W5，36 项）| 决策穷举 + 进程过滤 + 集成（注入 mock）+ 接线 + 壳侧契约 |
 | `test/shell-watchdog-e2e-test.js`（E2E，6 项）| **真实 Supervisor + 真实 spawn**：壳缺失 → 真的被拉起 |
 
-### 仍未实现（已如实声明）
+## 六、自启所有权矩阵（2026-09-11 定案）
 
-| 能力 | Linux | macOS | Windows | 影响 | 缓解 |
-|---|---|---|---|---|---|
-| **壳开机自启（原生机制）** | ✅ | ❌ | ✅ | macOS 用户重启后需手动打开壳 | ✅ **已由壳自愈覆盖**：守卫自启 → 看护发现壳缺失 → 拉起 |
+此前**没有**矩阵，导致 macOS 上两个写入方争同一个 plist。现明确：
 
-> ⚠️ 「原生自启」与「崩溃自愈」**不可互相替代**，故两个字段独立声明：
-> macOS 的 `shellAutostart: false`（无原生机制）与 `shellSelfHeal: true`（守卫看护）**同时成立**。
+| 产物 | 唯一所有者 | 依据 |
+|---|---|---|
+| 守卫服务**定义**（unit / plist / 计划任务）| **桌面壳**（`service.rs`）| 引导顺序：壳是安装器，装内核后立即建立 |
+| 守卫自启**开关**（enable/disable）| **内核**（面板）| 用户可见设置项在面板 |
+| 壳（GUI）自启产物 | **内核**（`autostart.js`）| 同上；与守卫自启同属「整链自启」语义 |
+| 壳崩溃自愈 | **守卫看护** | 壳不能自监督（`domains/shell/watchdog`）|
+
+### 修复的两类缺陷
+
+**① 双写冲突（macOS）**
+
+内核与壳**同时写** `~/Library/LaunchAgents/com.dsh.supervisor.plist`，且内核 disable 时
+`unlink` 该文件，而壳下次启动会重建并 bootstrap →
+**用户「关闭自启」不生效**（下次开机又回来了）。
+
+现内核**只做 `launchctl enable/disable` + `bootstrap/bootout`，绝不写/删该文件**。
+`launchctl enable/disable` 持久化到 launchd 覆盖库 —— 这才是「关闭」能生效的机制。
+
+**② macOS 无壳自启**
+
+旧注释谎称「同 plist 附带」，实测只含守卫。现新增**独立** LaunchAgent：
+
+```
+com.dsh.supervisor      ← 守卫（壳所有）
+com.dsh.supervisor.gui  ← 桌面壳（内核所有）
+```
+
+GUI plist 的关键约束：**只表达「登录启动」**（`RunAtLoad` + `LimitLoadToSessionType=Aqua`），
+**不加 `KeepAlive`** —— 崩溃恢复归**守卫看护**负责（它有会话判定、宽限期、有界重试）；
+两套机制同时管会互相争抢，且 launchd 的 KeepAlive 在 GUI 应用上可能造成无退避重启循环。
+
+### 现在三平台能力齐备
+
+| 能力 | Linux | macOS | Windows |
+|---|---|---|---|
+| 壳开机自启（原生机制） | ✅ systemd + XDG | ✅ LaunchAgent | ✅ schtasks |
+| 壳崩溃自愈 | ✅ 守卫看护 | ✅ 守卫看护 | ✅ 守卫看护 |
+
+> 「原生自启」与「崩溃自愈」是**两个独立字段**：前者管「重启后自己回来」，
+> 后者管「运行中崩了被拉起」。二者互补，不互相替代。
 
 ---
 
-## 六、如何运行审计
+## 七、如何运行审计
 
 ```bash
 node test/platform-capability-audit-test.js    # 42 项断言，任意平台可跑

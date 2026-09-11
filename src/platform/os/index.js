@@ -95,12 +95,10 @@ function capabilityProfile(platform, arch) {
       hostService: 'launchd',
       guardAutostart: true,  // LaunchAgent RunAtLoad + KeepAlive
       guardSelfHeal: true,   // KeepAlive
-      // ⚠ shellAutostart 保持 false —— 这里的语义是「**平台原生**自启机制」。
-      //   macOS 的 LaunchAgent plist 只含守卫，**没有壳的原生自启**
-      //   （历史注释谎称「由 LaunchAgent 一并代管」，实测 macPlist 从奠基提交至今逐字节未变）。
-      //   但「壳能否在重启后自己回来」是另一回事：由 shellSelfHeal（守卫看护）覆盖 ——
-      //   守卫经 LaunchAgent 自启 → 看护发现壳缺失 → 拉起。故两项**不可互相替代**，需同时看。
-      shellAutostart: false,
+      // ✅ 2026-09-11 补齐：独立 LaunchAgent com.dsh.supervisor.gui（RunAtLoad）。
+      //   守卫的 plist（com.dsh.supervisor）仍归**桌面壳**建立，内核只 enable/disable —— 见
+      //   platform/os/autostart.js 文件头的所有权矩阵。
+      shellAutostart: true,
       shellSelfHeal: true,   // 守卫看护（2026-09-11 新增，此前 macOS 完全没有壳自愈）
     });
   }
