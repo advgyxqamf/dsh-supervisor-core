@@ -1,44 +1,24 @@
 'use strict';
-// 版本自洽校验（双轨独立，DESIGN §16.4）：
-//   --core   内核：package.json 即单源（无跨组件同号要求）
-//   --shell  壳：Cargo.toml[package].version === tauri.conf.json.version（两处互锁）
-// 无参 = 全部校验（私有仓两者并存）；供 bump.sh / verify:shell 复用；违反退出 1。
-const fs = require('node:fs');
-const mode = process.argv[2] || '--all';
+// 版本自洽校验（**内核**）。
+//
+// 2026-09-11 双仓隔离：壳版本校验（Cargo.toml / tauri.conf.json / Cargo.lock 三处互锁）
+// 已迁回壳仓 scripts/verify-shell-versions.js —— 壳的版本属于壳自身，
+// 不应由内核仓脚本管理。本文件只校验内核单源。
+const mode = process.argv[2] || '--core';
 const bad = [];
 function coreCheck() {
   const pkg = require('../../package.json');
   // 版本规范（2026-09 定稿）：内核 = semver + 两档预览后缀（BETA.n / RC.n）——
   // 0.1.1-BETA.1 / 0.1.1-RC.1 / 0.1.1（无后缀=正式版）
-  if (!/^[0-9]+\.[0-9]+\.[0-9]+(-(BETA|RC)\.[0-9]+)?$/.test(pkg.version || '')) bad.push('package.json.version 非法: ' + pkg.version);
+  if (!/^[0-9]+\.[0-9]+\.[0-9]+(-(BETA|RC)\.[0-9]+)?$/.test(pkg.version || '')) {
+    bad.push('package.json.version 非法: ' + pkg.version);
+  }
   if (!bad.length) console.log('内核版本 OK: ' + pkg.version + '（package.json 单源）');
 }
-/** 壳源码目录（双仓拆分后本仓无 src-tauri）——DSH_SHELL_DIR 或 .shell-work。 */
-function shellDir() {
-  const path = require('node:path');
-  const root = path.join(__dirname, '..', '..');
-  if (process.env.DSH_SHELL_DIR) {
-    const d = process.env.DSH_SHELL_DIR;
-    return fs.existsSync(path.join(d, 'src-tauri')) ? path.join(d, 'src-tauri') : d;
-  }
-  const local = path.join(root, '.shell-work', 'src-tauri');
-  return fs.existsSync(local) ? local : null;
+if (mode === '--core' || mode === '--all') {
+  coreCheck();
+} else {
+  console.error('未知模式: ' + mode + '（本仓只支持 --core；壳版本校验见壳仓 scripts/verify-shell-versions.js）');
+  process.exit(2);
 }
-function shellCheck() {
-  const path = require('node:path');
-  const dir = shellDir();
-  if (!dir) { bad.push('未找到壳源码（本仓已剥离 src-tauri）；请设置 DSH_SHELL_DIR 或在 .shell-work 放置壳 checkout'); return; }
-  let cargo; let tauri;
-  try {
-    cargo = fs.readFileSync(path.join(dir, 'Cargo.toml'), 'utf8').match(/^version\s*=\s*"([0-9.]+)"/m)?.[1];
-    tauri = JSON.parse(fs.readFileSync(path.join(dir, 'tauri.conf.json'), 'utf8')).version;
-  } catch (e) { bad.push('读取壳版本失败: ' + e.message); return; }
-  if (!cargo) bad.push('Cargo.toml 缺 [package] version');
-  if (tauri && cargo && tauri !== cargo) bad.push('tauri.conf.json ' + tauri + ' ≠ Cargo.toml ' + cargo);
-  if (tauri && !/^[0-9]+\.[0-9]+\.[0-9]+$/.test(tauri)) bad.push('壳版本非法: ' + tauri);
-  if (!bad.length) console.log('壳版本自洽 OK: ' + tauri + '（Cargo.toml = tauri.conf.json）');
-}
-if (mode === '--core') coreCheck();
-else if (mode === '--shell') shellCheck();
-else { coreCheck(); shellCheck(); }
 if (bad.length) { console.error('版本校验失败:\n- ' + bad.join('\n- ')); process.exit(1); }

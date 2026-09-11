@@ -17,7 +17,7 @@ release/
 │   ├── verify-desktop.md      ← 桌面真机手工验收清单（GUI 场景）
 │   └── credentials.md         ← 凭据/令牌管理（GitHub PAT + NPM token，值不入库）
 └── scripts/                   ← 发布自动化脚本（唯一可执行集）
-    ├── bump.sh                ← 版本提升（--core 内核单源；--shell 仅随壳仓流程使用）
+    ├── bump.sh                ← 版本提升（**--core 内核单源**；壳版本提升见壳仓 scripts/bump-shell.sh）
     ├── build-ui.sh            ← 前端统一构建（ui/ → ui-react/ 镜像；npm test 与 launcher 携带依赖）
     ├── build-launcher.sh      ← 内核统一发布物（esbuild bundle core.cjs + node 启动脚本 + ui-react）
     │                             `--all-platforms`：一次构建 → 派生 4 平台（零 GitHub 额度）
@@ -25,7 +25,6 @@ release/
     ├── _npm-auth.sh           ← npm 认证解析共享库（**单源**；publish-core/configure-credentials 共用）
     ├── ci-core.sh             ← 发布产线核心逻辑（**单源**：CI 与本地 Linux 生产都跑它）
     ├── publish-core.sh        ← 内核 npm 平台子包发布（dry-run/--publish；self-check 版本核对）
-    ├── export-shell.sh        ← 导出公开壳仓（壳仓更新桥；URL 缺省=仅组装 dist/export-shell/）
     ├── release.sh             ← 源码打包出口（tar.gz，非发布通道）
     ├── release-core.sh        ← 一键发布编排（薄编排：委托 ci-core.sh + 平台闸/预检/tag 时序）
     ├── configure-credentials.sh ← 本机凭据安全配置（环境变量 → 0600 配置，值不入库）
@@ -46,11 +45,16 @@ release/
 | `npm run publish:core:all` | publish-core.sh --all-platforms | 全平台子包发布（默认 dry-run） |
 | `npm run release:core:all` | release-core.sh --all-platforms | **全平台 dry-run** |
 | `npm run release:core:all:publish` | release-core.sh --all-platforms --publish | **全平台真发（推荐，零 GitHub 额度）** |
-| `npm run export:shell` | export-shell.sh | 导出公开壳仓（壳更新桥） |
 | `npm run release:guard` | release.sh | 源码打包 |
 
-> 已移除：`build:sea` / `verify:shell`（2026-09 双仓拆分：SEA 形态全平台弃用 → launcher 形态；
-> 壳冒烟归壳仓 CI，核仓无 src-tauri 故 verify-shell/build-shell-frontend 一并删除）。
+> 已移除：`build:sea` / `verify:shell`（2026-09 双仓拆分：SEA 形态全平台弃用 → launcher 形态）。
+
+> **双仓隔离（2026-09-11）**：本仓（内核）**不再持有任何壳资产**。此前混放于本仓的
+> `shell-release/`（壳的 npm 打包工具）、9 份 `SHELL-*.md`（壳设计文档）、`export-shell.sh`、
+> 以及 `bump.sh --shell` / `verify-versions.js --shell` 均已迁至壳仓：
+> 壳工具 → `shell-release/`、`scripts/bump-shell.sh`、`scripts/verify-shell-versions.js`；
+> 壳文档 → `docs/`。本仓仅保留**内核侧**的壳对接代码（`src/domains/shell/`、`src/api/shell.js`
+> —— 内核需要展示桌面版本并观测壳健康，属内核职责）。
 
 ## 内核生产模式：全平台本地构建（推荐，零 GitHub 额度）
 
@@ -111,7 +115,7 @@ tag 推送
 ## 版本规范
 
 - **内核**：唯一事实源 = 根 `package.json`（`bump.sh --core`；tag `v<内核>` 触发 build.yml）。语义化版本 + 两档预览后缀：`-BETA.n` / `-RC.n` / 无后缀=正式。
-- **壳**：独立于内核，版本在壳仓 `src-tauri/Cargo.toml` 与 `tauri.conf.json` 两处互锁（壳仓内 verify）。
+- **壳**：独立于内核。版本在壳仓**三处互锁**（`src-tauri/Cargo.toml` / `tauri.conf.json` / `Cargo.lock`），由壳仓 `scripts/verify-shell-versions.js` 校验、`scripts/bump-shell.sh` 提升。
 - npm dist-tag：`-BETA.n` → `beta`；`-RC.n` → `rc`；正式 → `latest`（publish-core.sh 自动判定）。
 
 ## 端到端发布 SOP
@@ -151,7 +155,19 @@ CI 产线（.github/workflows/build.yml → release/scripts/ci-core.sh）：mac/
 
 ### B. 壳发布（公开仓 dsh-supervisor-launcher）
 
-壳仓独立运营：直接改壳仓 `src-tauri/` → push → tag `v<壳版本>` 触发 launcher-build.yml → 三平台 Tauri bundle（.deb/.AppImage/.dmg/.msi）挂壳仓 Release。核仓 `export-shell.sh` 仅作历史同步桥（一般不再用）。
+壳仓完全独立运营（内核仓不参与）：
+
+```bash
+cd <壳仓>                                  # 公开仓 wasi7mglns/dsh-supervisor-launcher
+bash scripts/bump-shell.sh <ver>          # 三处互锁同号：Cargo.toml / tauri.conf.json / Cargo.lock
+node scripts/verify-shell-versions.js     # 自洽校验
+git add -A && git commit && git tag v<ver> && git push origin main && git push origin v<ver>
+```
+
+→ tag 触发壳仓 `launcher-build.yml`：四平台 Tauri bundle（deb/rpm/.dmg/.app/.msi/nsis）
++ npm 壳包（`@dsh-sup/shell-*`）+ `shell-manifest.json`。
+壳仓已**自持**打包工具（`shell-release/`）、CI（`.github/workflows/build.yml`）、
+文档（`docs/`）与版本脚本（`scripts/`），不依赖内核仓。
 
 ### C. 验收
 

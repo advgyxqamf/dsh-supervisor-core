@@ -9,7 +9,7 @@
 #   内核发布唯一通道 = build:launcher Node launcher + scripts/publish-core.sh npm 平台子包；
 #   守卫自身更新走同一 npm 执行器（DistributionManager.runNpmInstall + 平台子包）。
 #   本脚本仅保留为「源码打包」出口（人工审计/分发自用），产出自检照旧。
-# 双仓拆分：壳源码不在本仓（见 export-shell.sh 的 DSH_SHELL_DIR 说明），包内只含内核资产。
+# 双仓隔离：壳源码不在本仓（壳是独立仓），包内只含内核资产。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

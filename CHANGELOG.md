@@ -6,6 +6,40 @@
 
 ## [未发布]
 
+### 双仓隔离：壳资产全部移出内核仓（用户 2026-09-11 指出严重违规）
+
+**问题**：内核仓持有大量本应属于壳仓的资产，违反「壳与内核是两个仓」的既定架构。
+
+**已迁出（迁入壳仓，非删除）**：
+
+| 资产 | 原位置（内核仓） | 新位置（壳仓） |
+|---|---|---|
+| 壳的 npm 打包工具 | `shell-release/` | `shell-release/` |
+| 壳设计/审计文档（9 份） | 根目录 `SHELL-*.md`、`AUDIT-SHELL-*.md` | `docs/` |
+| 壳仓导出脚本 | `release/scripts/export-shell.sh` | 已不需要（壳仓独立运营） |
+| 壳版本提升 | `bump.sh --shell` | `scripts/bump-shell.sh` |
+| 壳版本校验 | `verify-versions.js --shell` | `scripts/verify-shell-versions.js` |
+| npm 入口 | `npm run export:shell` | 已移除 |
+
+**壳仓已自持**：打包工具、CI、文档、版本脚本齐备，可独立构建/校验/发布，不再依赖内核仓。
+壳的版本校验还从「两处互锁」加强为**三处互锁**（新增 `Cargo.lock`）。
+
+**内核仓保留的壳相关内容（均为内核职责，非违规）**：
+- `src/domains/shell/`、`src/api/shell.js`：内核需向控制面板提供桌面版本并观测壳健康
+  （用户明确要求「桌面版本 + 内核版本」双版本展示）；
+- `test/shell-safety-net-test.js`：验证内核侧壳安全网的硬约束（不触碰内核更新机制）；
+- `ui/**/AppShell.tsx`、`shell.css`：前端「应用外壳」布局，与桌面壳无关的同名巧合；
+- `release/scripts/build-launcher.sh`：内核自身的 launcher 构建（名字里的 launcher 指内核发布形态）。
+
+**文档同步**：`release/README.md` 改写壳发布章节（明确内核仓不参与）、去掉已删入口、
+标注双仓隔离边界。
+
+### 修复：桌面壳 Windows 真机三项问题 + 语义统一（详见壳仓 CHANGELOG）
+- 卡在检测环境 = Windows `WindowsApps` 应用别名存根被当作 Node + 探测无超时 + 同步命令占主线程；
+- 托盘右键失效 = 事件处理未区分按键，右键也被当成「显示窗口」；
+- 隐形边框 = Tauri `shadow` 默认 true，官方文档载明会给无边框窗口加 1px 白边；
+- 步骤名统一为：检测环境 → 运行环境 → **桌面版本** → 内核版本 → 守卫就绪 → **进入控制面板**。
+
 ### 修复：桌面壳引导顺序错误导致首次启动卡死（Windows 真机实测）
 
 #### 现象
