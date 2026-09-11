@@ -16,6 +16,8 @@ const os = require('node:os');
 const cp = require('node:child_process');
 const ROOT = path.join(__dirname, '..');
 const S = path.join(ROOT, 'release', 'scripts');
+// 工作流解析必须行尾归一化（Windows CRLF 事故根因，2026-09-11）
+const { readWorkflow, stripComments, jobSection } = require(path.join(__dirname, '_workflow.js'));
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  <- ' + x : '')); };
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-auth-'));
@@ -140,24 +142,20 @@ console.log('== R5 发布脚本不得执行 npm config set ==');
 // ── R6 CI 平台分工 ──
 console.log('== R6 CI 矩阵不含 ubuntu ==');
 {
-  const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'build.yml'), 'utf8');
-  const code = y.split(String.fromCharCode(10)).filter((l) => !/^\s*#/.test(l)).join(String.fromCharCode(10));
+  // 经 _workflow.js 读取（**行尾归一化**）：Windows 检出为 CRLF，直接读会让下面 `\n` 锚定的
+  // 正则全部失配 → 取到空段 → 5 个断言失败（2026-09-11 真实 Windows CI 事故）。
+  const y = readWorkflow('build.yml');
+  const code = stripComments(y);
   // ⚠ 断言范围必须精确到「build 发布矩阵」这一 job（2026-09-11 两次修正）：
   //   linux-x64 由**本地**发布，故 CI 的 npm 发布矩阵不得含 ubuntu；
   //   但使用 ubuntu 的 job 是正当存在的 —— `precheck`（探测是否已全部发布）与
   //   `release`（汇总 artifact → 挂 GitHub Release，不发 npm）。
   //   故必须按 job 名切分，而非按「全文」或「release 之前的所有内容」。
-  const jobSection = (name) => {
-    const parts = code.split(/\n  [a-z][a-z0-9_-]*:\n/);
-    const idx = code.split(/\n  ([a-z][a-z0-9_-]*):\n/).reduce((acc, seg, i, arr) => {
-      if (i % 2 === 1 && seg === name) acc.push(arr[i + 1] || '');
-      return acc;
-    }, []);
-    return idx.join('\n');
-  };
-  const buildSection = jobSection('build');
-  const releaseSection = jobSection('release');
-  const precheckSection = jobSection('precheck');
+  // job 段提取改用 _workflow.js 的实现（行尾无关，已由门禁以 CRLF 夹具实测）。
+  const jobSectionOf = (name) => jobSection(code, name);
+  const buildSection = jobSectionOf('build');
+  const releaseSection = jobSectionOf('release');
+  const precheckSection = jobSectionOf('precheck');
   check('R6-a 发布矩阵不含 ubuntu', !/os:\s*ubuntu/.test(buildSection) && !/runs-on:\s*ubuntu/.test(buildSection), buildSection.match(/os:\s*\S+/g));
   check('R6-b build 用 matrix.os', /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/.test(buildSection) && /windows-latest/.test(y));
   check('R6-c 含 macos', /macos-latest/.test(y) && /macos-14/.test(y));

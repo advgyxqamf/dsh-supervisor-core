@@ -23,6 +23,8 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+// 工作流解析统一入口（行尾归一化，防 Windows CRLF 事故）
+const { readWorkflow, stripComments } = require(path.join(__dirname, '_workflow.js'));
 const S = path.join(ROOT, 'release', 'scripts');
 
 // 调用 _platforms.sh 的矩阵函数
@@ -91,8 +93,10 @@ console.log('== T4 四平台同源保证 ==');
 // ── T5 workflow precheck（tag 触发时的省额度闸）──
 console.log('== T5 workflow precheck ==');
 {
-  const y = read('.github/workflows/build.yml');
-  const code = y.split(String.fromCharCode(10)).filter((l) => !/^\s*#/.test(l)).join(String.fromCharCode(10));
+  // 经 _workflow.js 读取（行尾归一化）：本段断言本身是行首锚定（CRLF 安全），
+  // 但统一走助手可杜绝后人加入 `\n` 锚定正则时重蹈 Windows CRLF 事故。
+  const y = readWorkflow('build.yml');
+  const code = stripComments(y);
   check('T5-a 存在 precheck job', /^\s{2}precheck:/m.test(code), 'ok');
   check('T5-b precheck 输出 need_build', /need_build:\s*\$\{\{\s*steps\.probe\.outputs\.need_build\s*\}\}/.test(code), 'ok');
   check('T5-c build 依赖 precheck', /needs:\s*precheck/.test(code), 'ok');
@@ -123,8 +127,13 @@ console.log('== T6 纯 JS 产物前提 ==');
       }
     })(launcherDir);
     check('T6-d 构建产物中无 .node 原生二进制', found.length === 0, JSON.stringify(found));
-    // 实测四平台目录的 core.cjs 一致（若产物齐备）
-    const dirs = fs.readdirSync(launcherDir).filter((d) => d.startsWith('dsh-supervisor-') && fs.statSync(path.join(launcherDir, d)).isDirectory());
+    // 实测四平台目录的 core.cjs 一致（若产物齐备）。
+    // ⚠ 必须按**当前版本**过滤（2026-09-11 修复）：dist/launcher 会累积历史版本的平台目录，
+    //   不过滤就会把「旧版 4 份 + 新版 4 份」一起比对 → **假失败**（实测 8 份 / 2 哈希）。
+    //   与壳组装器同类的「缺版本过滤」缺陷 —— 一致性断言的语义是「同一版本的各平台必须一致」。
+    const CUR_VER = require(path.join(ROOT, 'package.json')).version;
+    const dirs = fs.readdirSync(launcherDir).filter((d) =>
+      d.startsWith('dsh-supervisor-' + CUR_VER + '-') && fs.statSync(path.join(launcherDir, d)).isDirectory());
     if (dirs.length >= 2) {
       const hashes = dirs.map((d) => {
         const c = path.join(launcherDir, d, 'core.cjs');

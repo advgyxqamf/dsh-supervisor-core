@@ -8,6 +8,64 @@
 
 （下一版本待记）
 
+### 修复：Windows CI 失败 —— 测试用 `\n` 锚定正则解析 workflow，CRLF 检出下失配（本人引入）
+
+#### 事实澄清（先纠正我的失误）
+
+`v0.1.4-BETA.1` 的 CI **确实失败**（Windows job，5 个断言），而我在汇报时只说了「已发布成功」、
+**没有检查 tag 触发的 CI 结果** —— 这是我的疏漏。产品本身没有问题（npm 4/4 已发布、四平台
+`core.cjs` 同源），失败的是**测试**。
+
+#### 根因（已实测复现）
+
+Windows runner 的 git 检出会把 `build.yml` 转成 **CRLF**（`core.autocrlf`）。
+测试里用 `\n` 锚定正则提取 YAML job 段：
+
+```js
+code.split(/\n  ([a-z][a-z0-9_-]*):\n/)
+```
+
+CRLF 下 job 名后紧跟的是 `\r` 而非 `\n` → **完全失配** → 取到空串 → 5 个断言失败。
+而 Linux/macOS（LF）全绿 —— 典型的「只在 Windows 红」。
+
+本机复现验证（把 workflow 转 CRLF 后跑同一测试）：
+
+```
+LF   : 全部 PASS
+CRLF : FAIL R6-b / R6-d / R6-e / R6-f / R6-g   ← 与 CI 失败列表**完全一致**
+```
+
+#### 归属
+
+该解析逻辑由本仓 `042773f`（内核全平台本地构建）引入，属**本人引入的缺陷**。
+（`v0.1.3-BETA.3` 之前的旧写法用 `/\njobs:/` 锚定，CRLF 下恰好仍能匹配，故此前未暴露。）
+
+#### 修复
+
+**新增 `test/_workflow.js`（工作流解析单一入口，行尾归一化）**：
+- `normalize()` 把 CRLF / CR 统一为 LF，所有下游正则只需处理 `\n`；
+- `readWorkflow()` / `readNormalized()` / `stripComments()` / `jobSection()`；
+- 规定：凡按行解析 workflow 的测试**必须**经此模块，禁止裸 `fs.readFileSync`。
+
+`release-auth-test.js` 与 `all-platforms-test.js` 均已接入；
+并**顺带修掉一处同类缺陷**：`T6-e`（四平台 `core.cjs` 一致性）原先不过滤版本 ——
+`dist/launcher` 会累积历史版本的平台目录，导致「旧版 4 份 + 新版 4 份」一起比对而**假失败**
+（实测 8 份 / 2 哈希）。现按当前版本过滤（与壳组装器的版本过滤同源问题）。
+
+#### 门禁（防回归）
+
+新增 `test/workflow-parse-test.js`（置于 `npm test` 链第 2 位）：
+- **W1** 归一化对 CRLF / CR / LF 结果一致；
+- **W2** `jobSection` 在 CRLF 与 LF 下对真实 `build.yml` 结果**完全相同**；
+- **W3** CRLF 下必须取到 build / release / precheck 三段且**非空**，
+  并**在 CRLF 下重跑原失败断言**（R6-b/d/e/f/g）证明已修好；
+- **W4** 任何测试不得裸读 `.github/workflows`。
+
+#### 验证
+
+- 门禁 **15/15 通过**（含 CRLF 下复现原失败断言）；
+- 全量回归 **845 passed / 0 failed**（42 个结果文件）。
+
 ## [0.1.4-BETA.1]（2026-09-11）
 
 ### 修复：测试固定端口落在 OS 动态端口范围 —— 导致偶发假失败
