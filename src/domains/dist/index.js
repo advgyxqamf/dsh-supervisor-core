@@ -69,7 +69,7 @@ function semverCompare(a, b) {
  *
  * 原 6 条（npm 官方 / npmmirror / 华为 / 腾讯 / 中科大 / cnpmjs）在**三处**逐字节重复：
  *   · 壳 `mirror.rs` `NPM_PRESETS`（**所有者**）
- *   · 本文件 `REGISTRY_PRESETS`
+ *   · 本文件原 `REGISTRY_PRESETS`（**已删除**）
  *   · `platform/config.js` `registries`
  * 任何一处增删都会漂移，且实测已造成**两侧选源不一致**（探测方法不同）。
  *

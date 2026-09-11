@@ -19,7 +19,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const ex = require('../exec');
 
 const PLATFORM = process.platform; // 'linux' | 'darwin' | 'win32'
 const ARCH = process.arch;
@@ -32,12 +32,8 @@ const isWindows = PLATFORM === 'win32';
 const _toolCache = {};
 function hasTool(name, args) {
   if (_toolCache[name] !== undefined) return _toolCache[name];
-  try {
-    execFileSync(name, args || ['--version'], { stdio: 'ignore', timeout: 3000 });
-    _toolCache[name] = true;
-  } catch {
-    _toolCache[name] = false;
-  }
+  // 经统一执行器：失败返回 null（不再依赖 try/catch 吞异常）。
+  _toolCache[name] = ex.run(name, args || ['--version'], { stdio: 'ignore', timeoutMs: 3000 }) !== null;
   return _toolCache[name];
 }
 /** 统一数据目录：~/.dsh（三平台一致，os.homedir 通用）。 */

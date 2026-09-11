@@ -111,27 +111,30 @@ function calls(src, fnNames) {
   return out;
 }
 
-// ── G9-a 无 timeout 的调用必须归零 ──
-console.log('== G9-a 子进程调用必须有界 ==');
+// ── G9-a **只有执行器**可以调用 execFileSync/spawnSync ──
+console.log('== G9-a 子进程调用只允许出现在执行器内 ==');
 {
+  // 2026-09-11 收紧：原先只断言「必须有 timeout」，于是 18 处调用虽然带 timeout
+  // 却**绕过**统一执行器 —— 执行器头注释自称「唯一入口」，而实际不是。
+  // 现全部调用点已迁入执行器，故可断言这条**绝对不变量**：
+  //   `src/` 内除 `platform/exec.js` 外，不得出现 execFileSync / spawnSync。
+  //
+  // 为什么这比「有 timeout」强：timeout 只是**逐个调用点**的约定（容易漏、容易退化），
+  // 而「只有一处能调用」把 killSignal / windowsHide / maxBuffer / 超时默认值
+  // 全部收敛到**一个实现**里（与壳的 bounded.rs + B32 门禁同构）。
   const offenders = [];
-  let total = 0;
   for (const f of jsFiles()) {
     const rel = path.relative(ROOT, f);
-    if (rel === EXEC_MODULE) continue; // 执行器自身实现（它当然直接调 execFileSync）
+    if (rel === EXEC_MODULE) continue; // 执行器自身
     const code = stripComments(fs.readFileSync(f, 'utf8'));
     for (const c of calls(code, ['execFileSync', 'spawnSync'])) {
-      total++;
-      if (!/timeout(Ms)?\s*:/.test(c.text)) {
-        const line = code.slice(0, c.at).split(String.fromCharCode(10)).length;
-        offenders.push(rel + ':' + line);
-      }
+      const line = code.slice(0, c.at).split(String.fromCharCode(10)).length;
+      offenders.push(rel + ':' + line + ' ' + c.fn);
     }
   }
-  check('G9-a 无 timeout 的 execFileSync/spawnSync 归零', offenders.length === 0,
-    offenders.length ? (offenders.length + ' 处: ' + offenders.slice(0, 4).join(', ')) : ('共 ' + total + ' 处，全部有界'));
+  check('G9-a 仅 platform/exec.js 调用 execFileSync/spawnSync', offenders.length === 0,
+    offenders.length ? (offenders.length + ' 处绕过执行器: ' + offenders.slice(0, 4).join(', ')) : 'ok');
 }
-
 // ── G9-b 统一执行器必须被实际引用 ──
 console.log('== G9-b 统一执行器被实际引用 ==');
 {

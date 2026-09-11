@@ -5,12 +5,13 @@
 // 消费方：supervisor.envStatus/dshenvStatus/面板环境卡；壳负责 Node 前置安装，catalog 负责陈述+判定。
 
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
+const ex = require('./exec');
 
 /** 探测某二进制版本；不可执行返回 null。 */
 function whichVersion(bin) {
-  try { const v = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 3000 }).trim(); return v || null; }
-  catch { return null; }
+  // 经统一执行器（默认有界；失败返回 null）。
+  const v = ex.runOut(bin, ['--version'], { timeoutMs: 3000 });
+  return v ? (v.trim() || null) : null;
 }
 
 // 版本探测结果缓存（TTL 10s）：envStatus 的 probe + summary 会在单次 API 调用内重复探测 3+ 次，

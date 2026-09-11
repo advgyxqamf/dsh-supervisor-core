@@ -30,7 +30,8 @@
 //            （守卫 plist 由壳建立；GUI 用独立 plist com.dsh.supervisor.gui）
 // - Windows：schtasks ONLOGON（GUI）+ MINUTE watchdog（崩溃自拉）+ /Change /ENABLE|/DISABLE（守卫）
 //
-// 全部 execFileSync 外置 try/catch（平台能力缺失 → 明确错误返回，绝不静默成功）。
+// 全部外部命令经 platform/exec 统一执行器（有界 + SIGKILL + windowsHide），
+// 平台能力缺失时返回明确错误，绝不静默成功。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -63,20 +64,19 @@ const MAC_T = 8000;
 /** 服务是否已被 launchd 载入（RunAtLoad 服务载入即运行）。 */
 function macLoaded(label) {
   try {
-    execFileSync('launchctl', ['print', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeout: MAC_T });
-    return true;
+    return ex.runDetail('launchctl', ['print', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeoutMs: MAC_T }).ok;
   } catch { return false; }
 }
 function macSetEnabled(label, on) {
-  try { execFileSync('launchctl', [on ? 'enable' : 'disable', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeout: MAC_T }); return true; }
+  try { return ex.runDetail('launchctl', [on ? 'enable' : 'disable', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeoutMs: MAC_T }).ok; }
   catch { return false; }
 }
 function macBootstrap(file) {
-  try { execFileSync('launchctl', ['bootstrap', 'gui/' + macUid(), file], { stdio: 'ignore', timeout: MAC_T }); return true; }
+  try { return ex.runDetail('launchctl', ['bootstrap', 'gui/' + macUid(), file], { stdio: 'ignore', timeoutMs: MAC_T }).ok; }
   catch { return false; }
 }
 function macBootout(label) {
-  try { execFileSync('launchctl', ['bootout', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeout: MAC_T }); return true; }
+  try { return ex.runDetail('launchctl', ['bootout', 'gui/' + macUid() + '/' + label], { stdio: 'ignore', timeoutMs: MAC_T }).ok; }
   catch { return false; }
 }
 

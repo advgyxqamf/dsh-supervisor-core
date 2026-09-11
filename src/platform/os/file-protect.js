@@ -17,7 +17,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const ex = require('../exec');
 
 const IS_WINDOWS = process.platform === 'win32';
 let _icacls = null; // 缓存 icacls 可用性
@@ -25,8 +25,8 @@ let _icacls = null; // 缓存 icacls 可用性
 function hasIcacls(platform) {
   if ((platform || process.platform) !== 'win32') return false;
   if (_icacls !== null) return _icacls;
-  try { execFileSync('icacls', ['/?'], { stdio: 'ignore', timeout: 3000 }); _icacls = true; }
-  catch { _icacls = false; }
+  // 经统一执行器（`icacls /?` 退出码非 0 即视为不可用）。
+  _icacls = ex.run('icacls', ['/?'], { stdio: 'ignore', timeoutMs: 3000 }) !== null;
   return _icacls;
 }
 
@@ -44,10 +44,11 @@ function protectFile(file) {
   if (!hasIcacls()) return { ok: false, mode: 'none', reason: 'icacls 不可用' };
   const user = currentUser();
   if (!user) return { ok: false, mode: 'icacls', reason: '无法确定当前用户' };
-  try {
-    execFileSync('icacls', [file, '/inheritance:r', '/grant:r', user + ':F'], { stdio: 'ignore', timeout: 5000 });
-    return { ok: true, mode: 'icacls-file' };
-  } catch (e) { return { ok: false, mode: 'icacls-file', reason: e.message }; }
+  // 经统一执行器：runDetail 保留退出码/错误，便于如实上报失败原因。
+  const r = ex.runDetail('icacls', [file, '/inheritance:r', '/grant:r', user + ':F'], { stdio: 'ignore', timeoutMs: 5000 });
+  return r.ok
+    ? { ok: true, mode: 'icacls-file' }
+    : { ok: false, mode: 'icacls-file', reason: r.error || ('退出码 ' + r.code) };
 }
 
 /** 保护目录（Unix chmod 0700；Windows icacls 继承性收紧 (OI)(CI)）。
@@ -61,10 +62,10 @@ function protectDir(dir) {
   if (!hasIcacls()) return { ok: false, mode: 'none', reason: 'icacls 不可用' };
   const user = currentUser();
   if (!user) return { ok: false, mode: 'icacls', reason: '无法确定当前用户' };
-  try {
-    execFileSync('icacls', [dir, '/inheritance:r', '/grant:r', user + ':(OI)(CI)F'], { stdio: 'ignore', timeout: 10000 });
-    return { ok: true, mode: 'icacls-dir' };
-  } catch (e) { return { ok: false, mode: 'icacls-dir', reason: e.message }; }
+  const r = ex.runDetail('icacls', [dir, '/inheritance:r', '/grant:r', user + ':(OI)(CI)F'], { stdio: 'ignore', timeoutMs: 10000 });
+  return r.ok
+    ? { ok: true, mode: 'icacls-dir' }
+    : { ok: false, mode: 'icacls-dir', reason: r.error || ('退出码 ' + r.code) };
 }
 
 /** 确保目录存在并施加保护（创建 + 保护一步到位）。 */

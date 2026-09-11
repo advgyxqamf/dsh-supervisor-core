@@ -28,7 +28,7 @@
 //     stateDir 下的运行时令牌缓存（0600，不进任何用户配置），重启后据此/再捕获恢复。
 // ═══════════════════════════════════════════════════════════════════════════
 
-const { execFileSync } = require('node:child_process');
+const ex = require('./exec');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -135,15 +135,19 @@ class DshTokenService {
         // 用 -g（journald grep）取「最近一条含回环 URL 的行」而非固定最近 N 行——
         // 长驻实例启动时的 token 行会随日志增长滚出最近 400 行窗口 → 令牌永远捕获不到
         // → 远程 relay 无 cookie 401（2026-09 实证 inst-…920 启动 18h+ 未重启即此症）。
-        const out = execFileSync('journalctl', ['--user', '-u', src.unit + '.service', '--no-pager', '-o', 'cat', '-g', '127\.0\.0\.1:.*token=', '-n', '1'], {
-          encoding: 'utf8',
-          timeout: 5000,
+        // 经统一执行器：runOut 失败返回 null（不再依赖 try/catch）。
+        const out = ex.runOut('journalctl', ['--user', '-u', src.unit + '.service', '--no-pager', '-o', 'cat', '-g', '127\.0\.0\.1:.*token=', '-n', '1'], {
+          timeoutMs: 5000,
           stdio: ['ignore', 'pipe', 'ignore'],
         });
-        const lines = out.split('\n');
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const t = parseDshTokenLine(lines[i]);
-          if (t) { token = t; source = 'journal'; tokenLine = lines[i]; break; }
+        if (!out) {
+          this.logger.warn && this.logger.warn('[token] journal capture(' + id + '/' + src.unit + ') 命令失败或无输出');
+        } else {
+          const lines = out.split('\n');
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const t = parseDshTokenLine(lines[i]);
+            if (t) { token = t; source = 'journal'; tokenLine = lines[i]; break; }
+          }
         }
       } catch (e) {
         this.logger.warn && this.logger.warn('[token] journal capture(' + id + '/' + src.unit + ') failed: ' + e.message);

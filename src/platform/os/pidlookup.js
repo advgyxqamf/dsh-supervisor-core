@@ -7,7 +7,7 @@
 // 任一步失败返回 null，调用方自行降级。
 
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
+const ex = require('../exec');
 
 const isLinux = process.platform === 'linux';
 const isMac = process.platform === 'darwin';
@@ -57,7 +57,8 @@ function linuxFind(port) {
 function macFind(port) {
   try {
     // lsof 输出列：COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-    const out = execFileSync('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN'], { encoding: 'utf8', timeout: 3000 });
+    const out = ex.runOut('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN'], { timeoutMs: 3000 });
+    if (!out) return null;
     for (const line of out.split('\n')) {
       const m = line.trim().split(/\s+/);
       if (m.length >= 2 && /^\d+$/.test(m[1])) return Number(m[1]);
@@ -73,7 +74,8 @@ function winFind(port) {
   // relay 建连的可见滞后问题已由 relay/manager targetReachable(TCP 直连) 根治，此处不再承担该职责。
   try {
     // netstat 输出例：TCP  127.0.0.1:41000  0.0.0.0:0  LISTENING  12345
-    const out = execFileSync('netstat', ['-ano'], { encoding: 'utf8', timeout: 3000 });
+    const out = ex.runOut('netstat', ['-ano'], { timeoutMs: 3000 });
+    if (!out) return null;
     const want = String(port);
     for (const line of out.split('\n')) {
       const parts = line.trim().split(/\s+/);
@@ -98,8 +100,8 @@ function linuxFindSs(port) {
   const candidates = ['ss', '/usr/sbin/ss', '/usr/bin/ss', '/bin/ss'];
   for (const ssBin of candidates) {
     try {
-      const out = execFileSync(ssBin, ['-tlnHp', 'sport = :' + port], { encoding: 'utf8', timeout: 3000 });
-      const m = /pid=(\d+)/.exec(out);
+      const out = ex.runOut(ssBin, ['-tlnHp', 'sport = :' + port], { timeoutMs: 3000 });
+      const m = out && /pid=(\d+)/.exec(out);
       if (m) return Number(m[1]);
     } catch {}
   }
@@ -139,21 +141,22 @@ function readCmdline(pid) {
   if (isMac) {
     try {
       // ps -o command= -p <pid>：输出原始命令行（无标题行）
-      return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000 }).trim() || null;
+      const o = ex.runOut('ps', ['-o', 'command=', '-p', String(pid)], { timeoutMs: 3000 });
+      return o ? (o.trim() || null) : null;
     } catch { return null; }
   }
   if (isWindows) {
-    try {
-      // wmic process where ProcessId=<pid> get CommandLine /value
-      const out = execFileSync('wmic', ['process', 'where', 'ProcessId=' + pid, 'get', 'CommandLine', '/value'], { encoding: 'utf8', timeout: 5000 });
+    // wmic process where ProcessId=<pid> get CommandLine /value
+    const out = ex.runOut('wmic', ['process', 'where', 'ProcessId=' + pid, 'get', 'CommandLine', '/value'], { timeoutMs: 5000 });
+    if (out) {
       const m = /CommandLine=([\s\S]*)/.exec(out);
       return m ? m[1].trim() : null;
-    } catch {
-      // wmic 在新 Windows 弃用：回退 PowerShell CIM
-      try {
-        const ps = "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine";
-        return execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 5000 }).trim() || null;
-      } catch { return null; }
+    }
+    // wmic 失败或在新 Windows 已弃用：回退 PowerShell CIM
+    {
+      const ps = "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine";
+      const o = ex.runOut('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeoutMs: 5000 });
+      return o ? (o.trim() || null) : null;
     }
   }
   return null;
@@ -178,12 +181,11 @@ function isDshCmdline(pid) {
  */
 function pgrepList(pattern) {
   const out = [];
-  const { execFileSync: ex } = require('node:child_process');
   const readCmd = (pid) => readCmdline(pid) || '';
   try {
     if (isMac) {
       // pgrep -f：BSD 版仅打印 pid（-a 不存在）；拿到的 pid 用 ps 补命令行
-      const pids = ex('pgrep', ['-f', String(pattern)], { encoding: 'utf8', timeout: 3000 }).toString().split(/\r?\n/);
+      const pids = (ex.runOut('pgrep', ['-f', String(pattern)], { timeoutMs: 3000 }) || '').split(/\r?\n/);
       for (const line of pids) {
         const pid = parseInt(line.trim(), 10);
         if (!Number.isInteger(pid) || pid <= 0) continue;
@@ -196,7 +198,7 @@ function pgrepList(pattern) {
     if (isWindows) {
       // Windows 无 pgrep：走 Win32_Process 查询（含 CommandLine），按子串匹配
       const ps = "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress";
-      const j = ex('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 8000 }).toString();
+      const j = ex.runOut('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeoutMs: 8000 }) || '';
       let arr = [];
       try { arr = JSON.parse(j); if (!Array.isArray(arr)) arr = [arr]; } catch {}
       for (const it of arr) {
@@ -210,7 +212,7 @@ function pgrepList(pattern) {
       return out;
     }
     // Linux（含 -a 支持）
-    const res = ex('pgrep', ['-af', String(pattern)], { encoding: 'utf8', timeout: 3000 }).toString();
+    const res = ex.runOut('pgrep', ['-af', String(pattern)], { timeoutMs: 3000 }) || '';
     for (const line of res.split(/\r?\n/)) {
       const m = /^(\d+)\s+([\s\S]*)$/.exec(line.trim());
       if (m) out.push({ pid: Number(m[1]), cmdline: m[2] });
