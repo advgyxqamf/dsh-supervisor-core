@@ -29,6 +29,11 @@ class ConvergeView {
       startDeadlinePassed: !!(this._mStartDeadline() && now > this._mStartDeadline()),
       restartDue: this._mRestartAt() === null || now >= this._mRestartAt(),
       backoffDue: this._mBackoffUntil() === null || now >= this._mBackoffUntil(),
+      // K5 修复（2026-09-11）：`_shouldRun()` 有两个否决位，快照此前**都没建模** ——
+      //   于是影子每拍算出的「应然」与真实 tick 不一致，`[shadow] 不一致` 长期刷屏，
+      //   G3 切换门槛（连续零 diff）**永久不可达**。
+      crashHalted: this._crashHalted === true, // guardian=false 崩溃后停靠：等显式启动
+      sessionHalting: this._sessionHalting() === true, // 退出流程中：抑制一切自动拉起
       crashWindowStart: this._mCrashWindowStart(),
       crashWindowRestarts: this._mCrashWindowRestarts(),
       backoffLevel: this._mBackoffLevel(),
@@ -66,6 +71,10 @@ class ConvergeView {
     }
     switch (s.phase) {
       case 'STOPPED': {
+        // ⚠ 顺序与 `_shouldRun()` 一致（K5 修复）：两个否决位必须**先于**拉起判断，
+        //   否则影子会算出 start 而真实 tick 拒绝 → 永久 diff。
+        if (s.sessionHalting) return { action: 'none', reason: 'session_halting' };
+        if (s.crashHalted) return { action: 'none', reason: 'crash_halted_await_explicit_start' };
         if (s.probeOk) return { action: 'adopt', reason: 'adopt' };
         if (s.spawnBlocked) return { action: 'none', reason: 'command_missing_cooloff' };
         return { action: 'start', reason: 'spawn' }; // 端口占用复查在执行期（isPortListening）

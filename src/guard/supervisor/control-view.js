@@ -601,9 +601,21 @@ class ControlView {
       lc.healthy = false;
       return;
     }
-    if (lc.phase !== 'running') lc._setPhase('running');
+    // ⚠ phase 必须反映**观测到的 ok**，不能无条件置 running（2026-09-11 修复，与 K4 同族）：
+    //   旧实现无论 ok 与否都 _setPhase('running') ——
+    //   于是 daemon 还没就绪时面板显示「运行中」，与 healthy=false 自相矛盾。
+    //   现：ok → running；未 ok 且从未 running 过 → starting（拉起中，不谎报）；
+    //       曾 running 则保持 running 相位（进程可能仍在，只是探活失败）。
+    if (ok) {
+      if (lc.phase !== 'running') lc._setPhase('running');
+      lc.error = null;
+    } else if (lc.phase !== 'running') {
+      if (lc.phase !== 'starting') lc._setPhase('starting');
+      lc.error = err;
+    } else {
+      lc.error = err;
+    }
     lc.healthy = ok;
-    if (ok) { lc.error = null; } else { lc.error = err; }
   }
 
   /** instances 聚合视图真实化（C3-5b）：lifecycle 的 instances 项表示「实例管理服务」（驻守卫进程，

@@ -104,13 +104,31 @@ class ManagedLifecycle {
     this.desired = 'stopped';
   }
 
-  /** 启动模块（幂等：已在运行则 no-op）。 */
+  /** 启动模块（幂等：已在运行则 no-op）。
+   *
+   *  ⚠ 必须尊重回调的**显式失败**（K4 修复，2026-09-11）：
+   *    适配器的 start 可能返回 `{ok:false, error}`（如 `setRouterRunning` 在 daemon 拉不起来时）。
+   *    旧实现**不看 `r.ok`**，无条件把 phase 置 running / healthy=true ——
+   *    于是 `/lifecycle/status` 谎报成功，而模块实际没起来（用户看到「运行中」但服务是死的）。
+   *
+   *  兼容性：`r.ok !== false` 视为成功 —— 保留「回调只返回 undefined / 无 ok 字段」的既有语义，
+   *    避免把历史上合法的返回值误判为失败。
+   */
   async start() {
     if (this.phase === 'running' || this.phase === 'starting') return { ok: true, already: true };
     this.error = null;
     this._setPhase('starting');
     try {
       const r = this._start ? await this._start() : { ok: true };
+      if (r && r.ok === false) {
+        // 回调**明确**报告失败：不得置 running/healthy。
+        this.error = r.error || 'start 返回 ok:false（未提供 error）';
+        this._setPhase('stopped');
+        this.healthy = false;
+        this.desired = 'stopped';
+        if (this.logger && this.logger.warn) this.logger.warn('[lifecycle] ' + this.id + ' start 被拒: ' + this.error);
+        return { ok: false, error: this.error, ...this.snapshot() };
+      }
       this.startedAt = this.startedAt || new Date().toISOString();
       this.desired = 'running';
       this._setPhase('running');
@@ -124,12 +142,24 @@ class ManagedLifecycle {
     }
   }
 
-  /** 停止模块（守卫 shutdown 或用户显式停）。 */
+  /** 停止模块（守卫 shutdown 或用户显式停）。
+   *
+   *  ⚠ 同样必须尊重回调的**显式失败**（K4 修复的对称面）：
+   *    旧实现在 stop 回调返回 `{ok:false}` 时仍置 phase=stopped / desired=stopped ——
+   *    于是面板显示「已停止」而进程可能还在跑。
+   *    现：显式失败 → 保持运行态（与异常分支同一语义），并把错误如实上报。
+   */
   async stop(reason) {
     if (this.phase === 'stopped') return { ok: true, already: true };
     this._setPhase('draining');
     try {
       const r = this._stop ? await this._stop(reason) : { ok: true };
+      if (r && r.ok === false) {
+        this.error = r.error || 'stop 返回 ok:false（未提供 error）';
+        this._setPhase('running'); // 与异常分支一致：未能确认停止 → 回到运行态
+        if (this.logger && this.logger.warn) this.logger.warn('[lifecycle] ' + this.id + ' stop 被拒: ' + this.error);
+        return { ok: false, error: this.error, ...this.snapshot() };
+      }
       this.desired = 'stopped';
       this._setPhase('stopped');
       this.healthy = false;
