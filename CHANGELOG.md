@@ -12,7 +12,8 @@
 
 #### 背景（本次审计实测）
 
-镜像目录在**三处逐字节重复**：壳 `mirror.rs`、内核 `dist/index.js:68-75`、内核 `platform/config.js:66-73`。
+镜像目录在**三处逐字节重复**：壳 `mirror.rs`、内核 `domains/dist/index.js`、内核 `platform/config.js`
+（后两处即当时的 `REGISTRY_PRESETS` 与 `registries`；本次已删除，故不写行号）。
 且两侧**探测方法不同**（内核 `/-/ping`、壳真实包元数据），同一镜像测出的延迟可差 **6.7 倍**
 （实测 ustclug 2613ms vs 389ms）→ 内核选 `repo.huaweicloud.com`、壳选 `registry.npmmirror.com`，
 用户看到「面板显示一个源、实际下载用另一个」。
