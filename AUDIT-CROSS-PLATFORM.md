@@ -3,6 +3,11 @@
 > 范围：内核仓 `dsh-supervisor`（src/ 18,090 行 / 63 个 JS 模块 + bin/ + release/ + .github/）。
 > 维度：**目录分层与架构规范**、**平台抽象层质量**、**跨平台能力矩阵**、**业务逻辑跨平台正确性**、**CI/测试**。
 > 结论先行：**分层骨架存在且方向正确（platform/os 门面），但「声明的规范」与「实际实现」存在系统性偏差——域层仍在直呼平台命令，且多平台能力有真实缺口。**
+>
+> ⚠️ **2026-09-11 复核更正**：本报告 §三 给 `os/autostart.js` 的评级（C+「三端齐全」）**是错的**，
+> 已下调为 **D**。错误原因与完整证据见 **§五.a**：本报告按**平台名**数能力，未验证**行为**，
+> 因而漏掉了「macOS 壳自启/自愈从奠基提交起就不存在」这一事实。
+> 本次更正同时确立了不变量：**跨平台能力的声明必须由可执行断言支撑，文字不构成证据。**
 
 ---
 
@@ -74,7 +79,7 @@
 | `os/process.js` | 44 | **B+** | POSIX 进程组 vs Windows taskkill /T 语义桥接清晰 |
 | `os/notify.js` | 49 | **B+** | 三端实现；Windows 走 PowerShell 气泡 |
 | `os/browser.js` | 21 | **B** | 三端分支；但直接 `process.platform` 判断（未用统一 isX 常量） |
-| `os/autostart.js` | 153 | **C+** | 三端齐全（systemd/LaunchAgent/schtasks+watchdog），但见 §4 的 Windows 路径缺陷 |
+| `os/autostart.js` | 190 | **D** | ⚠️ **2026-09-11 复核下调（原评 C+「三端齐全」是错的）**：`setGuiAutostart` 对非 Linux **静默返回 `ok:true`**，`status()` 对 macOS **硬编码 `gui:on`**，而 macOS 壳自启/自愈**从奠基提交起就不存在**。详见 §五.a |
 | `platform/deploy.js` | 74 | **A** | 形态判定用 ELF/PE/Mach-O magic，跨平台严谨 |
 
 ---
@@ -139,8 +144,10 @@ daemon 用 `process.on('SIGTERM')`（router/daemon.js:142、relay/daemon.js:157�
 
 | 能力 | Linux | macOS | Windows | 等价性 |
 |---|---|---|---|---|
-| 开机自启 | systemd --user + linger | LaunchAgent + KeepAlive | schtasks ×2（ONLOGON + Watchdog） | ⚠️ 语义不同（watchdog 是轮询模拟） |
-| 崩溃自愈 | systemd Restart=always | KeepAlive | Watchdog 每 5 分钟轮询 | ⚠️ Windows 最弱 |
+| 守卫开机自启 | systemd --user + linger | LaunchAgent + KeepAlive | schtasks ×2（ONLOGON + Watchdog） | ⚠️ 语义不同（watchdog 是轮询模拟） |
+| 守卫崩溃自愈 | systemd Restart=always | KeepAlive | Watchdog 每 5 分钟轮询 | ⚠️ Windows 最弱 |
+| **壳开机自启** | XDG autostart .desktop | **❌ 未实现** | schtasks `DSH-Supervisor-GUI` | ❌ **macOS 缺失** |
+| **壳崩溃自愈** | **❌ 未实现** | **❌ 未实现** | Watchdog（壳检查已独立于守卫块） | ❌ **仅 Windows** |
 | 进程树终止 | 进程组 kill(-pid) | 进程组 kill(-pid) | taskkill /T | ✅ |
 | 端口反查 pid | /proc + ss 兜底 | lsof | netstat -ano | ✅ |
 | 命令行读取 | /proc/<pid>/cmdline | ps -o command= | wmic → PowerShell CIM | ✅ |
@@ -149,6 +156,48 @@ daemon 用 `process.on('SIGTERM')`（router/daemon.js:142、relay/daemon.js:157�
 | 进程匹配 | pgrep -af | pgrep -f + ps | CIM Win32_Process | ✅ |
 | **沙箱多实例** | **systemd-run** | **❌ 不支持** | **❌ 不支持** | ❌ **功能缺失** |
 | 文件权限保护 | 0600 | 0600 | **❌ 空转** | ❌ **安全降级** |
+
+### 五.a、2026-09-11 复核更正：原矩阵把「守卫能力」当成了「整链能力」
+
+**原表的错误**：`开机自启` / `崩溃自愈` 两行只描述了**守卫**，却写在「整链」的行里 ——
+于是 macOS 那格看起来「有 LaunchAgent + KeepAlive」，掩盖了**壳完全没有自启/自愈**这一事实。
+
+**真相（git 考古 + 代码实测）**：
+
+| 事实 | 证据 |
+|---|---|
+| macOS 壳自启**从未实现** | `autostart.js` 的 `setGuiAutostart` 从**奠基提交 8867942（2026-09-01）**起即 `if (!isLinux) return { ok: true }` —— 静默成功 |
+| macOS 壳自愈**从未实现** | `macPlist` 从奠基提交至今**逐字节未变**，`ProgramArguments` 只含守卫 |
+| 注释是**假的** | 原文「macOS：LaunchAgent plist + 登录面板（**同 plist 附带**）」—— plist 里没有壳 |
+| 状态是**假的** | `status()` 返回 `{ gui: on }`（把守卫自启当作壳自启） |
+| 审计是**假的** | 本文件原评「三端齐全」（按平台名数，未验证行为） |
+
+**四层互相背书，没有一层验证行为** —— 这是本项目最值得警惕的失效模式：
+
+```
+注释（声称已实现）
+   ↓ 被当作规范读
+实现（静默 ok:true）
+   ↓ 被当作证据
+status（硬编码 gui:on）
+   ↓ 被当作事实
+审计文档（按平台名数 → 「三端齐全」）
+   ↓
+测试：只断言「函数返回绝对路径」—— 从未断言「能力存在」
+```
+
+**已修正**（2026-09-11）：
+- `capabilityProfile()` 新增 `guardAutostart` / `guardSelfHeal` / `shellAutostart` / `shellSelfHeal` 四个能力字段；
+- `setGuiAutostart(on, platform)` 对未实现平台**显式报告**（`ok:false, unsupported:true`），不再静默成功；
+- macOS `status()` 如实返回 `gui: false, guiSupported: false`；
+- Windows watchdog 的**壳检查移出 `if (-not $up)`** —— 旧实现只在「守卫也挂了」时才检查壳，
+  而「壳崩、守卫活」正是唯一需要它的场景（现已修正，`shellSelfHeal: true`）；
+- Linux `.desktop` 的 `Exec` 改为**按实际安装解析**（deb/rpm 装到 `/usr/bin`，模板原硬编码 `~/.local/bin`）；
+- 新增 **`test/platform-capability-audit-test.js`**（42 项断言）把「声明」与「实现」强制绑定：
+  A1 完整性 / A2 声明=true→有产物 / A3 声明=false→显式不支持 / A4 行为一致 / A5 自愈机制真实 / A6 历史假声明不得重现。
+
+> **不变量（本次确立）**：跨平台能力的**声明**必须由**可执行断言**支撑；
+> 文字（注释/审计/文档）不构成证据 —— 「不支持」是可接受的回答，「假装支持」不是。
 
 ---
 

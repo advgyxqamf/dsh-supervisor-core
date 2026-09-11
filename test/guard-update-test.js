@@ -160,8 +160,26 @@ function seedInstall(dirName, versions) {
   const d3 = supHave.dshenvStatus();
   check('S7 dshenv：main 实例已纳管判定', typeof d3.managed === 'boolean', String(d3.managed));
 
-  // 自更新「重启生效」衔接（A2）：SEA 形态自动允许自重启；本机无 systemd unit → 明确指引手动重启
-  const rr = supInst.guardSelfUpdateRestart();
+  // 自更新「重启生效」衔接（A2）：SEA 形态自动允许自重启；**无 systemd unit** → 明确指引手动重启。
+  //
+  // ⚠ 必须**隔离 $HOME**（2026-09-11 修复）：`guardSelfUpdateRestart()` 用 `os.homedir()`
+  //   探测 `~/.config/systemd/user/dsh-supervisor.service` 是否存在，而本断言要求「不存在」。
+  //   不隔离就依赖开发者的真实 HOME —— 只要跑过一次桌面壳（壳会建立该 unit），
+  //   此断言必然失败，且**失败与产品代码无关**（实测：本地红、CI 绿，极具误导性）。
+  //   同类问题即「测试依赖外部状态」，属测试可信度缺陷。
+  const rr = (() => {
+    const savedHome = process.env.HOME;
+    const savedProfile = process.env.USERPROFILE;
+    const cleanHome = path.join(TMP, 'clean-home');
+    fs.mkdirSync(cleanHome, { recursive: true });  // 无 .config/systemd/user → 无 unit
+    process.env.HOME = cleanHome;
+    process.env.USERPROFILE = cleanHome;           // Windows 的 os.homedir() 读 USERPROFILE
+    try { return supInst.guardSelfUpdateRestart(); }
+    finally {
+      if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+      if (savedProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedProfile;
+    }
+  })();
   check('S8 restart-guard 无 systemd 单元 → 明确指引', rr.ok === false && /systemd/.test(rr.error || ''), JSON.stringify(rr));
 
   // EnvCatalog 声明式视图（envStatus.catalog + summary.ready 语义）

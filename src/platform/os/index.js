@@ -75,6 +75,13 @@ function capabilityProfile(platform, arch) {
       autostart: true,       // 期望 systemctl（实测覆写）
       frpExpose: true,
       hostService: 'systemd',
+      // ── 服务链自愈/自启（2026-09-11 跨平台能力完整性审计补齐）──
+      // 此前这些**没有能力字段**，消费者（面板/壳）无从得知；而实现层已存在缺陷
+      // （autostart.js 对未实现平台静默返回 ok:true）。补字段 + 审计测试后，声明与实现绑定。
+      guardAutostart: true,  // systemd --user enable + linger
+      guardSelfHeal: true,   // unit Restart=always
+      shellAutostart: true,  // XDG autostart .desktop（Exec 按实际安装解析）
+      shellSelfHeal: false,  // ❌ 无监督：壳崩溃后无人拉起（见审计报告）
     });
   }
   if (pl === 'darwin') {
@@ -86,6 +93,11 @@ function capabilityProfile(platform, arch) {
       autostart: true,      // launchctl/LaunchAgent 恒在
       frpExpose: true,
       hostService: 'launchd',
+      guardAutostart: true,  // LaunchAgent RunAtLoad + KeepAlive
+      guardSelfHeal: true,   // KeepAlive
+      // ⚠ macOS 壳链**未实现**（历史注释谎称「由 LaunchAgent 一并代管」，实测 plist 只含守卫）
+      shellAutostart: false,
+      shellSelfHeal: false,
     });
   }
   if (pl === 'win32') {
@@ -97,12 +109,22 @@ function capabilityProfile(platform, arch) {
       autostart: true,       // 期望 schtasks（实测覆写）
       frpExpose: true,
       hostService: 'windows-service',
+      guardAutostart: true,  // schtasks DSH-Supervisor（ONLOGON）
+      guardSelfHeal: true,   // schtasks DSH-Supervisor-Watchdog 每 5 分钟
+      shellAutostart: true,  // schtasks DSH-Supervisor-GUI（ONLOGON，由 setAutostart 建立）
+      // ✅ 2026-09-11 修复：watchdog 的壳检查已移出 `if (-not $up)` ——
+      //   旧实现只在「守卫也挂了」时才检查壳，而「壳崩、守卫活」正是唯一需要它的场景。
+      //   前置条件：登录自启已启用（watchdog 任务由 setAutostart 建立），
+      //   与 guardSelfHeal 的同一前提一致。
+      shellSelfHeal: true,
     });
   }
   return Object.assign(base, {
     multiInstance: false, pidAdoption: false, processTreeKill: false,
     desktopNotify: false, autostart: false, frpExpose: false,
     hostService: 'none',
+    guardAutostart: false, guardSelfHeal: false,
+    shellAutostart: false, shellSelfHeal: false,
   });
 }
 

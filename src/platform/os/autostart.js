@@ -48,7 +48,12 @@ function status() {
   }
   if (isMac) {
     const on = fs.existsSync(laFile('com.dsh.supervisor'));
-    return { kind: 'launchagent', on, gui: on };
+    // ⚠ gui 必须**如实**（2026-09-11 审计修复）：
+    //   LaunchAgent plist 只含守卫（ProgramArguments = <daemon> daemon），**不含桌面壳**。
+    //   旧实现返回 `gui: on`（把「守卫自启」当成「壳自启」），使面板显示「开机自启已开启」
+    //   而壳实际不会自启。这是「静默成功」的同一类缺陷，直接违反本仓已声明的不变量：
+    //     service.js: 「未实现的能力**显式抛 CapabilityError**（绝不静默失败）」。
+    return { kind: 'launchagent', on, gui: false, guiSupported: false };
   }
   // Linux
   let unit = 'unknown';
@@ -76,12 +81,17 @@ function setAutostart(on) {
           '$daemon = ' + JSON.stringify(String(daemon)),
           '$gui = ' + JSON.stringify(String(guiPath)),
           '$up = Test-NetConnection -ComputerName 127.0.0.1 -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue',
+          '# ── 守卫保活（仅在守卫不可达时）──',
           'if (-not $up) {',
           '  $p = @(Get-Process -Name dsh-supervisor -ErrorAction SilentlyContinue)',
           "  if (-not $p) { Start-Process -FilePath $daemon -ArgumentList 'daemon' -WindowStyle Hidden }",
-          '  $g = @(Get-Process -Name dsh-supervisor-gui -ErrorAction SilentlyContinue)',
-          '  if (-not $g -and (Test-Path $gui)) { Start-Process -FilePath $gui -WindowStyle Hidden }',
           '}',
+          '# ── 壳保活（⚠ 必须**独立于守卫状态**）──',
+          '#   2026-09-11 审计修复：旧实现把壳检查嵌在上面的 if (-not $up) 内，',
+          '#   于是「壳崩、守卫活」时 $up 为真 → 整块跳过 → **壳永远不会被拉起**。',
+          '#   而那恰是壳自愈唯一需要生效的场景（守卫由服务管理器保活，壳无人管）。',
+          '$g = @(Get-Process -Name dsh-supervisor-gui -ErrorAction SilentlyContinue)',
+          'if (-not $g -and (Test-Path $gui)) { Start-Process -FilePath $gui -WindowStyle Hidden }',
           'exit 0',
         ].join(String.fromCharCode(13, 10));
         fs.mkdirSync(path.dirname(watchdogPs1), { recursive: true });
@@ -126,19 +136,58 @@ function setAutostart(on) {
   return { ok: errors.length === 0, errors, ...status() };
 }
 
-/** GUI 登录自启（Linux 面板 autostart；mac 由 LaunchAgent 一并代管；Windows 由 schtasks 一并代管）。 */
-function setGuiAutostart(on) {
-  if (!isLinux) return { ok: true, enabled: on, note: process.platform };
+/** GUI（桌面壳）登录自启 —— 平台差异**如实声明**（2026-09-11 审计修复）。
+ *
+ *  linux  —— ✅ XDG autostart .desktop（本函数实现）
+ *  win32  —— ✅ schtasks 任务 DSH-Supervisor-GUI（由 setAutostart 建立；本函数不重复实现）
+ *  darwin —— ❌ **未实现**
+ *
+ * ⚠ 历史错误（本项目奠基提交 8867942 起即存在，直到 2026-09-11 审计才被发现）：
+ *   旧注释声称「mac 由 LaunchAgent 一并代管」，而 macPlist 从奠基提交至今**逐字节未变**、
+ *   只含守卫。旧实现据此对非 Linux 平台直接 `return { ok: true }` —— **静默成功**，
+ *   调用方与用户都以为壳已配置自启。
+ *   现改为对未实现平台**显式报告**（ok:false + unsupported），与 service.js 的 CapabilityError 同规。
+ */
+function setGuiAutostart(on, platform) {
+  const pl = platform || process.platform;
+  if (pl === 'darwin') {
+    return {
+      ok: false, unsupported: true, platform: pl, enabled: false,
+      error: 'macOS 桌面壳登录自启未实现（LaunchAgent plist 仅含守卫，不含壳）',
+    };
+  }
+  if (pl === 'win32') {
+    // Windows 的壳自启由 setAutostart 的 schtasks DSH-Supervisor-GUI 承担（职责分离，见本文件顶部注释）。
+    return { ok: true, platform: pl, enabled: !!on, via: 'schtasks', task: 'DSH-Supervisor-GUI' };
+  }
+  if (pl !== 'linux') return { ok: false, unsupported: true, platform: pl, enabled: false, error: '未知平台' };
   try {
     const file = guiFile();
     if (on) {
       const tpl = path.join(__dirname, '..', '..', '..', 'desktop', 'dsh-supervisor-gui-autostart.desktop');
       let entry = fs.readFileSync(tpl, 'utf8');
+      // ⚠ Exec 必须指向**解析出的真实路径**（2026-09-11 审计修复）：
+      //   模板写死 `@HOME@/.local/bin/dsh-supervisor-gui`，而 deb/rpm 把可执行装在
+      //   **/usr/bin/dsh-supervisor-gui**（实测 dpkg -c 确认）。
+      //   于是「用安装包」的用户启用开机自启后，登录时 Exec 指向**不存在的文件** ——
+      //   桌面环境静默忽略，用户以为已开启。
+      //   guiCommand() 已具备跨安装形态的解析能力（PATH/标准目录），此处复用。
       entry = entry.split('@HOME@').join(os.homedir());
+      const guiBin = guiCommand();
+      const oldExec = os.homedir() + '/.local/bin/dsh-supervisor-gui';
+      if (entry.includes(oldExec)) entry = entry.split(oldExec).join(guiBin);
+      // Icon 同样按实际安装解析（deb 装到 /usr/share，本地装到 ~/.local/share）
+      const iconCandidates = [
+        path.join(os.homedir(), '.local', 'share', 'icons', 'dsh-supervisor.png'),
+        '/usr/share/icons/hicolor/256x256/apps/dsh-supervisor.png',
+        '/usr/share/pixmaps/dsh-supervisor.png',
+      ];
+      const icon = iconCandidates.find((c) => { try { return fs.statSync(c).isFile(); } catch { return false; } });
+      if (icon) entry = entry.split(/^Icon=.*$/m).join('Icon=' + icon);
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const atmp2 = file + '.tmp'; fs.writeFileSync(atmp2, entry); fs.renameSync(atmp2, file); // 原子写
     } else { try { fs.unlinkSync(file); } catch {} }
-    return { ok: true, enabled: !!on };
+    return { ok: true, enabled: !!on, exec: guiCommand() };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 

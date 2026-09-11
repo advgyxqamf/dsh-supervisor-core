@@ -1,6 +1,12 @@
 'use strict';
 
-// 主机服务对接 -> 平台抽象层（src/infra/platform/autostart，三端同能力：systemd / LaunchAgent / schtasks）。
+// 主机服务对接 -> 平台抽象层（src/platform/os/autostart）。
+//
+// ⚠ 2026-09-11 更正两处历史错误（跨平台能力审计发现）：
+//   1) 路径 `src/infra/platform/autostart` **不存在** —— 平台层早已迁至 `src/platform/os/`；
+//   2) 「三端同能力」是**假的** —— macOS 的壳自启/自愈从未实现。
+//      真实能力以 capabilityProfile() 的 shellAutostart / shellSelfHeal 声明为准，
+//      并由 test/platform-capability-audit-test.js 强制与实现绑定。
 // 保留类接口（supervisor/API 调用方零改动），实现全部委托平台层。
 
 const platform = require('../platform/os/index');
