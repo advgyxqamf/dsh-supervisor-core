@@ -6,6 +6,62 @@
 
 ## [未发布]
 
+### 内核「全平台本地构建」：发布不再消耗 GitHub Actions 额度（2026-09-11）
+
+#### 动因（实测数据）
+
+私有仓 Actions 按**倍率**计费：Linux 1x、Windows 2x、**macOS 10x**。本仓 mac/win 矩阵约
+**110 分钟/次**，免费额度 2000 分钟/月仅够约 **18 次** —— 已实测耗尽（run #1–#24 正常，
+#25 起 job 拿不到 runner、`steps=0`、秒级失败；同时间公开壳仓 4 平台全绿）。
+迁移账号只能再买约 18 次，不是根治。
+
+#### 关键事实（本机逐一验证）
+
+| 事实 | 数值 |
+|---|---|
+| 内核运行时依赖数 | **0** |
+| 产物中 `.node` 原生二进制 | **0 个** |
+| esbuild 打包参数 | 仅 `--platform=node` + 版本注入，**无平台相关参数** |
+| 同一 bundle 在 linux/win32/darwin 覆盖下的 sha256 | **完全一致** |
+
+即：launcher 是**纯 JS 产物**，四平台只差 npm 包名与 `os`/`cpu` 元数据。
+故正确做法是**构建一次 → 派生四份元数据包装**，而非「四台机器各构建一次」。
+
+#### 实现
+
+- **新增 `release/scripts/_platforms.sh`**：平台矩阵的**单一事实源**（读取
+  `package.json#npmPublish.packages`）。此前平台清单散落在三个脚本 + workflow 硬编码矩阵，
+  四处不同步就会产出「少一个平台」的发布。
+- **`build-launcher.sh --all-platforms`**：一次 esbuild → 派生 4 个平台目录，并**断言四份
+  `core.cjs` 逐字节一致**（不一致即失败）。这从构造上消除了「同版本不同平台代码不同」的风险
+  —— 该风险曾真实发生（BETA.2 的 linux/darwin 缺 frpc 修复而 win 有）。
+- **`publish-core.sh --all-platforms`**：自递归（每个平台各跑一遍既有单平台路径），
+  避免复制「冒烟 + 版本核对 + 组装 + 幂等发布 + 认证」逻辑；任一平台失败即非零退出，
+  并提示「可只重跑失败平台」（幂等保证已成功的自动跳过）。
+- **`ci-core.sh --all-platforms`**：透传参数（CI 的 mac/win 不使用此选项，避免同平台重复发布）。
+- **`release-core.sh --all-platforms`**：新增全平台编排；平台闸放宽为「单平台真发布仍限 Linux，
+  全平台模式任何平台皆可」。
+- **npm scripts**：`build:launcher:all` / `publish:core:all` / `release:core:all` /
+  `release:core:all:publish`。
+
+#### workflow 自动收敛（`precheck`）
+
+全平台本地发布后仍会推送 tag，因而仍触发 workflow。为避免白烧额度，新增 `precheck` job
+（ubuntu，约 1 分钟）：用 `npm view` 逐个检查 4 个平台子包在该版本下是否已存在 ——
+**已全部存在则跳过整个 build 矩阵**（省下约 110 分钟，含 macOS 10x）；有缺失则照常补齐。
+因此无论用哪种模式，tag 推送后都会收敛到「四平台齐备」，且不会重复发布。
+
+#### 验证
+
+- 本机 `--all-platforms` 产出的四份 `core.cjs` **四平台逐字节一致**，且与 CI 在 macOS/Windows
+  产出的 BETA.3 包**哈希完全吻合**（`7668aaa13f41c898`）—— 构建可复现。
+- 四份子包的 `os`/`cpu` 元数据各不相同且正确（linux/x64、darwin/arm64、darwin/x64、win32/x64）。
+- 缺平台时：明确报错、退出码非 0、并提示构建命令；补齐后复跑 4/4 成功。
+- 新增 `test/all-platforms-test.js`（34 断言 + `release-auth-test` 的 2 条 workflow 断言）：
+  覆盖平台矩阵单一事实源、脚本接线、npm 入口、同源断言、precheck、以及「纯 JS 产物」前提本身
+  （含**实测**四平台产物哈希一致）。
+- 全量回归：**40 文件 826 passed / 0 failed**。
+
 ## [0.1.3-BETA.3]（2026-09-11）
 
 ### 发布 0.1.3-BETA.3：修正 BETA.2 的跨平台代码不一致

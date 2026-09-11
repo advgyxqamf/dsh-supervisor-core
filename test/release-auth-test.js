@@ -142,17 +142,33 @@ console.log('== R6 CI 矩阵不含 ubuntu ==');
 {
   const y = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'build.yml'), 'utf8');
   const code = y.split(String.fromCharCode(10)).filter((l) => !/^\s*#/.test(l)).join(String.fromCharCode(10));
-  // ⚠ 断言范围必须精确到「发布矩阵」，而非全文（2026-09-11 修正）：
+  // ⚠ 断言范围必须精确到「build 发布矩阵」这一 job（2026-09-11 两次修正）：
   //   linux-x64 由**本地**发布，故 CI 的 npm 发布矩阵不得含 ubuntu；
-  //   但 `release` job（汇总 artifact → 挂 GitHub Release，**不发 npm**）使用 ubuntu-latest 是正当的，
-  //   原断言扫全文 `runs-on: ubuntu` 会把它误判为违规。
-  const buildSection = (code.split(/\njobs:/)[1] || '').split(/\n\s{2}release:/)[0];
-  const releaseSection = (code.split(/\n\s{2}release:/)[1] || '');
+  //   但使用 ubuntu 的 job 是正当存在的 —— `precheck`（探测是否已全部发布）与
+  //   `release`（汇总 artifact → 挂 GitHub Release，不发 npm）。
+  //   故必须按 job 名切分，而非按「全文」或「release 之前的所有内容」。
+  const jobSection = (name) => {
+    const parts = code.split(/\n  [a-z][a-z0-9_-]*:\n/);
+    const idx = code.split(/\n  ([a-z][a-z0-9_-]*):\n/).reduce((acc, seg, i, arr) => {
+      if (i % 2 === 1 && seg === name) acc.push(arr[i + 1] || '');
+      return acc;
+    }, []);
+    return idx.join('\n');
+  };
+  const buildSection = jobSection('build');
+  const releaseSection = jobSection('release');
+  const precheckSection = jobSection('precheck');
   check('R6-a 发布矩阵不含 ubuntu', !/os:\s*ubuntu/.test(buildSection) && !/runs-on:\s*ubuntu/.test(buildSection), buildSection.match(/os:\s*\S+/g));
   check('R6-b build 用 matrix.os', /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/.test(buildSection) && /windows-latest/.test(y));
   check('R6-c 含 macos', /macos-latest/.test(y) && /macos-14/.test(y));
-  check('R6-d release job 只挂资产、不发布 npm', releaseSection.length > 0 && !/npm\s+publish/.test(releaseSection) && !/ci-core\.sh/.test(releaseSection));
-  check('R6-e release job 仅 tag 触发且 need build', /needs:\s*build/.test(releaseSection) && /startsWith\(github\.ref/.test(releaseSection));
+  check('R6-d release job 只挂资产、不发布 npm', releaseSection.length > 0 && !/npm\s+publish/.test(releaseSection) && !/ci-core\.sh/.test(releaseSection), releaseSection.length ? 'ok' : '未取到 release job');
+  // release 现为 needs: [precheck, build]（全平台本地发布后要能按 precheck 决定是否挂资产）
+  check('R6-e release job 仅 tag 触发且依赖 build',
+    /needs:\s*\[[^\]]*\bbuild\b[^\]]*\]/.test(releaseSection) && /startsWith\(github\.ref/.test(releaseSection),
+    (releaseSection.match(/needs:[^\n]*/) || [])[0]);
+  // precheck：全平台本地发布后跳过昂贵矩阵（省额度），其自身不得发布 npm
+  check('R6-f 存在 precheck 且不发布 npm', precheckSection.length > 0 && !/npm\s+publish/.test(precheckSection), precheckSection.length ? 'ok' : '未取到');
+  check('R6-g precheck 用 ubuntu（1x 计费，成本远低于 mac 10x）', /runs-on:\s*ubuntu/.test(precheckSection), 'ok');
 }
 
 // ── R7 平台闸 ──

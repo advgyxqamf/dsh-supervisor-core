@@ -3,6 +3,11 @@
 # 用法（在对应平台机器运行，无交叉编译；脚本按本机 platform/arch 自动识别）：
 #   release/scripts/publish-core.sh                  # 组装 + npm publish --dry-run（安全检查，推荐先跑）
 #   release/scripts/publish-core.sh --publish        # 真发布（需 npm 登录且有 scope 权限）
+#   release/scripts/publish-core.sh --all-platforms [--publish]
+#                                                    # **全部 4 个平台**（linux-x64/darwin-arm64/
+#                                                    #  darwin-x64/win-x64）：launcher 为纯 JS 产物，
+#                                                    #  故可在单一机器（如 Linux）上完成全部平台的组装与发布。
+#                                                    #  平台清单来自 package.json#npmPublish.packages（单一事实源）。
 #   release/scripts/publish-core.sh --scope @acme    # 指定 scope（不传则读 package.json npmPublish.scope 或环境 DSH_CORE_SCOPE，兜底 @dsh-core）
 # 版本规范（DESIGN §16）：version 从仓库根 package.json 注入（禁手写）；发布前强制校验
 # 二进制 self-check 自报版本 === 单源版本（防产物错配发布）；产物命名 dsh-supervisor-<ver>-<plat>-<arch>。
@@ -13,18 +18,55 @@ VER="$(node -p "require('./package.json').version")"
 
 # ---- 参数：--publish / --scope <val> / --scope=<val> ----
 PUBLISH=0
+ALL=0
 SCOPE="$(node -p "try{const p=require('./package.json');(p.npmPublish&&p.npmPublish.scope)||''}catch(e){''}")"
 MAIN_LICENSE="$(node -p "require('./package.json').license")"
 [ -n "$SCOPE" ] || SCOPE="${DSH_CORE_SCOPE:-}"
 [ -n "$SCOPE" ] || SCOPE="@dsh-sup"   # 产品 scope（2026-09 用户定稿：@dsh-sup/dsh-core-<os>-<arch>）
 while [ $# -gt 0 ]; do case "$1" in
   --publish) PUBLISH=1 ;;
+  --all-platforms) ALL=1 ;;
   --dry-run) PUBLISH=0 ;;   # 显式 dry-run（默认即 dry-run；供编排脚本语义清晰传递）
   --scope) SCOPE="${2:?--scope 需要值}"; shift ;;
   --scope=*) SCOPE="${1#*=}" ;;
-  *) echo "未知参数: $1（支持 --publish / --dry-run / --scope <val>）"; exit 2 ;;
+  *) echo "未知参数: $1（支持 --publish / --dry-run / --all-platforms / --scope <val>）"; exit 2 ;;
 esac; shift; done
 
+
+# ── 全平台模式：自递归（每个平台各跑一遍「单平台」路径）──
+# 为什么自递归而非循环内联：单平台路径已包含「冒烟 + 版本核对 + 组装 + 幂等发布 + 认证」全套逻辑，
+# 内联会把这些复制一份（双份维护，正是本项目反复出现的缺陷模式）。递归只多一层进程，换来单一路径。
+if [ "$ALL" = 1 ]; then
+  # shellcheck source=./_platforms.sh
+  . "$ROOT/release/scripts/_platforms.sh"
+  MATRIX="$(dsh_platform_matrix_assert)"
+  TOTAL="$(printf "%s\n" "$MATRIX" | grep -c .)"
+  echo "=== 全平台发布：$TOTAL 个平台 ==="
+  INNER=(--scope "$SCOPE")
+  if [ "$PUBLISH" = 1 ]; then INNER=(--publish --scope "$SCOPE"); fi
+  FAILED=()
+  while read -r P_OS P_PLAT P_ARCH; do
+    [ -n "${P_PLAT:-}" ] || continue
+    echo ""
+    echo "──────── $P_OS-$P_ARCH ────────"
+    if DSH_PLATFORM_OVERRIDE="$P_PLAT" DSH_ARCH_OVERRIDE="$P_ARCH" \
+        bash "$ROOT/release/scripts/publish-core.sh" "${INNER[@]}"; then
+      echo "  ✅ $P_OS-$P_ARCH 完成"
+    else
+      echo "  ❌ $P_OS-$P_ARCH 失败"
+      FAILED+=("$P_OS-$P_ARCH")
+    fi
+  done <<< "$MATRIX"
+  echo ""
+  if [ "${#FAILED[@]}" -gt 0 ]; then
+    echo "=== 全平台结果：$((TOTAL - ${#FAILED[@]}))/$TOTAL 成功；失败：${FAILED[*]} ==="
+    echo "    可只重跑失败平台（幂等：已成功平台会自动跳过）："
+    echo "      DSH_PLATFORM_OVERRIDE=<plat> DSH_ARCH_OVERRIDE=<arch> npm run publish:core -- --publish"
+    exit 1
+  fi
+  echo "=== 全平台结果：$TOTAL/$TOTAL 全部成功 ==="
+  exit 0
+fi
 # ---- 平台识别与产物定位 ----
 PLAT="$(node -p "process.platform")"   # linux | darwin | win32
 ARCH="$(node -p "process.arch")"       # x64 | arm64
@@ -37,7 +79,15 @@ case "$PLAT" in linux) OS_TAG=linux;; darwin) OS_TAG=darwin;; win32) OS_TAG=win;
 case "$ARCH" in x64|arm64) ;; *) echo "不支持的架构: $ARCH （子包仅 x64/arm64）"; exit 1;; esac
 PKG_NAME="$SCOPE/dsh-core-$OS_TAG-$ARCH"
 SRC_DIR="dist/launcher/dsh-supervisor-$VER-$PLAT-$ARCH"
-[ -d "$SRC_DIR" ] || { echo "缺少构建产物: $SRC_DIR （请先 npm run build:sea / build:launcher）"; exit 1; }
+[ -d "$SRC_DIR" ] || {
+  echo "缺少构建产物: $SRC_DIR"
+  if [ "${ALL:-0}" = 1 ]; then
+    echo "  全平台发布需先构建全部平台：npm run build:launcher:all"
+  else
+    echo "  请先构建：npm run build:launcher（本机平台）或 npm run build:launcher:all（全平台）"
+  fi
+  exit 1
+}
 [ -f "$SRC_DIR/bin/dsh-supervisor" ] || { echo "产物缺 bin/dsh-supervisor: $SRC_DIR"; exit 1; }
 [ -f "$SRC_DIR/core.cjs" ] || { echo "产物缺 core.cjs: $SRC_DIR"; exit 1; }
 BIN_NAME="dsh-supervisor"   # launcher 形态：node 启动脚本（win 亦无 .exe——由 npm bin shim 生成）

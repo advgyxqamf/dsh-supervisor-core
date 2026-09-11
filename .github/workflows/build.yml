@@ -3,11 +3,15 @@ name: build-release
 # 私有内核仓产线（DESIGN §16.4 + 2026-09 双仓拆分：壳已剥离至公开仓 dsh-supervisor-launcher，本仓只管内核 npm 子包）。
 # tag v<内核版本> → verify + build:launcher + npm 子包发布；壳的构建/冒烟/安装程序归壳仓 launcher-build.yml。
 #
-# 平台分工（2026-09 定案，GitHub 额度优化）：
-#   - **linux-x64**：**本地生产**。在 Linux 机器执行 `npm run release:core:publish`——
-#     走 ci-core.sh 完整门禁后直推 npm，再 commit+tag+push 触发本 workflow 的 mac/win 矩阵。
-#   - **win-x64 / darwin-arm64 / darwin-x64**：GitHub CI 生产（本文件矩阵）。
-#   故本矩阵**不含 ubuntu**——若加回，会与本地发布形成同版本二次发布（npm 拒绝）。
+# 平台分工（2026-09-11 定案，GitHub 额度优化）：
+#   - **推荐路径：全平台本地生产** `npm run release:core:all:publish`
+#     launcher 是纯 JS 产物（内核 0 依赖 / 产物 0 个 .node），平台差异仅在 npm 元数据，
+#     故一台 Linux 即可产出四个平台的正确产物，**完全不消耗 GitHub 额度**。
+#     本地发布后本 workflow 仍会因 tag 而触发，但 `precheck` 会发现「本版已全部发布」
+#     并**跳过整个 mac/win 矩阵**（约 1 分钟 ubuntu prep vs 约 110 分钟含 macOS 10x 计费）。
+#   - **兜底路径：CI 产 mac/win**。若本地只发了部分平台（或不发），precheck 判定需要构建，
+#     则由本矩阵补齐。因此 tag 推送在任何情况下都能收敛到「四平台齐备」。
+#   本矩阵**不含 ubuntu**——linux-x64 由本地生产；若加回会形成同平台二次发布（npm 拒绝）。
 on:
   push:
     tags:
@@ -15,7 +19,52 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # ── precheck：该 tag 版本是否已在 npm 全部发布？ ──
+  # 为什么需要：全平台本地发布后，tag 仍会触发本 workflow。若无此判断，
+  #   每次发布都会白烧一轮 mac/win 矩阵（macOS 按 10x 计费，约 110 分钟/次）。
+  #   有它则退化为一次 ubuntu 探测（约 1 分钟，1x），把额度消耗降低约 99%。
+  # 判据：package.json#npmPublish.packages 声明的**每个**平台子包，在该版本下是否都已存在于 npm。
+  precheck:
+    runs-on: ubuntu-latest
+    outputs:
+      need_build: ${{ steps.probe.outputs.need_build }}
+      missing: ${{ steps.probe.outputs.missing }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 探测该版本是否已全部发布
+        id: probe
+        shell: bash
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          echo "  版本: $VER"
+          MISSING=""
+          for p in $(node -e 'const p=require("./package.json");console.log((p.npmPublish&&p.npmPublish.packages||[]).join(" "))'); do
+            if npm view "@dsh-sup/$p@$VER" version >/dev/null 2>&1; then
+              echo "    已发布 $p"
+            else
+              echo "    缺失   $p"
+              MISSING="$MISSING $p"
+            fi
+          done
+          if [ -z "$MISSING" ]; then
+            echo "need_build=false" >> "$GITHUB_OUTPUT"
+            echo "  → 四平台已齐备，**跳过构建矩阵**（省额度）"
+          else
+            echo "need_build=true" >> "$GITHUB_OUTPUT"
+            echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
+            echo "  → 需由 CI 补齐：$MISSING"
+          fi
+
   build:
+    needs: precheck
+    # 已全部发布则无需再构建（本地已用同一份代码产出，幂等）。
+    if: needs.precheck.outputs.need_build == 'true'
     # 本 job 只负责构建与发布 npm 子包（不再直接挂 Release，见文件末尾 release job 的说明）。
     permissions:
       contents: read
@@ -78,8 +127,9 @@ jobs:
   #   且各平台的 dist/launcher/** 内含**同名文件**（如 core.cjs），直接挂会互相覆盖/冲突。
   # 现改为：build 只上传 artifact → 本 job 汇总、按平台打成**唯一命名**的 tar.gz 后一次性挂载。
   release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [precheck, build]
+    # 需要 build 真正跑过（跳过 build 时没有 artifact 可汇总，故不挂 Release）。
+    if: startsWith(github.ref, 'refs/tags/v') && needs.precheck.outputs.need_build == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write   # 挂 Release 需 GITHUB_TOKEN contents:write
