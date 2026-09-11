@@ -6,6 +6,77 @@
 
 ## [未发布]
 
+### 修复：测试固定端口落在 OS 动态端口范围 —— 导致偶发假失败
+
+#### 问题（真实 flake，非猜测）
+
+回归中两次遇到**复跑即过**的失败：
+
+```
+FAIL instB → base+2（顺序补位）  ← {"port":46003,...}      ← ports-claim-test
+Error: listen EADDRINUSE: address already in use 127.0.0.1:39080   ← router-e2e-test
+```
+
+根因：**测试把固定端口放在了 OS ephemeral 范围内**。
+
+- `claimSlot` 用 **bind 探测**判断端口可用，而 ephemeral 内的端口会被**任何进程的临时出站连接**
+  短暂占用 → bind 失败 → 跳过该端口 → 断言数值不符；
+- 生产代码 `ports.js:22,31` 明确要求「选址必须避开 OS 动态端口范围」，**测试自己却违反了它**；
+- `router-e2e-test` 与 `token-boundary-test` 更是撞用同一个 `39080` → 必然 EADDRINUSE。
+
+全量扫描发现 **39 个固定端口**落在危险区，涉及 **23 个测试文件**。
+
+#### 修复
+
+**新增 `test/_ports.js`（端口分配单一事实源）**：
+- 按测试文件分段（每文件 10 个号），跨文件绝不撞号；
+- `safeBase(name)` / `safePort(name, i)` 取端口，未登记的文件会**直接报错**（强制登记，防静默撞号）；
+- `freePort()` 动态空闲端口；
+- `isSafe(p)` **检查三平台并集**，并叠加本机 `/proc` 实际配置。
+
+**23 个测试文件全部迁移**到安全段（不再硬编码端口字面量）。
+
+#### ⚠ 安全段选取过程中的一次自我纠错（值得记录）
+
+我最初选了 **61000-61999** —— 只考虑了 Linux（`32768-60999`）。
+但 **macOS 与 Windows 的动态端口范围是 49152-65535**（RFC 6335 定义的 Dynamic/Ephemeral Ports，
+IANA 永不分配），那个段在 mac/win 上**同样危险**。
+
+权威依据（RFC 6335 §6「Port Number Ranges」原文）：
+
+```
+o  the User Ports, also known as the Registered Ports, from 1024-49151 (assigned by IANA)
+o  the Dynamic Ports, also known as the Private or Ephemeral Ports, from 49152-65535 (never assigned)
+```
+
+| 平台 | 动态端口范围 |
+|---|---|
+| Linux | `net.ipv4.ip_local_port_range` 默认 32768-60999 |
+| macOS | `net.inet.ip.portrange` 默认 49152-65535 |
+| Windows | `netsh int ipv4 show dynamicport tcp` 默认 49152-65535 |
+
+三平台并集为 `32768-65535`，故安全上界只能到 **32767**；再排除生产池（20000-25999 / 40000-43199），
+最终选定 **28000-29999**（与生产池留 2000 号缓冲，且远离边界）。
+
+这条教训已写入 `_ports.js` 与门禁，防止后人重蹈。
+
+#### 门禁（防止回归）
+
+新增 `test/test-port-discipline-test.js`（**置于 `npm test` 链首位**）：
+- **T1** 任何测试的固定端口不得落在危险区；
+- **T2** 已登记的文件必须经 `safePort()` 取端口（不得硬编码）；
+- **T3** 跨文件端口段不得重叠；
+- **T4** 安全段自身必须真的安全。
+
+**T1 的实现要点**：「4-5 位数字」≠「端口」是重要教训 —— 实测 `20000` 既是超时毫秒数
+（多个测试用它当超时），又恰好是生产池下界，单凭数值无法区分。故 T1 只匹配**明确的端口语境**
+（`port: N` / `listen(N` / `127.0.0.1:N` / `localhost:N`），而非「扫描所有数字再过滤」
+（后者产生了大量误报）。
+
+#### 验证
+- 迁移后全量：**830 passed / 0 failed**（41 个结果文件）；
+- 关键测试连跑 5 轮 + 全量连跑 2 轮，均无 flake；
+- 门禁 T1-T4 全通过。
 ### 新功能：壳内镜像源适配（壳装机时无内核，三处下载须自带镜像能力）
 
 用户指正：「安装完壳之后的所有动作，它是没有镜像源的，它是没有内核的 —— 在初始安装完壳的

@@ -11,6 +11,8 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'freeze-recovery-'));
@@ -77,7 +79,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     const sig = classifyUpstreamLimited(429, bodyText);
     check('A1 429 CC body → signal=window', sig === 'window', String(sig));
     const retryMs = bodyResetMs(bodyText);
-    check('A2 bodyResetMs 解析 ISO 绝对时间 → ~2h', retryMs > 1.9 * 3600 * 1000 && retryMs < 2.1 * 3600 * 1000, String(retryMs / 60000) + 'min');
+    check('A2 bodyResetMs 解析 ISO 绝对时间 → ~2h', retryMs > 1.9 * 3600 * 1000 && retryMs < 2.1 * 3600 * 1000, String(retryMs / 28060) + 'min');
     // 冻结：传 retryMs 给 markQuotaExhausted（等价 reactToFailure effect 路径）
     p.markQuotaExhausted(acc, headerRetryMs({}) || retryMs);
     check('A3 冻结 nextResetAt ≈ now+2h（精确恢复点，非 +5h 默认）', acc.nextResetAt && acc.nextResetAt > Date.now() + 1.8 * 3600 * 1000 && acc.nextResetAt < Date.now() + 2.2 * 3600 * 1000,

@@ -13,6 +13,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const net = require('node:net');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-upg-'));
 const results = [];
@@ -34,7 +36,7 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
     mgr._prepareSystemd = () => {};
     let started = 0;
     mgr._systemdStart = () => { started++; return { ok: true }; };
-    const inst = { id, name: '升级用例', domain: 'sandbox', port: 35901, state: { phase: 'STOPPED' } };
+    const inst = { id, name: '升级用例', domain: 'sandbox', port: 28090, state: { phase: 'STOPPED' } };
     mgr.instances = [inst];
     mgr._ensureSandboxDirs = () => {};
     // 预置 install 目录的 DSH 入口，使 startInstance 不走 _installSandbox
@@ -61,7 +63,7 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
   console.log('== R2 晚就绪端口不得被误判失败 ==');
   {
     const dist = new DistributionManager({ logger });
-    // 端口健壮性（2026-09-11 修复）：原先用固定端口 35910/35911，前一次运行的 socket
+    // 端口健壮性（2026-09-11 修复）：原先用固定端口 28091/28092，前一次运行的 socket
     // 处于 TIME_WAIT 时会导致 EADDRINUSE 使整个测试链中断（实测发生过）。
     // 改为向内核申请空闲端口，彻底消除该 flake。
     const freePort = () => new Promise((resolve, reject) => {

@@ -10,6 +10,8 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'token-boundary-'));
@@ -25,8 +27,8 @@ function buildSupervisor() {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
   const cfg = {
     command: ['node', '/nonexistent/bin/dsh', 'web'],
-    healthUrl: 'http://127.0.0.1:39080/',
-    apiHost: '127.0.0.1', apiPort: 39081,
+    healthUrl: 'http://127.0.0.1:28210/',
+    apiHost: '127.0.0.1', apiPort: 28211,
     stateFile: path.join(TMP, 'state.json'),
     logFile: path.join(TMP, 'events.log'),
     supervisorLogFile: path.join(TMP, 'sup.log'),
@@ -45,11 +47,11 @@ async function main() {
     const sup = buildSupervisor();
     // 本地模式：覆写 lan.list() 返回带 token/dshToken 的伪造项（模拟 relay 缓存内字段）
     sup.lan = {
-      list: () => ({ items: [{ id: 'inst-x', name: 'x', dshPort: 3081, wanPort: 40001, token: 'lan-gate-key', dshToken: 'SECRETSESSIONTOKEN', enabled: true, localPort: 1, running: true }], addresses: ['192.168.3.64'] }),
+      list: () => ({ items: [{ id: 'inst-x', name: 'x', dshPort: 3081, wanPort: 28213, token: 'lan-gate-key', dshToken: 'SECRETSESSIONTOKEN', enabled: true, localPort: 1, running: true }], addresses: ['192.168.3.64'] }),
     };
     const r = sup.listLan();
     const it = r.items && r.items[0];
-    check('listLan 保留结构字段', !!it && it.id === 'inst-x' && it.wanPort === 40001);
+    check('listLan 保留结构字段', !!it && it.id === 'inst-x' && it.wanPort === 28213);
     check('listLan 剔除 remoteToken', !!it && !Object.prototype.hasOwnProperty.call(it, 'token'));
     check('listLan 剔除 dshToken', !!it && !Object.prototype.hasOwnProperty.call(it, 'dshToken'));
     // 白名单（2026-09 扩展）：新增 frpEnabled/frpRemotePort/tokenSet —— 均为**非机密**
@@ -63,7 +65,7 @@ async function main() {
   {
     const sup = buildSupervisor();
     sup.lan = {
-      list: () => ({ items: [{ id: 'inst-r', name: 'r', dshPort: 3081, wanPort: 40001, token: 'k', dshToken: 'SECRET', enabled: true, localPort: 1, running: true, inject: { tokenSet: true, cookieReady: true, lastOkAt: 1, lastError: null, lastErrorAt: null } }], addresses: [] }),
+      list: () => ({ items: [{ id: 'inst-r', name: 'r', dshPort: 3081, wanPort: 28213, token: 'k', dshToken: 'SECRET', enabled: true, localPort: 1, running: true, inject: { tokenSet: true, cookieReady: true, lastOkAt: 1, lastError: null, lastErrorAt: null } }], addresses: [] }),
     };
     const it = sup.listLan().items[0];
     check('inject 透传 cookieReady', !!it.inject && it.inject.cookieReady === true && it.inject.tokenSet === true);
@@ -76,14 +78,14 @@ async function main() {
     // daemon 门面：listLan 经 ctl 后 sanitize——以假 Promise 覆写 _lanCtlCall 验证
     // 2026-09 结构单写后 daemon 门面由 lanDaemonEnabled() 判定（lanApi/API 方法均改判该）；测试 mock 对应
     sup.lanDaemonEnabled = () => true;
-    sup._lanCtlCall = () => Promise.resolve({ items: [{ id: 'inst-y', dshPort: 3082, wanPort: 40003, dshToken: 'SECRET2' }], addresses: [] });
+    sup._lanCtlCall = () => Promise.resolve({ items: [{ id: 'inst-y', dshPort: 3082, wanPort: 28214, dshToken: 'SECRET2' }], addresses: [] });
     const r = await sup.listLan();
     check('门面路径剔除 dshToken', r.items.length === 1 && !Object.prototype.hasOwnProperty.call(r.items[0], 'dshToken'));
   }
 
   console.log('== 令牌边界：instances.json 遗留 dshToken 列剔除 ==');
   {
-    fs.writeFileSync(path.join(TMP, 'instances.json'), JSON.stringify({ instances: [{ id: 's1', name: 's', port: 39100, domain: 'sandbox', remoteEnabled: false, dshToken: 'STALEVALUE' }] }));
+    fs.writeFileSync(path.join(TMP, 'instances.json'), JSON.stringify({ instances: [{ id: 's1', name: 's', port: 28212, domain: 'sandbox', remoteEnabled: false, dshToken: 'STALEVALUE' }] }));
     const sup = buildSupervisor();
     sup.instances.load();
     const inst = sup.instances.instances.find((x) => x.id === 's1');

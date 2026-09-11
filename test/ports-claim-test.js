@@ -3,16 +3,18 @@
 
 // 确定性槽位仲裁 claimSlot 回归（2026-09，docs/port-architecture.md）：
 //  byOwner 绑定复用 / binding-lost 迁移(显式) / preferred advisory 回退 / 顺序补位 / 单 owner 单端口
-// 隔离 range（46000+50）→ 确定性，不依赖宿主真实 relay 段占用。
+// 隔离 range（28130+50）→ 确定性，不依赖宿主真实 relay 段占用。
 
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ports-claim-'));
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
-const RANGE = { base: 46000, count: 50 };
+const RANGE = { base: 28130, count: 50 };
 
 (async () => {
   const { PortRegistry } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports'));

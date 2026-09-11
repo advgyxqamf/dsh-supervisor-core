@@ -7,6 +7,8 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ensure-'));
@@ -42,7 +44,7 @@ fs.writeFileSync(mockApp, "const http = require('node:http');\nconst argv = proc
   check('A2 实例运行且有 version', inst.pid && inst.version === '1.2.3', JSON.stringify({ pid: inst.pid, version: inst.version }));
 
   // 模拟重启：重建 RouterService（进程态不落盘 → 实例 registered、version 丢失）
-  // 先停止第一个 RouterService 的实例：否则 41000 仍被旧进程监听，svc2 复用同端口 spawn → EADDRINUSE
+  // 先停止第一个 RouterService 的实例：否则 28050 仍被旧进程监听，svc2 复用同端口 spawn → EADDRINUSE
   for (const pp0 of svc.providers) { if (pp0.kind !== 'proxy') continue; for (const ins of (pp0.instances || [])) { try { pp0.stopInstance(ins); } catch {} } }
   await new Promise((r) => setTimeout(r, 400));
   const svc2 = new RouterService({ config: {}, providerFile, port: 19180, usageTotalsFile: path.join(TMP, 't.json'), logger: { info() {}, warn() {}, error() {} }, events: null });

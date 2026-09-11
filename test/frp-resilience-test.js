@@ -9,6 +9,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'frp-res-'));
 const results = [];
@@ -24,10 +26,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   {
     const m = new FrpManager({ dir: TMP, logger, events: null });
     const settings = { enabled: true, serverAddr: '1.2.3.4', serverPort: 7000, authToken: 'tok', user: 'dsh' };
-    const insts = [{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 40000 }];
+    const insts = [{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 28070 }];
     const { text, count } = m.buildConfig(settings, insts);
     check('R1-a 生成配置含 loginFailExit = false', /^loginFailExit = false$/m.test(text), 'ok');
-    check('R1-b 代理条目正确（localPort=wanPort, remotePort）', count === 1 && /localPort = 40000/.test(text) && /remotePort = 7001/.test(text), 'count=' + count);
+    check('R1-b 代理条目正确（localPort=wanPort, remotePort）', count === 1 && /localPort = 28070/.test(text) && /remotePort = 7001/.test(text), 'count=' + count);
     check('R1-c wanPort 缺失时不生成无效代理（防 frpc 解析失败）',
       m.buildConfig(settings, [{ id: 'x', frpEnabled: true, frpRemotePort: 7001, wanPort: null }]).count === 0, 'ok');
   }
@@ -48,7 +50,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     fs.writeFileSync(m.binPath, '#!/bin/sh\nsleep 300\n');
     fs.chmodSync(m.binPath, 0o755);
     m.saveSettings({ enabled: true, serverAddr: '127.0.0.1', serverPort: 7000, authToken: 'tok', user: 'dsh' });
-    const insts = [{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 40000 }];
+    const insts = [{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 28070 }];
     m.syncFromInstances(insts);
     await sleep(400);
     const first = m.child;
@@ -91,7 +93,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const m4 = new FrpManager({ dir: D4, logger, events: { append() {} } });
     fs.mkdirSync(m4.binPath, { recursive: true });   // binPath 变成**目录**：existsSync 通过但不可执行
     m4.saveSettings({ enabled: true, serverAddr: '127.0.0.1', serverPort: 7000, authToken: 'tok', user: 'dsh' });
-    m4.syncFromInstances([{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 40000 }]);
+    m4.syncFromInstances([{ id: 'inst-abc12345', frpEnabled: true, frpRemotePort: 7001, wanPort: 28070 }]);
     check('R4-a start 不抛出（同步异常已降级为返回值）', true, 'ok');
     await sleep(500);
     check('R4-b 异步 spawn 失败已被处理（child 清空、进程未崩溃）', m4.child === null, 'child=' + (m4.child && m4.child.pid));

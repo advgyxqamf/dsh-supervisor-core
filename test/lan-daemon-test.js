@@ -3,7 +3,7 @@
 
 // lan-daemon（L3b 进程解耦）机制集成测试（2026-09）：
 //  - lan-daemon 从 lan-state.json 快照拉起 relay（mock 目标），wanPort 绑定并真实代理
-//  - ctl（43108 复用 router-ctl dispatcher）list/frpStatus/health 可用
+//  - ctl（28104 复用 router-ctl dispatcher）list/frpStatus/health 可用
 //  - 状态 diff：remoteEnabled=false → reconcile 移除 relay；实例新增 → 补建
 //  - SIGTERM 优雅退出（端口释放）
 // 自包含：mock HTTP 目标 + 独立 tmp config/lan-state，不触碰生产守卫/账号/relay。
@@ -13,14 +13,16 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'lan-daemon-test-'));
-const TARGET_A = 39201;
-const TARGET_B = 39202;
-const WAN_A = 39310;
-const WAN_B = 39311;
-const CTL = 43208; // 避开默认 43108，防与未来生产冲突（config.lanCtlPort 覆盖）
+const TARGET_A = 28100;
+const TARGET_B = 28101;
+const WAN_A = 28102;
+const WAN_B = 28103;
+const CTL = 28105; // 避开默认 28104，防与未来生产冲突（config.lanCtlPort 覆盖）
 
 let passed = 0;
 let failed = 0;

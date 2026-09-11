@@ -7,6 +7,8 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'router-e2e-'));
@@ -29,10 +31,10 @@ const up = http.createServer((req, res) => {
 });
 
 (async () => {
-  await new Promise((r) => up.listen(39080, '127.0.0.1', r));
+  await new Promise((r) => up.listen(28170, '127.0.0.1', r));
   const { RouterService } = require(path.join(ROOT, 'src', 'domains', 'router'));
   const svc = new RouterService({ config: {}, providerFile: path.join(TMP, 'providers.json'), portsFile: path.join(TMP, 'ports-router.json'), usageTotalsFile: path.join(TMP, 'totals.json'), logger: { info(){}, warn(){}, error(){} }, events: null });
-  const r1 = svc.addDirectProvider({ name: 'Mock', baseUrl: 'http://127.0.0.1:39080/v1' });
+  const r1 = svc.addDirectProvider({ name: 'Mock', baseUrl: 'http://127.0.0.1:28170/v1' });
   const dp = svc.getProvider(r1.id);
   dp.accounts.push({ key: 'sk-mock-1', keyId: 'm1', maskedKey: '...ock-1', status: 'ready', quota: { rolling: { percent: 10, status: 'ok' }, weekly: { percent: 20, status: 'ok' }, monthly: { percent: 30, status: 'ok' } }, cooldownUntil: null, registeredAt: Date.now() });
   await svc.activateProvider(r1.id); // 供应商独立端点语义：激活即开放该供应商独立 API 端口（未激活不提供服务）

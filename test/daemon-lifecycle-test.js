@@ -20,8 +20,10 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const { DaemonLifecycle } = require(path.join(ROOT, 'src', 'guard', 'proc', 'daemon-lifecycle'));
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake-ctl-daemon.js');
-const CTL = 43810; // 测试专用端口段（远离生产）
+const CTL = 28040; // 测试专用端口段（远离生产）
 const ctlHealth = () => new Promise((resolve) => {
   const req = http.get({ host: '127.0.0.1', port: CTL, path: '/' }, (res) => { let b = ''; res.on('data', (c) => b += c); res.on('end', () => resolve({ code: res.statusCode, body: b })); });
   req.on('error', () => resolve(null));

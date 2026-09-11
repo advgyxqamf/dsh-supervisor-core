@@ -9,6 +9,8 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'bin', 'dsh-supervisor');
@@ -81,7 +83,7 @@ function api(port, method, p) {
   });
 }
 
-async function waitStatus(port, pred, timeoutMs = 40000) {
+async function waitStatus(port, pred, timeoutMs = 28220) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     const s = await api(port, 'GET', '/status');
@@ -91,7 +93,7 @@ async function waitStatus(port, pred, timeoutMs = 40000) {
   return null;
 }
 
-async function waitUpgrade(port, pred, timeoutMs = 60000) {
+async function waitUpgrade(port, pred, timeoutMs = 28221) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     const s = await api(port, 'GET', '/native/status');

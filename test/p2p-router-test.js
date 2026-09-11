@@ -21,6 +21,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 // 产品不再内置 dry-run 测试供应商：测试自行注册本地 mock 反代应用（仅本进程内生效，不进生产）
 const { PROXY_APPS: TEST_APPS } = require(path.join(ROOT, 'src', 'domains', 'router', 'proxy-apps'));
 const registerCleanup = require(path.join(ROOT, 'test', 'helpers-cleanup'));
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 function registerDryRunApp() {
   if (TEST_APPS['test-dry-run']) return;
   TEST_APPS['test-dry-run'] = {
@@ -69,7 +71,7 @@ const upstream = http.createServer((q, s) => {
 });
 
 (async () => {
-  await new Promise((r) => upstream.listen(39100, '127.0.0.1', r));
+  await new Promise((r) => upstream.listen(28110, '127.0.0.1', r));
   const { RouterService } = require(path.join(ROOT, 'src', 'domains', 'router'));
   const providerFile = path.join(TMP, 'providers.json');
   const svcs = [];
@@ -86,7 +88,7 @@ const upstream = http.createServer((q, s) => {
   check('A2 preset 注入 baseUrl/adapter', dp.baseUrl === 'https://opencode.ai/zen/go/v1' && dp.adapter && dp.adapter.quota.type === 'opencode-usage', dp.baseUrl);
   check('A3 preset 注入 plan', dp.plan && dp.plan.per5hUsd === 12, JSON.stringify(dp.plan));
 
-  dp.baseUrl = 'http://127.0.0.1:39100/v1';
+  dp.baseUrl = 'http://127.0.0.1:28110/v1';
   const aGood = await dp.addAccount('sk-good-001');
   check('A4 正常账号检测 → ready', aGood.ok && aGood.account.status === 'ready', JSON.stringify(aGood.account && aGood.account.status));
   const aFull = await dp.addAccount('sk-full-001');

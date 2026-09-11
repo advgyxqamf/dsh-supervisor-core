@@ -13,7 +13,7 @@ const path = require('node:path');
 const http = require('node:http');
 
 const ROOT = path.join(__dirname, '..');
-const API_PORT = 33100;
+const API_PORT = 28010;
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x ? '  ← ' + x : '')); };
 
@@ -64,6 +64,8 @@ const server = createServer(sup);
 
 // 本机非回环 IPv4（P0-1 结构修复后的真实 LAN 身份来源：socket 层，不再伪造 Host 头）
 const os = require('node:os');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const LAN_IP = (() => {
   for (const list of Object.values(os.networkInterfaces())) {
     for (const i of list || []) { if (i.family === 'IPv4' && !i.internal) return i.address; }

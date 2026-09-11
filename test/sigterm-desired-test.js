@@ -12,6 +12,8 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'bin', 'dsh-supervisor');
@@ -25,10 +27,10 @@ function check(name, cond, extra = '') {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const cfg = {
-  command: ['node', MOCK, '39051'], healthUrl: 'http://127.0.0.1:39051/',
+  command: ['node', MOCK, '28191'], healthUrl: 'http://127.0.0.1:28191/',
   probeIntervalMs: 300, startTimeoutMs: 5000, stopGraceMs: 800, portReleaseWaitMs: 600,
-  crashWindowMs: 60000, crashBurst: 5, backoff: [1500, 3000, 6000],
-  apiHost: '127.0.0.1', apiPort: 39050, stateFile: path.join(TMP, 'state.json'),
+  crashWindowMs: 28192, crashBurst: 5, backoff: [1500, 3000, 6000],
+  apiHost: '127.0.0.1', apiPort: 28190, stateFile: path.join(TMP, 'state.json'),
   logFile: path.join(TMP, 'events.log'), supervisorLogFile: path.join(TMP, 'guard.log'),
   dshLogFile: path.join(TMP, 'dsh.log'), upgradeLogFile: path.join(TMP, 'up.log'),
 };
@@ -46,7 +48,7 @@ function api(port, method, p) {
 }
 async function waitStatus(pred, timeoutMs = 12000) {
   const end = Date.now() + timeoutMs;
-  while (Date.now() < end) { const s = await api(39050, 'GET', '/status'); if (!s.error && pred(s)) return s; await sleep(200); }
+  while (Date.now() < end) { const s = await api(28190, 'GET', '/status'); if (!s.error && pred(s)) return s; await sleep(200); }
   return null;
 }
 function startDaemon() {
@@ -72,13 +74,13 @@ async function main() {
 
   // 稳定窗口：确认收敛循环不因 shutdown 残留意图翻转 desired
   await sleep(2000);
-  const s3 = await api(39050, 'GET', '/status');
+  const s3 = await api(28190, 'GET', '/status');
   check('稳定窗口 desired 仍 running', s3.desired === 'running', JSON.stringify({ desired: s3.desired, phase: s3.phase, pid: s3.dshPid }));
 
   d2.kill('SIGKILL');
   try { if (pid) process.kill(pid, 'SIGKILL'); } catch {}
   await sleep(400);
-  try { require('node:child_process').execSync("pkill -9 -f 'mock-target.js 39051' || true", { stdio: 'ignore' }); } catch {}
+  try { require('node:child_process').execSync("pkill -9 -f 'mock-target.js 28191' || true", { stdio: 'ignore' }); } catch {}
 
   console.log('\n==============================');
   console.log('结果: ' + passed + ' passed, ' + failed + ' failed');

@@ -9,6 +9,8 @@ const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'bin', 'dsh-supervisor');
@@ -203,7 +205,7 @@ async function main() {
     makeConfig(3910, 3911, { startTimeoutMs: 700, crashWindowMs: 30000 }),
     { MOCK_EXIT_ON_START: '1' }
   );
-  s = await waitStatus(3910, (x) => x.phase === 'BACKOFF', 40000);
+  s = await waitStatus(3910, (x) => x.phase === 'BACKOFF', 28200);
   // BACKOFF 窗口短，phase 快照可能错过；以事件为准
   ev = await getEvents(3910);
   check('crash_loop_entered 事件存在', ev.some((e) => e.type === 'crash_loop_entered'));

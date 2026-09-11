@@ -20,6 +20,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
 // self-update 模块已随 dist 域迁移至 src/domains/dist/self-update.js（2026-09）
 const { apply, fetchManifest, currentDir, versionOf } = require(path.join(ROOT, 'src', 'domains', 'dist', 'self-update'));
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 
 function makeRelease(version) {
   const root = path.join(TMP, 'rel-' + version);
@@ -68,9 +70,9 @@ function seedInstall(dirName, versions) {
     if (u.includes('dsh-core-')) { s.writeHead(200, { 'Content-Type': 'application/json' }); s.end(JSON.stringify({ 'dist-tags': servePkg.tags, versions: servePkg.versions })); return; }
     s.writeHead(404); s.end('nf');
   });
-  await new Promise((r) => server.listen(39230, '127.0.0.1', r));
-  const manifestUrl = 'http://127.0.0.1:39230/manifest.json';
-  const blobUrl = 'http://127.0.0.1:39230/blob';
+  await new Promise((r) => server.listen(28080, '127.0.0.1', r));
+  const manifestUrl = 'http://127.0.0.1:28080/manifest.json';
+  const blobUrl = 'http://127.0.0.1:28080/blob';
   serve.manifest.url = blobUrl;
 
   // 1. manifest 校验
@@ -121,15 +123,15 @@ function seedInstall(dirName, versions) {
   fs.chmodSync(fakeInstall, 0o755);
   const supCfg = {
     command: ['node', '/nonexistent/bin/dsh', 'web'],
-    healthUrl: 'http://127.0.0.1:39232/',
-    apiHost: '127.0.0.1', apiPort: 39233,
+    healthUrl: 'http://127.0.0.1:28081/',
+    apiHost: '127.0.0.1', apiPort: 28082,
     stateFile: path.join(supDir, 'state.json'),
     logFile: path.join(supDir, 'events.log'),
     supervisorLogFile: path.join(supDir, 'sup.log'),
     dshLogFile: path.join(supDir, 'dsh.log'),
     upgradeLogFile: path.join(supDir, 'up.log'),
     corePackageName: '@dsh-sup/dsh-core-{os}-{arch}',
-    registries: ['http://127.0.0.1:39230'],
+    registries: ['http://127.0.0.1:28080'],
     // 假安装命令模板: node <fake> <version> <marker> —— 模拟 npm i -g 成功
     installCommandTemplate: ['node', fakeInstall, '{version}', path.join(supDir, 'installed.marker')],
   };
@@ -149,9 +151,9 @@ function seedInstall(dirName, versions) {
   check('S5 dshenv：命令 bin 缺失 → binOk=false', d1.binOk === false && d1.installed === null, JSON.stringify(d1));
   const mockBin = path.join(ROOT, 'test', 'mock-target.js');
   const supHave = new Supervisor(Object.assign({}, supCfg, {
-    command: ['node', mockBin, '39234'],
-    healthUrl: 'http://127.0.0.1:39234/',
-    apiPort: 39235,
+    command: ['node', mockBin, '28083'],
+    healthUrl: 'http://127.0.0.1:28083/',
+    apiPort: 28084,
   }));
   const d2 = supHave.dshenvStatus();
   check('S6 dshenv：命令 bin 存在 → binOk=true', d2.binOk === true && d2.bin === mockBin, JSON.stringify(d2));

@@ -12,6 +12,8 @@
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'session-lifecycle-'));
 const results = [];
@@ -32,9 +34,9 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
   const cfg = {
     command: ['node', '-e', '0'],
-    healthUrl: 'http://127.0.0.1:34199/',
+    healthUrl: 'http://127.0.0.1:28181/',
     probeIntervalMs: 100000,
-    apiHost: '127.0.0.1', apiPort: 34190,
+    apiHost: '127.0.0.1', apiPort: 28180,
     stateFile: path.join(TMP, 'state.json'),
     logFile: path.join(TMP, 'events.log'),
     supervisorLogFile: path.join(TMP, 'sup.log'),

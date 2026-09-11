@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
+// 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
+const { safePort } = require(path.join(__dirname, '_ports'));
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ports-verify-'));
 const MOCK = path.join(ROOT, 'test', 'mock-target.js');
@@ -40,7 +42,7 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   const instancesFile = path.join(stateDir, 'instances.json');
   fs.writeFileSync(instancesFile, JSON.stringify({ instances: [
     // 概念清分(2026-09-06)：main 不再存沙箱 instances——由守卫核心 dsh-main.json 持有（下方预置）
-    { id: 'inst-down', name: '未运行', port: 39999, domain: 'sandbox', guardian: false, remoteEnabled: true },
+    { id: 'inst-down', name: '未运行', port: 28150, domain: 'sandbox', guardian: false, remoteEnabled: true },
     { id: 'inst-ok', name: '正常实例', port: okPort, domain: 'sandbox', guardian: false, remoteEnabled: true },
   ]}));
   // main(原生主干)元数据：守卫核心存储 dsh-main.json（remoteEnabled=true → 允许远程）
@@ -83,7 +85,7 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   // 3. syncProxy：只有目标在监听才建代理
   const lan = sup.lan;
   await lan.syncProxy(instDown); // 未在监听 → 不建
-  check('未运行实例不建代理', !lan.lanInstances.some((p) => p.dshPort === 39999));
+  check('未运行实例不建代理', !lan.lanInstances.some((p) => p.dshPort === 28150));
   await lan.syncProxy(instOk); // 在监听 → 建
   check('在运行实例建代理成功', !!lan.lanInstances.find((p) => p.dshPort === okPort));
   await lan.syncProxy(instMain); // main 在监听 → 建（main 开远程是允许的）
