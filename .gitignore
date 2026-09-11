@@ -61,3 +61,9 @@ dsh-supervisor-REPAIR-PLAN.md
 .b2msg.tmp
 .commit-b2.sh
 .cleanup.sh
+
+# 密钥材料：绝不入库（私钥泄露=账号被接管）
+.ssh/
+*.pem
+id_ed25519*
+id_rsa*
