@@ -245,12 +245,19 @@ class SettingsView {
   }
 
   // ---- 管家自身版本检查（与 DSH 更新解耦）：本地仓库 git 视角，配了远程才 fetch 比对 ----
-  /** VCS 根解析：从 dsh-supervisor/ 上溯找最近的「外层」.git（排除自身嵌套仓）。
-   *  修复（2026-09）：原 path.resolve(__dirname,'..') 命中 dsh-supervisor/.git 嵌套仓，
-   *  其 HEAD 与真实外层仓脱节（嵌套仓 06:29 早于外层 07:15 提交）→ UI 版本/commit 失真。
-   *  找不到外层仓时回退自身目录（行为与历史一致，commit 解析失败仍为 null）。 */
+  /** VCS 根解析：从**包根**上溯找最近的「外层」.git（排除自身嵌套仓）。
+   *
+   *  修复（2026-09）：原实现命中 dsh-supervisor/.git 嵌套仓，其 HEAD 与真实外层仓脱节
+   *  （嵌套仓 06:29 早于外层 07:15 提交）→ UI 版本/commit 失真。
+   *  找不到外层仓时回退包根（行为与历史一致，commit 解析失败仍为 null）。
+   *
+   *  ⚠ 二次修复（2026-09-11）：包根解析原为 `path.resolve(__dirname, '..')` 并注释
+   *  「= dsh-supervisor/」，但 §7.6 拆分把本文件从 `src/` 移到 `src/guard/supervisor/`，
+   *  该表达式实际得到 `src/guard/` —— **注释与行为已不符**，
+   *  使「排除嵌套 .git」的判据作用在错误目录（真正的包根 .git 不再被排除）。
+   *  改用 srcpath.resolvePackageRoot()（按 package.json 上溯，不受层级调整影响）。 */
   _vcsRoot() {
-    let dir = path.resolve(__dirname, '..'); // dsh-supervisor/
+    const dir = require('../../platform/srcpath').resolvePackageRoot() || path.resolve(__dirname, '..');
     const innerGit = path.join(dir, '.git');
     let parent = path.dirname(dir);
     while (parent !== path.dirname(parent)) {

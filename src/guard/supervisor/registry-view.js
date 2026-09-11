@@ -182,7 +182,7 @@ class RegistryView {
         desired: this.config.routerAutostart === true ? 'running' : 'stopped',
         guardian: true,
         ownership: {
-          daemonScript: path.join(__dirname, 'domains', 'router', 'daemon.js'),
+          daemonScript: require('../../platform/srcpath').daemonScript('router'),
           ports: [{ role: 'ctl', port: this._routerCtlPort() }],
           processMode: 'daemon',
         },
@@ -192,7 +192,7 @@ class RegistryView {
         desired: this.lanDaemonEnabled() ? 'running' : 'stopped',
         guardian: true,
         ownership: {
-          daemonScript: path.join(__dirname, 'domains', 'relay', 'daemon.js'),
+          daemonScript: require('../../platform/srcpath').daemonScript('lan'),
           ports: [{ role: 'ctl', port: this._lanCtlPort() }],
           processMode: 'daemon',
         },

@@ -213,11 +213,16 @@ class ControlView {
     if (!this.configPath) return null; // 非守卫实例（测试）绝不管理独立 daemon
     if (!this._lc) this._lc = {};
     if (this._lc[kind]) return this._lc[kind];
-    const root = path.join(__dirname, '..');
     const cfgPath = this.configPath;
     const isLan = kind === 'lan';
-    const script = isLan ? path.join(root, 'src', 'domains', 'relay', 'daemon.js') : path.join(root, 'src', 'domains', 'router', 'daemon.js');
-    if (!fs.existsSync(script)) return null;
+    // ⚠ 路径解析必须用**单一真源**（2026-09-11 生产级修复）：
+    //   旧实现 `path.join(__dirname, '..')` + `'src/domains/...'` 在 §7.6 拆分后
+    //   （__dirname 由 src/ 变为 src/guard/supervisor/）解析成 `src/guard/src/...`
+    //   —— **文件不存在**，于是 `_daemonLifecycle` 恒为 null，
+    //   **守卫永远无法自起 router/lan daemon**（且既有测试完全绕过此路径）。
+    //   srcpath 用「存在性验证」代替脆弱的相对推算法。
+    const script = require('../../platform/srcpath').daemonScript(isLan ? 'lan' : 'router');
+    if (!script) return null;
     const dir = path.dirname(this.config.stateFile);
     this._lc[kind] = new DaemonLifecycle({
       name: kind,
