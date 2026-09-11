@@ -8,6 +8,94 @@
 
 （下一版本待记）
 
+### 新增：桌面壳自愈 —— 守卫看护（三平台一套机制）
+
+#### 修复的缺口（用户指出的「壳最脆的地方」）
+
+产品意图是「**壳关不掉**」：关窗 = 隐藏到托盘；「退出管家」= 停止全部服务链。
+故壳只会在**崩溃**时消失。而修复前：
+
+| 平台 | 壳崩溃自愈 |
+|---|---|
+| Linux | ❌ **完全没有**（仅 XDG 登录自启，会话内崩溃无人拉起）|
+| macOS | ❌ **完全没有**（`setGuiAutostart` 在非 Linux 是空操作）|
+| Windows | ⚠️ 有 watchdog 但**壳检查被嵌在 `if (-not $up)` 内** —— 只在「守卫也不可达」时才执行，
+|  | 而「壳崩、守卫活」正是唯一需要它的场景 → **整块跳过** |
+
+#### 为什么由守卫做
+
+壳**无法自我监督** —— 它的监督者会随它一起死。守卫是抗重启的那个
+（`Restart=always` / `KeepAlive` / schtasks Watchdog），且**已在读取** `identity.json`、
+**已实现** `restartShell()`。故由守卫承担，且**三平台一套机制、无需新增服务定义**。
+
+#### 看护策略（`src/domains/shell/watchdog.js`）
+
+```
+守卫每 20s：pgrepList → 过滤出真正的壳进程（排除 --*-plan 自检进程）
+  ├─ 壳在运行                         → 重置计时
+  ├─ 缺失 < 宽限（默认 90s）           → 等待（避让壳自更新/自重启空窗）
+  ├─ 处于预期缺席（更新/重启中）        → 用更长宽限（默认 300s），不抢跑
+  ├─ 无图形会话（Linux 注销/无 DISPLAY）→ 跳过（拉起必失败 → 会成重启风暴）
+  ├─ 窗口内已达上限（默认 5 次/30min）  → 跳过（防风暴）
+  ├─ 无法定位壳可执行文件              → 跳过（不盲拉）
+  └─ 否则                             → restartShell({exePath}) 拉起
+```
+
+设计要点：
+- **决策是纯函数** `decide()` —— 可穷举单测，不依赖进程/时钟/文件系统；
+- 以**进程实际存在**为准，不以文件/心跳推断；
+- **必须有图形会话**：Linux 经 `enable-linger` 在注销后仍运行，
+  此时拉起 GUI 必然失败并造成重启风暴 —— 新增 `platform/os/desktop.js` 做真判定
+  （环境变量 + X11/Wayland socket 实测）；
+- 记账在**尝试前**（失败同样计入上限，防失败风暴）；
+- 失败**如实上报**（`shell_watchdog_restart_failed` 事件），不假成功；
+- 异常**不影响守卫主循环** —— 看护是增强，不是依赖；
+- 可按配置禁用（`shellWatchdog: false`）。
+
+#### 壳侧配套
+
+`identity.json` 新增 `exe`（`std::env::current_exe()`）与 `lastSeenAt`。
+**为什么必须**：壳崩溃后进程已不存在，`pgrepList` 拿不到它的 cmdline ——
+看护需要一个**已落盘**的路径来源，否则只能靠猜安装形态（那正是历史上多次踩坑之处）。
+
+#### 修复 Windows watchdog 的嵌套缺陷
+
+```powershell
+# 修复前
+if (-not $up) {                       # 仅当「守卫也不可达」
+  ... 拉起守卫 ...
+  $g = @(Get-Process dsh-supervisor-gui ...)
+  if (-not $g) { Start-Process $gui }  # ← 壳自愈被埋在这里
+}
+# 修复后：壳检查移出该块，独立于守卫状态
+```
+
+#### 能力声明更新
+
+`capabilityProfile()` 的 `shellSelfHeal` 由 **false → true**（linux/darwin/win32）；
+`shellAutostart`（**原生**机制）在 macOS **仍为 false** —— 二者独立，不可互相替代：
+
+```
+linux    壳原生自启=Y  壳自愈=Y
+darwin   壳原生自启=n  壳自愈=Y   ← 守卫自启 → 看护发现壳缺失 → 拉起
+win32    壳原生自启=Y  壳自愈=Y
+```
+
+#### 验证
+
+| 测试 | 覆盖 |
+|---|---|
+| `test/shell-watchdog-test.js`（36 项）| 决策穷举（W1）+ 进程过滤（W2）+ 集成 mock（W3）+ 接线（W4）+ 壳侧契约（W5）|
+| `test/shell-watchdog-e2e-test.js`（6 项）| **真实 Supervisor + 真实 spawn**：壳缺失 → 真的被拉起（写标记文件证明）|
+| `test/platform-capability-audit-test.js` | 新增 A7：`shellSelfHeal` 声明 ↔ 实现绑定 |
+
+E2E 实测输出：
+
+```
+[shell-watchdog] 已启用（周期 1s）
+[shell-watchdog] 桌面壳缺失，开始计时（宽限 2s）
+[shell-watchdog] 桌面壳缺失 2s，已拉起 pid=3219711 exe=/tmp/.../dsh-supervisor-gui
+```
 ### 修复：全平台发布的时序竞态 —— 本地发布与 CI 同时 PUT 同一包（409 Conflict）
 
 #### 问题（本次发布实测撞到）

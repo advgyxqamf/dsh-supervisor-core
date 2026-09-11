@@ -80,8 +80,8 @@ function capabilityProfile(platform, arch) {
       // （autostart.js 对未实现平台静默返回 ok:true）。补字段 + 审计测试后，声明与实现绑定。
       guardAutostart: true,  // systemd --user enable + linger
       guardSelfHeal: true,   // unit Restart=always
-      shellAutostart: true,  // XDG autostart .desktop（Exec 按实际安装解析）
-      shellSelfHeal: false,  // ❌ 无监督：壳崩溃后无人拉起（见审计报告）
+      shellAutostart: true,  // 原生：XDG autostart .desktop（Exec 按实际安装解析）
+      shellSelfHeal: true,   // 守卫看护（domains/shell/watchdog，三平台一套机制）
     });
   }
   if (pl === 'darwin') {
@@ -95,9 +95,13 @@ function capabilityProfile(platform, arch) {
       hostService: 'launchd',
       guardAutostart: true,  // LaunchAgent RunAtLoad + KeepAlive
       guardSelfHeal: true,   // KeepAlive
-      // ⚠ macOS 壳链**未实现**（历史注释谎称「由 LaunchAgent 一并代管」，实测 plist 只含守卫）
+      // ⚠ shellAutostart 保持 false —— 这里的语义是「**平台原生**自启机制」。
+      //   macOS 的 LaunchAgent plist 只含守卫，**没有壳的原生自启**
+      //   （历史注释谎称「由 LaunchAgent 一并代管」，实测 macPlist 从奠基提交至今逐字节未变）。
+      //   但「壳能否在重启后自己回来」是另一回事：由 shellSelfHeal（守卫看护）覆盖 ——
+      //   守卫经 LaunchAgent 自启 → 看护发现壳缺失 → 拉起。故两项**不可互相替代**，需同时看。
       shellAutostart: false,
-      shellSelfHeal: false,
+      shellSelfHeal: true,   // 守卫看护（2026-09-11 新增，此前 macOS 完全没有壳自愈）
     });
   }
   if (pl === 'win32') {
@@ -162,4 +166,6 @@ module.exports = {
   // notify 为直接可调函数（supervisor.notify 按 platform.notify(title, body, onError) 调用），不能导出模块对象——否则通知路径报 platform.notify is not a function，升级终态被误判为失败
   notify: require('./notify').notify,
   browser: require('./browser'),
+  //   desktop      —— 图形会话可用性（守卫看护桌面壳的前置条件；Linux 需真判定，见 desktop.js）
+  desktop: require('./desktop'),
   autostart: require('./autostart'),};

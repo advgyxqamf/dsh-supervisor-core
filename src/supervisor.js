@@ -7,7 +7,12 @@ const { spawn, execFile, execFileSync } = require('node:child_process');
 const pidlook = require('./platform/os/pidlookup');
 const { DaemonLifecycle } = require('./guard/proc/daemon-lifecycle');
 const { LineBuffer } = require('./platform/log'); // 行缓冲工具（LogCore 已统一采集：logger/events/dshWriter/hub 见构造 init）
-const platform = require('./platform/os/index'); // 平台抽象层：通知/进程/pid反查/浏览器/自启（三端同能力）
+// 平台抽象层：通知/进程/pid反查/浏览器/自启/图形会话。
+// ⚠ 「三端同能力」的措辞曾掩盖真实缺口（2026-09-11 跨平台审计）：
+//   autostart 的**壳自启**在 macOS 从未实现（原生机制缺失）。
+//   真实能力以 platform/os/index.js 的 capabilityProfile() 声明为准，并由
+//   test/platform-capability-audit-test.js 强制与实现绑定。
+const platform = require('./platform/os/index');
 const { RouterService } = require('./domains/router/index');
 const { LanManager } = require('./domains/relay/manager');
 const { TaskRegistry } = require('./platform/tasks');
@@ -17,6 +22,9 @@ const { DistributionManager, semverCompare } = require('./domains/dist/index');
 // 桌面壳更新安全网（2026-09-11）：内核**不是**壳的更新源（壳直连 npm CDN 自更新），
 // 只做预取/备份/观察/有界回退/审计。⛔ 绝不触碰内核既有更新机制（D6 硬约束）。
 const shellDomain = require('./domains/shell/index');
+// 桌面壳看护（2026-09-11）：壳**不能自我监督**（监督者随它一起死），
+// 故由抗重启的守卫看护 —— 三平台一套机制，复用 shellDomain.restartShell()。
+const { createShellWatchdog } = require('./domains/shell/watchdog');
 const { normalize, extractPortFromCommand } = require('./platform/config');
 // envCatalogSummary + EnvCatalog 已随「设置面」拆分至 guard/supervisor/settings-view.js（§7.6）
 const { guardVersion } = require('./platform/version');
@@ -110,6 +118,7 @@ class Supervisor {
     this._adoptKillTimer = null;
     this._initialCheckTimer = null;
     this._upgradeTimer = null;
+    this._shellWatchdogTimer = null;   // 桌面壳看护定时器
     this._lastOccupiedWarn = 0;
     // ── 瞬态字段统一构造初始化（RC2.2 契约）：任何实例字段的首次赋值必须发生在此处。
     // `_maybeReclaimAdoptToken` 曾因 `_tokenReclaimAt` 未初始化（undefined !== null）
@@ -512,6 +521,40 @@ class Supervisor {
         this.nativeManager.checkUpdate();
       }, this.config.updateCheckIntervalMs || 3600000);
     }
+    this._startShellWatchdog();
+  }
+
+  /**
+   * 启动桌面壳看护（2026-09-11）。
+   *
+   * 为什么是守卫的职责：产品意图「壳关不掉」意味着壳只会在**崩溃**时消失；
+   * 而壳无法自我监督（监督者随它一起死），守卫是抗重启的那个。
+   * 覆盖三平台：修复前 Linux/macOS 完全没有壳自愈，Windows 的壳检查被条件屏蔽。
+   *
+   * 失败隔离：任何异常都不得影响守卫主循环 —— 看护是**增强**，不是依赖。
+   */
+  _startShellWatchdog() {
+    if (this.config.shellWatchdog === false) {
+      this.logger.info && this.logger.info('[shell-watchdog] 已按配置禁用');
+      return;
+    }
+    try {
+      this.shellWatchdog = createShellWatchdog({
+        shell: this.shellDomain,
+        pidlookup: pidlook, desktop: platform.desktop,
+        logger: this.logger,
+        events: this.events,
+        config: this.config,
+      });
+      this._shellWatchdogTimer = setInterval(() => {
+        Promise.resolve(this.shellWatchdog.tick()).catch(() => {});
+      }, this.shellWatchdog.intervalMs);
+      if (this._shellWatchdogTimer.unref) this._shellWatchdogTimer.unref();
+      this.logger.info && this.logger.info('[shell-watchdog] 已启用（周期 ' +
+        Math.round(this.shellWatchdog.intervalMs / 1000) + 's）');
+    } catch (e) {
+      this.logger.warn && this.logger.warn('[shell-watchdog] 初始化失败（不影响守卫）: ' + ((e && e.message) || e));
+    }
   }
 
   shutdown() {
@@ -527,6 +570,7 @@ class Supervisor {
     if (this._adoptKillTimer) clearTimeout(this._adoptKillTimer);
     if (this._initialCheckTimer) clearTimeout(this._initialCheckTimer);
     if (this._upgradeTimer) clearInterval(this._upgradeTimer);
+    if (this._shellWatchdogTimer) clearInterval(this._shellWatchdogTimer);
     if (this.api) {
       try {
         this.api.close();

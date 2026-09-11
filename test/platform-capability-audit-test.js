@@ -135,6 +135,20 @@ console.log('== A2 声明能力必须有实现产物 ==');
   // 壳自启
   check('A2 壳自启 Linux（XDG .desktop）', /autostart/.test(asSrc) && /\.desktop/.test(asSrc), 'ok');
   check('A2 壳自启 Windows（DSH-Supervisor-GUI 任务）', /DSH-Supervisor-GUI/.test(asSrc), 'ok');
+  // 壳自愈（2026-09-11 实现）：声明为 true 的平台必须有**真实的看护机制**
+  {
+    const wdPath = path.join(ROOT, 'src', 'domains', 'shell', 'watchdog.js');
+    const exists = fs.existsSync(wdPath);
+    check('A2 壳自愈有实现产物（domains/shell/watchdog.js）', exists, exists ? 'ok' : '缺失');
+    if (exists) {
+      const wd = fs.readFileSync(wdPath, 'utf8');
+      check('A2 看护决策为纯函数（可穷举单测）', /function decide\(/.test(wd), 'ok');
+      check('A2 看护要求图形会话（防无显示重启风暴）', /sessionAvailable/.test(wd), 'ok');
+      check('A2 看护有界重试（防风暴）', /maxRestarts/.test(wd), 'ok');
+      const supSrc = read('src/supervisor.js');
+      check('A2 看护已接线进守卫生命周期', /_startShellWatchdog/.test(supSrc), 'ok');
+    }
+  }
 }
 
 // ── A5 自愈机制真伪 ──
@@ -177,6 +191,37 @@ console.log('== A6 历史错误声明不得重现 ==');
   // Linux .desktop 的 Exec 不得硬编码 ~/.local/bin
   check('A6 Linux .desktop Exec 按实际安装解析（不硬编码 .local/bin）',
     /guiCommand\(\)/.test(asCode) && /oldExec/.test(asCode), 'ok');
+}
+
+// ── A7 壳自愈：声明 ↔ 实现（2026-09-11 新增实现）──
+console.log('== A7 壳自愈：声明 ↔ 实现 ==');
+{
+  const wdRel = 'src/domains/shell/watchdog.js';
+  const hasWd = fs.existsSync(path.join(ROOT, wdRel));
+  const wd = hasWd ? read(wdRel) : '';
+  for (const pl of PLATFORMS) {
+    const claimed = capabilityProfile(pl, 'x64').shellSelfHeal;
+    check('A7 ' + pl + ' shellSelfHeal 声明为 true', claimed === true, String(claimed));
+    check('A7 ' + pl + ' 声明为 true 且有实现产物', claimed ? hasWd : true, hasWd ? 'ok' : '缺 watchdog.js');
+  }
+  // 未知平台不得声称具备
+  check('A7 未知平台 shellSelfHeal 为 false', capabilityProfile(UNKNOWN, 'x64').shellSelfHeal === false);
+  // darwin 原生自启仍未实现 —— 新增看护不得让它误报为「有原生机制」
+  check('A7 darwin shellAutostart 仍为 false（看护 ≠ 原生机制，二者不可互替）',
+    capabilityProfile('darwin', 'arm64').shellAutostart === false);
+  if (hasWd) {
+    check('A7 看护覆盖三平台（不按平台分支）', !/process\.platform/.test(wd), '纯策略，平台差异在 desktop.js');
+    check('A7 看护有宽限期（避让壳自更新空窗）', /graceMs/.test(wd) && /updateGraceMs/.test(wd), 'ok');
+    check('A7 看护不假成功（失败如实上报）', /restart_failed/.test(wd), 'ok');
+  }
+  // 跨仓契约：壳必须记录自身 exe（看护的路径来源）
+  const shellUpd = path.join(ROOT, '..', 'dsh-supervisor-launcher', 'src-tauri', 'src', 'update.rs');
+  if (fs.existsSync(shellUpd)) {
+    check('A7 壳 identity.json 记录 exe（看护定位依据）',
+      /"exe"\s*:\s*std::env::current_exe\(\)/.test(fs.readFileSync(shellUpd, 'utf8')), 'ok');
+  } else {
+    console.log('SKIP A7 跨仓 exe 断言（壳仓不在同级目录）');
+  }
 }
 
 const failed = results.filter((r) => !r);

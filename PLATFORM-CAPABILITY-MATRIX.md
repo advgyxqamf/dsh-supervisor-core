@@ -57,8 +57,8 @@ macOS 的**壳自启 / 壳自愈从项目奠基提交（`8867942`, 2026-09-01）
 | C10 | 沙箱多实例（transient） | ✅ `systemd-run` | ❌ **显式** | ❌ **显式** | `platform/os/service.js` | A3 |
 | C11 | **守卫**开机自启 | ✅ systemd + linger | ✅ LaunchAgent | ✅ schtasks | `platform/os/autostart.js` | A2 |
 | C12 | **守卫**崩溃自愈 | ✅ `Restart=always` | ✅ `KeepAlive` | ✅ Watchdog 每 5 min | `platform/os/autostart.js` | A5 |
-| C13 | **壳**开机自启 | ✅ XDG `.desktop` | ❌ **未实现** | ✅ schtasks `DSH-Supervisor-GUI` | `platform/os/autostart.js` | A4 |
-| C14 | **壳**崩溃自愈 | ❌ **未实现** | ❌ **未实现** | ✅ Watchdog（检查已独立于守卫块）| `platform/os/autostart.js` | A5 |
+| C13 | **壳**开机自启（原生机制） | ✅ XDG `.desktop` | ❌ **未实现** | ✅ schtasks `DSH-Supervisor-GUI` | `platform/os/autostart.js` | A4 |
+| C14 | **壳**崩溃自愈 | ✅ 守卫看护 | ✅ 守卫看护 | ✅ 守卫看护 | `domains/shell/watchdog.js` | A7 · W1–W5 · E2E |
 
 **运行时声明**：`capabilityProfile()` 输出 `guardAutostart` / `guardSelfHeal` / `shellAutostart` / `shellSelfHeal`
 四个字段（2026-09-11 新增），经 `/env/status` 暴露给壳与面板 —— 消费者据此做能力感知与降级提示，
@@ -112,28 +112,55 @@ if (-not $up) {                       # 仅当「守卫也不可达」时才进�
 
 ---
 
-## 五、尚未实现的能力（需产品决策）
+## 五、壳自愈：已实现（2026-09-11）
 
-以下缺口已**如实声明**（不再静默），但**尚未实现**：
+守卫看护桌面壳（`domains/shell/watchdog.js`），**三平台一套机制**，无需新增服务定义。
 
-| 能力 | Linux | macOS | Windows | 影响 |
-|---|---|---|---|---|
-| **壳崩溃自愈** | ❌ | ❌ | ✅ | **壳崩后永久失去 UI，直到用户手动打开** —— 违背产品意图「壳关不掉」 |
-| **壳开机自启** | ✅ | ❌ | ✅ | macOS 用户重启后需手动打开壳 |
-
-### 建议方向（待确认，尚未实施）
-
-守卫心跳监督壳（三平台通用，无需新增服务定义）：
+**为什么由守卫做**：产品意图「壳关不掉」意味着壳只会在**崩溃**时消失，而壳**无法自我监督**
+（监督者会随它一起死）。守卫是抗重启的那个（`Restart=always` / `KeepAlive` / schtasks Watchdog），
+且**已在读取** `identity.json`、**已实现** `restartShell()`。
 
 ```
-守卫每 N 秒：读 ~/.dsh/shell/identity.json（含 pid / lastSeenAt / phase）
-  ├─ 壳 pid 存活且心跳新鲜        → 正常
-  ├─ 壳 pid 已死 / 心跳过期        → restartShell()（该函数已存在于 domains/shell/）
-  └─ 无图形会话（Linux 注销 / 无 DISPLAY）→ 不尝试拉起，记待办，会话恢复后再拉起
+守卫每 20s：pgrepList → 过滤出真正的壳进程（排除 --*-plan 自检进程）
+  ├─ 壳在运行                         → 重置计时
+  ├─ 缺失 < 宽限（默认 90s）           → 等待（避让壳自更新/自重启空窗）
+  ├─ 处于预期缺席（更新/重启中）        → 用更长宽限（默认 300s），不抢跑
+  ├─ 无图形会话（Linux 注销/无 DISPLAY）→ 跳过（拉起必失败 → 会成重启风暴）
+  ├─ 窗口内已达上限（默认 5 次/30min）  → 跳过（防风暴）
+  ├─ 无法定位壳可执行文件              → 跳过（不盲拉）
+  └─ 否则                             → restartShell({exePath}) 拉起
 ```
 
-理由：壳**无法监督自己**（监督者会随它一起死）；守卫是抗重启的那个
-（`Restart=always` / `KeepAlive`），且**已在读取** `identity.json`、**已实现** `restartShell()`。
+**关键设计**：
+
+| 设计 | 理由 |
+|---|---|
+| 决策为**纯函数** `decide()` | 可穷举单测，不依赖进程/时钟/文件系统 |
+| 以**进程实际存在**为准 | 不以文件/心跳推断（壳可能已死但文件还在）|
+| 宽限期 + 更新期延长 | 避让壳自更新/自重启的瞬时空窗（否则会抢跑）|
+| **必须有图形会话** | Linux 经 linger 在注销后仍运行 —— 此时拉起 GUI 必失败 |
+| 记账在**尝试前** | 失败同样计入上限，防失败风暴 |
+| 失败**如实上报** | 写 `shell_watchdog_restart_failed` 事件，不假成功 |
+| 异常不影响守卫主循环 | 看护是**增强**，不是守卫的依赖 |
+
+**壳侧配套**：`identity.json` 新增 `exe`（`std::env::current_exe()`）与 `lastSeenAt` ——
+壳崩溃后进程已不存在，`pgrepList` 拿不到它的 cmdline，**必须有一个已落盘的路径来源**。
+
+### 验证
+
+| 测试 | 覆盖 |
+|---|---|
+| `test/shell-watchdog-test.js`（W1–W5，36 项）| 决策穷举 + 进程过滤 + 集成（注入 mock）+ 接线 + 壳侧契约 |
+| `test/shell-watchdog-e2e-test.js`（E2E，6 项）| **真实 Supervisor + 真实 spawn**：壳缺失 → 真的被拉起 |
+
+### 仍未实现（已如实声明）
+
+| 能力 | Linux | macOS | Windows | 影响 | 缓解 |
+|---|---|---|---|---|---|
+| **壳开机自启（原生机制）** | ✅ | ❌ | ✅ | macOS 用户重启后需手动打开壳 | ✅ **已由壳自愈覆盖**：守卫自启 → 看护发现壳缺失 → 拉起 |
+
+> ⚠️ 「原生自启」与「崩溃自愈」**不可互相替代**，故两个字段独立声明：
+> macOS 的 `shellAutostart: false`（无原生机制）与 `shellSelfHeal: true`（守卫看护）**同时成立**。
 
 ---
 
