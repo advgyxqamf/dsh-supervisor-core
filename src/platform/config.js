@@ -59,17 +59,21 @@ const DEFAULTS = {
   selfUpdateDir: null,
   pluginsProfileName: 'web',
   packageName: '@deepseek-ai/dsh',
-  // 默认候选镜像源。自动模式按延迟测速选最快可达，与 UI 预设/壳 mirror.rs 保持同一集合。
-  // ⚠ 每一项都经**真实 tarball 下载验证**（2026-09-11）——仅「元数据可读」不足以判定可用，
-  //   部分镜像只代理元数据、不代理 tarball。
-  //   已排除：mirrors.aliyun.com/npm、mirrors.tuna.tsinghua.edu.cn/npm（元数据不可用）。
+  // **最小兜底**镜像源（2026-09-11 契约化）。
+  //
+  // ⚠ 完整目录与探测规格**不在这里** —— 它们是**壳**的产物：
+  //   用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
+  //   故「镜像源管理」的所有权在壳，经 ~/.dsh/supervisor/registry.json 投放，
+  //   内核由 domains/dist 的 DistributionManager 读取（见 platform/registry-contract.js）。
+  //
+  // 此处仅保留 2 条，覆盖「契约不可用时也能跑」这一底线（不变量 C2）：
+  //   官方源（能上网）+ npmmirror（中国网络）。
+  //
+  // 历史：曾在此硬编码与 dist/index.js、壳 mirror.rs **逐字节相同的 6 条**，
+  //   任何一处增删都会漂移；且因两侧探测方法不同，实测会**选到不同的源**。
   registries: [
-    'https://registry.npmmirror.com',
     'https://registry.npmjs.org',
-    'https://repo.huaweicloud.com/repository/npm/',
-    'https://mirrors.cloud.tencent.com/npm',
-    'https://npmreg.proxy.ustclug.org',
-    'https://r.cnpmjs.org',
+    'https://registry.npmmirror.com',
   ],
   updateCheckEnabled: true,
   updateCheckIntervalMs: 3600000,

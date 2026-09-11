@@ -8,6 +8,53 @@
 
 （下一版本待记）
 
+### 修复/架构：镜像目录契约化（M1–M5，消除「两侧选源不一致」）
+
+#### 背景（本次审计实测）
+
+镜像目录在**三处逐字节重复**：壳 `mirror.rs`、内核 `dist/index.js:68-75`、内核 `platform/config.js:66-73`。
+且两侧**探测方法不同**（内核 `/-/ping`、壳真实包元数据），同一镜像测出的延迟可差 **6.7 倍**
+（实测 ustclug 2613ms vs 389ms）→ 内核选 `repo.huaweicloud.com`、壳选 `registry.npmmirror.com`，
+用户看到「面板显示一个源、实际下载用另一个」。
+
+此外内核环境判定只看 `which node` 成功，而壳要求 `>= v22.12.0` →
+**面板显示「环境就绪」而壳拒绝启动内核**。
+
+#### 判据（所有权，非偏好）
+
+用户在装壳那一刻机器上**没有内核** —— 壳必须先完成镜像选择才能装内核。
+故「镜像目录与探测方法」的所有权在**壳**，内核**消费产物**。
+
+#### 变更
+
+| # | 内容 |
+|---|---|
+| M1 | 新增 `src/platform/registry-contract.js`（契约读取器，schema 1/2 兼容，未来版本明确拒绝）|
+| M1 | `dist` 的 `REGISTRY_PRESETS` 6 条 → **删除**；`config.js` 的 `registries` 6 条 → **2 条最小兜底** |
+| M1 | 候选来源优先级：用户 manual > 契约 `catalog` > 构造参数 > 兜底 |
+| M2 | `_probeRegistry` 按契约 `probe` 规格探测（与壳同法 → **同一答案**），无契约退回 `/-/ping` |
+| M3 | `selectRegistry` **优先复用契约 `selected`**（TTL 内零网络；实测 1ms 完成）|
+| M4 | `env-catalog.js` 的 Node 判定改为**三态**（ok/outdated/missing），门槛从壳投放的 `runtime.json.minNode` 读取 |
+| M5 | 新增 `shared/version-vectors.json` + `test/version-vectors-test.js`（33 项，含**跨仓逐字节一致**校验）|
+
+#### 不变量
+
+| # | 内容 |
+|---|---|
+| C2 | 契约缺失/损坏/schema 更新时**必须可降级运行**（实测：reason=contract-missing，仍可用兜底）|
+| C3 | 契约比本内核新 → **明确拒绝**并记录，不猜格式 |
+| C5 | 两侧对同一问题的判定**必须给同一答案**（探测规格随契约投放）|
+
+#### 验证
+
+```
+内核  49 文件 / 1026 断言 / 0 失败
+壳    69 项（9 单元 + 54 B 系列 + 6 V 系列）/ 0 失败
+E2E   契约 catalog 生效（3 条而非兜底 2 条）
+      契约 probe 生效（平台标签展开为 linux-x64）
+      契约 selected 复用（1ms，未测速）
+      契约缺失降级（contract-missing，兜底可用）
+```
 ### 修复：自启所有权定案 + macOS 原生壳自启（用户要求「按规范做扎实」）
 
 #### 一、先定所有权矩阵（此前**没有**，是两个缺陷的根因）

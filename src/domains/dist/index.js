@@ -16,6 +16,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
+// 镜像契约读取器（壳 → 内核）。**目录与探测方法的所有权在壳**：
+// 用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
+// 故内核**消费壳投放的契约**，而不是自己再持一份硬编码副本。
+const registryContract = require('../../platform/registry-contract');
 // 服务管理器抽象（跨平台审计 §7.1）：分发域不直接调用 systemctl。
 const service = require('../../platform/os/service').current();
 
@@ -59,19 +63,25 @@ function semverCompare(a, b) {
   return 0;
 }
 
-/** 常用 npm 镜像候选（面板可填加其他；此处仅作展示性预设）。 */
-/** 常用 npm 镜像候选（面板可填加其他；此处仅作展示性预设）。
- * 注意：仅收录经 -/ping 实测可达的镜像（npm官方/国内主流三大）。
- * 网易/USTC/SJTUG/阿里云等曾提供但已下线或 /-/ping 不可达——加入会污染自动测速
- * 与手动固定（用户可能选到死源），故不收录；需要额外源请用面板「添加」自定义。 */
-// 全部经真实 tarball 下载验证（2026-09-11）。面板「镜像源」卡即展示这一组。
-const REGISTRY_PRESETS = [
-  { label: 'npm 官方', origin: 'https://registry.npmjs.org' },
-  { label: 'npmmirror（国内·淘宝）', origin: 'https://registry.npmmirror.com' },
-  { label: '华为云镜像', origin: 'https://repo.huaweicloud.com/repository/npm/' },
-  { label: '腾讯云镜像', origin: 'https://mirrors.cloud.tencent.com/npm' },
-  { label: '中科大镜像', origin: 'https://npmreg.proxy.ustclug.org' },
-  { label: 'cnpmjs 镜像', origin: 'https://r.cnpmjs.org' },
+/** 最小兜底镜像源 —— **仅契约缺失/损坏时使用**（2026-09-11 契约化）。
+ *
+ * ## 为什么从 6 条减到 2 条
+ *
+ * 原 6 条（npm 官方 / npmmirror / 华为 / 腾讯 / 中科大 / cnpmjs）在**三处**逐字节重复：
+ *   · 壳 `mirror.rs` `NPM_PRESETS`（**所有者**）
+ *   · 本文件 `REGISTRY_PRESETS`
+ *   · `platform/config.js` `registries`
+ * 任何一处增删都会漂移，且实测已造成**两侧选源不一致**（探测方法不同）。
+ *
+ * 现目录归壳（经 `~/.dsh/supervisor/registry.json` 的 `catalog` 投放），
+ * 内核只需保证「**契约不可用时也能跑**」（不变量 C2）——
+ * 故保留 2 条覆盖两种基本情形：能上网（官方）+ 中国网络（npmmirror）。
+ *
+ * 完整目录与探测规格一律来自契约；此处**不参与**正常选择路径。
+ */
+const FALLBACK_REGISTRIES = [
+  'https://registry.npmjs.org',
+  'https://registry.npmmirror.com',
 ];
 
 /**
@@ -88,27 +98,57 @@ class DistributionManager {
     this.events = opts.events || null;
     this.logger = opts.logger || console;
     this.registryFile = opts.registryFile || null;
-    // 候选镜像源（默认值）
-    // 默认候选 = 传入候选(守卫经 config.registries)或 REGISTRY_PRESETS 全集——
-    // 统一单一真源：任何入口构造 dist(守卫/daemon/测试)默认候选都与面板预设一致。
-    this.defaultRegistries = (opts.registries && opts.registries.length) ? opts.registries : REGISTRY_PRESETS.map((p) => p.origin);
+    // 最小兜底（契约不可用时才用；见 FALLBACK_REGISTRIES 注释）。
+    this.defaultRegistries = (opts.registries && opts.registries.length) ? opts.registries : [...FALLBACK_REGISTRIES];
+    // 壳投放的镜像契约（目录 + 选择结果 + **探测规格**）。
+    this.contract = { ok: false, reason: 'not-loaded', catalog: [], probe: null, selected: null };
     // 全局镜像配置：mode auto|manual，origins 候选，manualOrigin 手动固定。从 registryFile 加载。
     this.registryConfig = { mode: 'auto', origins: [...this.defaultRegistries], manualOrigin: this.defaultRegistries[0] || '' };
-    this.selectedRegistry = null; // { origin, latencyMs, checkedAt, manual }
+    this.selectedRegistry = null; // { origin, latencyMs, checkedAt, manual, source }
     this._loadRegistryConfig();
   }
 
   // ---- 全局镜像配置持久化 ----
+  /**
+   * 载入镜像配置与**壳投放的契约**。
+   *
+   * 优先级（高 → 低）：
+   *   ① 用户在面板手动固定（`mode=manual`）—— 显式意图，最高优先；
+   *   ② 壳投放的契约 `catalog` —— 目录的所有者在壳；
+   *   ③ 构造参数 `opts.registries`；
+   *   ④ 最小兜底 `FALLBACK_REGISTRIES`。
+   *
+   * 契约不可用（缺失/坏 JSON/schema 更新/空目录）时**不阻断**：
+   * 记录 reason 供诊断，选择路径自动回退到 ③/④（不变量 C2）。
+   */
   _loadRegistryConfig() {
+    // ① 先读契约（即使下面是 manual，也要拿到 probe 规格用于复测）
+    this.contract = registryContract.read(this.registryFile);
+    if (!this.contract.ok) {
+      this.logger.warn && this.logger.warn(
+        'dist: 镜像契约不可用（' + this.contract.reason + '），回退到最小兜底（' +
+        this.defaultRegistries.length + ' 条）'
+      );
+      if (this.events) {
+        try { this.events.append('dist_contract_unavailable', { reason: this.contract.reason, file: this.registryFile }); } catch {}
+      }
+    }
+
+    // ② 旧字段（mode/manualOrigin/origins）保留读取，兼容 v1 与「内核自己写过的配置」
     if (!this.registryFile) return;
     try {
       if (!fs.existsSync(this.registryFile)) return;
       const doc = JSON.parse(fs.readFileSync(this.registryFile, 'utf8'));
       if (typeof doc !== 'object' || !doc) return;
+      // 候选集：契约 catalog 优先（壳是所有者），其次旧 origins，最后兜底。
+      const fromContract = this.contract.ok ? this.contract.catalog : [];
+      const fromDoc = (Array.isArray(doc.origins) && doc.origins.length) ? doc.origins : [];
+      const origins = fromContract.length ? fromContract : (fromDoc.length ? fromDoc : [...this.defaultRegistries]);
       this.registryConfig = {
         mode: (doc.mode === 'manual') ? 'manual' : 'auto',
-        origins: (Array.isArray(doc.origins) && doc.origins.length) ? doc.origins : [...this.defaultRegistries],
-        manualOrigin: (typeof doc.manualOrigin === 'string' && doc.manualOrigin) ? doc.manualOrigin : (this.defaultRegistries[0] || ''),
+        origins,
+        manualOrigin: (typeof doc.manualOrigin === 'string' && doc.manualOrigin)
+          ? doc.manualOrigin : (origins[0] || ''),
       };
     } catch (e) { this.logger.warn && this.logger.warn('dist: registry config load failed: ' + e.message); }
   }
@@ -123,13 +163,39 @@ class DistributionManager {
   }
 
   // ---- 镜像源探测/选择 ----
-  /** 探测单个 registry 的可达性 + 延迟（GET /-/ping，短超时）。返回 { ok, latencyMs }。 */
+  /** 内核平台标签（用于展开契约的 pathTemplate；与壳的 package_name 同源）。 */
+  _platformTag() {
+    const os = process.platform === 'darwin' ? 'darwin' : (process.platform === 'win32' ? 'win' : 'linux');
+    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    return os + '-' + arch;
+  }
+
+  /**
+   * 探测单个 registry 的可达性 + 延迟。
+   *
+   * **探测 URL 由契约决定**（修复「两侧选源不一致」）：
+   *   契约 `probe.kind='package-metadata'` → 与壳完全一致的**真实包元数据** URL；
+   *   无契约 → 退回旧的 `/-/ping`（兜底，不阻断）。
+   *
+   * 为什么必须一致：实测同一镜像两种方法测出的延迟差 **6.7 倍**
+   *（ustclug 2613ms vs 389ms），内核与壳因此**选到不同的源** ——
+   * 用户看到「面板显示一个源、实际下载用另一个」。
+   */
   async _probeRegistry(origin) {
+    const base = origin.replace(/\/+$/, '');
+    const spec = (this.contract && this.contract.ok && this.contract.probe) || null;
+    let url = base + '/-/ping';
+    let kind = 'ping';
+    if (spec && spec.kind === 'package-metadata' && spec.pathTemplate) {
+      url = base + '/' + spec.pathTemplate.replace('{platform}', this._platformTag());
+      kind = spec.kind;
+    }
+    const timeoutMs = (spec && spec.timeoutMs) || 4000;
     const start = Date.now();
     try {
-      const res = await fetch(origin.replace(/\/+$/, '') + '/-/ping', { signal: AbortSignal.timeout(4000) });
-      return { ok: res.ok, latencyMs: Date.now() - start };
-    } catch (e) { return { ok: false, latencyMs: Date.now() - start }; }
+      const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+      return { ok: res.ok, latencyMs: Date.now() - start, probe: kind };
+    } catch (e) { return { ok: false, latencyMs: Date.now() - start, probe: kind }; }
   }
 
   /** 生效的候选 registry 列表（用户配置或默认）。 */
@@ -149,6 +215,25 @@ class DistributionManager {
     }
     const now = Date.now();
     if (!force && this.selectedRegistry && !this.selectedRegistry.manual && this.selectedRegistry.checkedAt && (now - this.selectedRegistry.checkedAt) < 30 * 60 * 1000) return this.selectedRegistry.origin;
+    // ★ 优先采用**壳投放的选择结果**（2026-09-11 契约化）：
+    //   壳已完成同轮测速（且用同一探测规格），内核无需再测一遍；
+    //   仅当契约过期（超 TTL）或 force 时才自己复测。
+    //   收益：正常路径零重复网络；且两侧**必然同源**（同一份 selected）。
+    const c = this.contract;
+    if (!force && c && c.ok && c.selected) {
+      const age = Math.floor(Date.now() / 1000) - c.selected.checkedAt;
+      if (age >= 0 && age < 30 * 60) {
+        this.selectedRegistry = {
+          origin: c.selected.origin, latencyMs: c.selected.latencyMs,
+          checkedAt: Date.now(), manual: false, source: 'shell',
+          probes: [],
+        };
+        if (this.events) {
+          try { this.events.append('dist_registry_selected', { origin: c.selected.origin, source: 'shell-contract' }); } catch {}
+        }
+        return c.selected.origin;
+      }
+    }
     const origins = this._registryOrigins();
     const results = await Promise.all(origins.map(async (origin) => {
       const p = await this._probeRegistry(origin);
@@ -177,7 +262,10 @@ class DistributionManager {
       mode: rc.mode || 'auto',
       manualOrigin: rc.manualOrigin || '',
       candidates: this._registryOrigins().map((o) => ({ origin: o })),
-      presets: REGISTRY_PRESETS,
+      // 预设 = 壳投放的目录（契约）；契约不可用时为空数组，
+      // UI 应展示 candidates（实际候选）而非依赖 presets。
+      presets: (this.contract && this.contract.ok) ? this.contract.catalog : [],
+      catalogSource: (this.contract && this.contract.ok) ? (this.contract.writtenBy || 'shell') : 'fallback',
       latencyMs: (this.selectedRegistry && this.selectedRegistry.latencyMs) || null,
       checkedAt: (this.selectedRegistry && this.selectedRegistry.checkedAt) || null,
       manual: !!(this.selectedRegistry && this.selectedRegistry.manual),

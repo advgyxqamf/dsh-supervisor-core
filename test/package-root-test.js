@@ -48,31 +48,45 @@ console.log('== P1 内核包根解析（发行态正确性）==');
   }
 }
 
-// ── P2 镜像预设集合 ──
-console.log('== P2 镜像预设集合（经验证的真实源）==');
+// ── P2 镜像目录：**归壳**，内核只留最小兜底（2026-09-11 契约化）──
+console.log('== P2 镜像目录契约化（目录归壳，内核留最小兜底）==');
 {
   const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'config.js'), 'utf8');
-  const want = [
-    'https://registry.npmmirror.com',
-    'https://registry.npmjs.org',
-    'https://repo.huaweicloud.com/repository/npm/',
-    'https://mirrors.cloud.tencent.com/npm',
-    'https://npmreg.proxy.ustclug.org',
-    'https://r.cnpmjs.org',
-  ];
-  for (const w of want) {
-    check('P2 config.registries 含 ' + w.replace('https://', ''), cfg.includes(w), 'ok');
+  const arr = (cfg.match(/registries:\s*\[([\s\S]*?)\]/) || [])[1] || '';
+  const listed = (arr.match(/https?:\/\/[^'\"]+/g) || []).map((x) => x.trim());
+
+  // P2-a：内核**不得**再持有完整 6 条目录（那是壳的所有权）。
+  check('P2-a 内核 registries 为最小兜底（<= 2 条）', listed.length > 0 && listed.length <= 2,
+    listed.length + ' 条: ' + listed.join(', '));
+  // P2-b：兜底必须覆盖「能上网」与「中国网络」两种基本情形。
+  check('P2-b 兜底含官方源', listed.includes('https://registry.npmjs.org'), listed.join(', '));
+  check('P2-b 兜底含国内源', listed.some((x) => /npmmirror/.test(x)), listed.join(', '));
+  // P2-c：**目录所有者是壳** —— config.js 必须说明这一点（防后人再次硬编码 6 条）。
+  check('P2-c 标注了「目录归壳 / 契约」', /契约|壳/.test(cfg) && /最小兜底|兜底/.test(cfg), 'ok');
+  check('P2-c 指向契约读取器', /registry-contract/.test(cfg) || /registry\.json/.test(cfg), 'ok');
+  // P2-d：契约读取器必须存在且导出 read()。
+  const rcPath = path.join(ROOT, 'src', 'platform', 'registry-contract.js');
+  check('P2-d 契约读取器存在', fs.existsSync(rcPath), rcPath);
+  if (fs.existsSync(rcPath)) {
+    const rc = require(rcPath);
+    check('P2-d 契约读取器导出 read/SUPPORTED_SCHEMA',
+      typeof rc.read === 'function' && typeof rc.SUPPORTED_SCHEMA === 'number', 'ok');
+    // 契约缺失时必须**可降级**（不变量 C2）：read 不抛异常，返回 ok:false。
+    let r1;
+    try { r1 = rc.read('/nonexistent/registry.json'); } catch (e) { r1 = { threw: e.message }; }
+    check('P2-e 契约缺失时降级而非抛错', r1.ok === false && !r1.threw, JSON.stringify(r1.reason || r1.threw));
   }
-  // 必须记录「仅收录经验证的源」这一约束（防后人盲目加源）
-  check('P2-g 标注了验证要求', /真实 tarball 下载验证|已排除/.test(cfg), 'ok');
+  // P2-f：内核侧不得再出现「三份副本」中的任一份完整集合特征。
+  const distSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+  check('P2-f dist 不再持有完整 6 条目录（无华为/腾讯/中科大/cnpmjs 硬编码数组）',
+    !/const REGISTRY_PRESETS = \[/.test(distSrc), 'ok');
   // 实测不可用的源不得出现在 **registries 数组**里。
   // ⚠ 不能对全文判定：config.js 的注释里**应当**记录「哪些源被排除及原因」，
   //   否则后人无从知晓为何只有这几个源（对全文判定会将正确的说明误判为违规）。
-  const arr = (cfg.match(/registries:\s*\[([\s\S]*?)\]/) || [])[1] || '';
-  check('P2-h 取到 registries 数组', arr.length > 0, arr.length + ' 字符');
+  check('P2-g 取到 registries 数组', arr.length > 0, arr.length + ' 字符');
   for (const bad of ['mirrors.aliyun.com/npm', 'mirrors.tuna.tsinghua.edu.cn/npm']) {
     check(
-      'P2-i registries 未收录实测不可用的 ' + bad,
+      'P2-g registries 未收录实测不可用的 ' + bad,
       !arr.includes(bad),
       arr.includes(bad) ? '❌ 在数组内' : 'ok'
     );
