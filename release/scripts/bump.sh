@@ -29,10 +29,20 @@ case "$MODE" in
     echo "  4) npm run publish:core -- --publish（对应平台）"
     ;;
   --shell)
-    CUR="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+    # 壳仓根定位（2026-09-11 修复）：开发时壳仓是内核仓内的 .shell-work checkout，
+    # 而非 CWD 本身。原先硬编码 ./src-tauri 要求「在壳仓根执行」，但本项目的实际工作流
+    # 是在内核仓根执行（壳仓由 export-shell.sh 同步出去），于是该分支必然报
+    # Cannot find module ./src-tauri/tauri.conf.json。现两处都支持。
+    if [ -f "src-tauri/tauri.conf.json" ]; then SHELL_ROOT=".";
+    elif [ -f ".shell-work/src-tauri/tauri.conf.json" ]; then SHELL_ROOT=".shell-work";
+    else echo "❌ 未找到壳仓（试过 ./src-tauri 与 ./.shell-work/src-tauri）"; exit 1; fi
+    echo "  壳仓根: $SHELL_ROOT"
+    CUR="$(node -p "require('./'+'$SHELL_ROOT'+'/src-tauri/tauri.conf.json').version")"
     ver_lt "$NEW" "$CUR" && { echo "拒绝回退：$NEW < 当前壳 $CUR"; exit 1; }
-    sed -i -E "s/^version = .*/version = \"$NEW\"/" src-tauri/Cargo.toml
-    NEW="$NEW" node -e "const fs=require('fs');const p='src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p));j.version=process.env.NEW;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
+    sed -i -E "s/^version = .*/version = \"$NEW\"/" "$SHELL_ROOT/src-tauri/Cargo.toml"
+    # Cargo.lock 里的本包版本也需同步（否则 cargo 会把它当依赖变更）
+    sed -i -E "/^name = \"dsh-supervisor-gui\"$/{n;s/^version = .*/version = \"$NEW\"/}" "$SHELL_ROOT/src-tauri/Cargo.lock"
+    NEW="$NEW" SHELL_ROOT="$SHELL_ROOT" node -e "const fs=require('fs');const p=process.env.SHELL_ROOT+'/src-tauri/tauri.conf.json';const j=JSON.parse(fs.readFileSync(p));j.version=process.env.NEW;fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')"
     node release/scripts/verify-versions.js --shell
     echo "=== 壳版本已提升: $CUR → $NEW ==="
     echo "  1) bash release/scripts/export-shell.sh <publicRepoUrl>（同步公开仓 dsh-supervisor-launcher）"
