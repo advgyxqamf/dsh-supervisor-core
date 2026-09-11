@@ -40,11 +40,6 @@ function hasTool(name, args) {
   }
   return _toolCache[name];
 }
-// 重置探测缓存（测试/环境变化用）
-function resetCapabilityProbes() {
-  for (const k of Object.keys(_toolCache)) delete _toolCache[k];
-}
-
 /** 统一数据目录：~/.dsh（三平台一致，os.homedir 通用）。 */
 function dataDir() {
   return path.join(os.homedir(), '.dsh');
@@ -151,7 +146,7 @@ function capabilities() {
 
 module.exports = {
   PLATFORM, ARCH, isLinux, isMac, isWindows,
-  dataDir, supervisorDir, capabilities, capabilityProfile, resetCapabilityProbes, hasTool,
+  dataDir, supervisorDir, capabilities, capabilityProfile, hasTool,
   processControl: require('./process'),
   pidlookup: require('./pidlookup'),
   // P0/P1 修复（2026-09 跨平台审计）：

@@ -122,7 +122,6 @@ class DaemonLifecycle {
    *  一律视为旧代残留，TERM 回收。任何上下文（含不可见命名空间）拉起的同 cmdline 旧代都会被清掉，
    *  「固定端口被看不见的旧代占用」从此不可能存活。@returns 回收数 */
   reclaimOrphans() {
-    const { execFileSync } = require('node:child_process');
     // cfg = args 中 -c/--config 的值（生产 daemon 为 configPath，用于精确匹配防误杀其它实例/用户）；
     // 无 -c（如测试夹具/简化调用）→ cfg 为空 → 仅按 cmdMark 匹配（仍排除自己/受管代/ctl 属主）
     const args = this.args || [];

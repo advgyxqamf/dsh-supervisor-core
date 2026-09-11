@@ -5,7 +5,6 @@
 // 与沙箱实例(domain/instance)彻底分开；监控/守护由 domain/monitor + domain/guardian 统一覆盖。
 
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
 
 /** 组装原生 DSH 启动命令：存在插件启停覆盖层时附加 --patch 参数。
  *  DSH CLI（@deepseek-ai/dsh lib/bin.js）的 web 子命令带 rejectParentOptions 守卫：

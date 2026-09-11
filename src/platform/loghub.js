@@ -16,7 +16,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const Events = require('../platform/events');
-const { Rotator } = require('../platform/log');
 
 const SOURCES = ['guard', 'router-daemon', 'lan-daemon'];
 

@@ -13,7 +13,6 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync, spawn } = require('node:child_process');
 const os = require('node:os');
 const monitor = require('../../guard/monitor/index');
 const guardian = require('../../guard/guardian/index');

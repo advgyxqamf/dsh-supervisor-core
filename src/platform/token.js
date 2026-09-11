@@ -46,8 +46,6 @@ const CAPTURE_RETRY_MS = [0, 1500, 4000, 8000, 15000, 30000];
 const BACKFILL_THROTTLE_MS = 30000;
 /** stdout 行缓冲上限（只保留最近的 URL 候选，防止无限增长）。 */
 const MAX_PENDING_LINES = 20;
-/** journald 一次读取的最近行数窗口。 */
-const JOURNAL_LINES = 400;
 /** 本地恢复文件一次读取的尾部字节窗口。 */
 const FILE_TAIL_BYTES = 64 * 1024;
 

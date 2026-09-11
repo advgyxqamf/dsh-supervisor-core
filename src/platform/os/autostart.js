@@ -348,13 +348,13 @@ function guiCommand() {
   return cands[0];
 }
 
-// ⚠ `macPlist()` 已删除（2026-09-11）：守卫的 plist 定义**归桌面壳**（service.rs），
-//   内核不再写它（所有权矩阵见文件头）。保留一个不再使用的模板只会与壳的模板漂移。
-//   守卫 plist 的 KeepAlive 断言现由 test/platform-capability-audit-test.js 跨仓读壳的
-//   service.rs 验证（与本文件对壳 exe 字段的断言同一模式）。
+// ⚠ 守卫的 plist 模板**不在本文件**（2026-09-11 起）：
+//   守卫服务定义的**所有权在桌面壳**（`src-tauri/src/platform/{linux,macos,windows}.rs`），
+//   内核只做 `launchctl enable/disable`（见文件头所有权矩阵）。
+//   此处原有一个 `macPlist()` 模板副本 —— 已删除，因为两个写入方必然漂移；
+//   且内核 disable 时 unlink 它、而壳下次启动会重建（「关闭自启」因此不生效）。
+//   KeepAlive 的跨仓断言见 `test/platform-capability-audit-test.js`。
 //
-// 以下为 **GUI** 的 plist（内核所有的产物），故保留在核仓。
-//
-// （原 `macPlist()` 函数体已删除 —— 守卫 plist 归桌面壳；保留一份副本只会与壳的模板漂移。）
+// 下方 `macGuiPlist()` 是 **GUI** 的 plist（内核所有的产物），故保留在核仓。
 
 module.exports = { status, setAutostart, setGuiAutostart, daemonCommand, guiCommand };
