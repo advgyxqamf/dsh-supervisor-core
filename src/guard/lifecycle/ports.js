@@ -221,7 +221,7 @@ class PortRegistry {
     return [...this._records.values()].sort((a, b) => a.port - b.port);
   }
 
-  /* ═══════ 确定性槽位仲裁（2026-09 架构定稿，docs/port-architecture.md）═══════
+  /* ═══════ 确定性槽位仲裁（2026-09 架构定稿）═══════
    * claimSlot(rangeKey, owner, opts)：统一「绑定持久 + 确定性分配 + 孤儿回收 + main 回迁」。
    *   期望槽位 = ① byOwner 既有绑定（绑定永久，重启复用）→ ② opts.preferred（如 main=40000）→
    *              ③ 段内最小空闲（按加入顺序补位，删除即释放补位）。

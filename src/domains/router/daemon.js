@@ -7,7 +7,7 @@
 // 本进程独立承载：43011/43012 等供应商端点 + 反代实例（4100x）+ 账号/额度管理。
 //
 // 运行方式（独立 systemd 单元 dsh-router.service，或守卫 spawn detached）：
-//   node src/service-daemon/router-daemon.js [-c <configPath>]
+//   node src/domains/router/daemon.js [-c <configPath>]
 //
 // 共享文件：config.json（读）、providers.json / router-usage-totals.json / ports.json（独占写）。
 // 守卫与 daemon 通过「探测 + 文件」松耦合：守卫探测 43011 判定 daemon 存活，异常时拉起。
@@ -34,7 +34,7 @@ function main() {
 
   const config = loadConfig();
   const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : path.join(HOME, '.dsh', 'supervisor');
-  // 系统日志框架（docs/LOGGING-SINGLETON-AUDIT.md S2）：daemon 经每进程唯一 LogCore 取日志/事件
+  // 系统日志框架（历史设计文档）：daemon 经每进程唯一 LogCore 取日志/事件
   // （自有独立文件，不共享守卫文件；单例 init 幂等，异进程复用拒绝）。
   const core = require('../../platform/logcore').init({
     process: 'router-daemon',
@@ -54,7 +54,7 @@ function main() {
   });
   const tasks = new TaskRegistry({ stateDir: swDir, logger, events });
 
-  // 迁移S2+重建（2026-09，docs/MIGRATION-PROXY-PORTS.md）：router 自治端口段（proxy/providerApi）先迁出共享
+  // 迁移S2+重建（2026-09）：router 自治端口段（proxy/providerApi）先迁出共享
   // ports.json 到 ports-router.json，再按 providers.json 重建绑定（幂等合并）。必须在 RouterService 构造前执行，
   // 使构造时 configureFile 加载完整文件（此前在构造后执行 -> RouterService 内存空表覆盖历史绑定，真实数据丢失教训）。
   try {
@@ -102,7 +102,7 @@ function main() {
   });
 
   // 守卫控制通道（L3 监督模式状态一致性，2026-09）：守卫经 POST /ctl {method,args}
-  // 把 /router/* 读写转发到本 daemon（唯一事实源）——见 src/service-daemon/router-ctl.js。
+  // 把 /router/* 读写转发到本 daemon（唯一事实源）——见 src/domains/router/ctl.js。
   const { createRouterCtlServer, DEFAULT_CTL_PORT } = require('./ctl');
   const ctlPort = Number(config.routerCtlPort) || DEFAULT_CTL_PORT;
   const ctl = createRouterCtlServer({ router, logger, events });

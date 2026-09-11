@@ -8,7 +8,7 @@
 // 不再随守卫中断（守卫重启只短暂影响新增/变更对账）。
 //
 // 运行方式（config.lanDaemon=true 时由守卫 spawn detached；或手动调试）：
-//   node src/service-daemon/lan-daemon.js -c <configPath>
+//   node src/domains/relay/daemon.js -c <configPath>
 //
 // 数据流（守卫 → lan-daemon，松耦合）：
 //   - 实例清单/令牌：守卫写 <stateDir>/lan-state.json（原子、0600），本进程每 2s 轮询 diff：
@@ -46,7 +46,7 @@ function main() {
   const config = loadConfig();
   const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : path.join(HOME, '.dsh', 'supervisor');
   const stateFile = path.join(swDir, 'lan-state.json');
-  // 系统日志框架（docs/LOGGING-SINGLETON-AUDIT.md S2）：lan-daemon 经每进程唯一 LogCore 取日志/事件
+  // 系统日志框架（历史设计文档）：lan-daemon 经每进程唯一 LogCore 取日志/事件
   // （自有独立文件，不共享守卫文件；单例 init 幂等）。
   const core = require('../../platform/logcore').init({
     process: 'lan-daemon',

@@ -1,7 +1,7 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════
-// LogCore —— 每进程唯一日志/事件核心（docs/LOGGING-SINGLETON-AUDIT.md）。
+// LogCore —— 每进程唯一日志/事件核心（历史设计文档）。
 //
 // 定位：platform 层一等原语。每进程（守卫 / router-daemon / lan-daemon）进程入口调用一次
 // LogCore.init(...)，此后统一经 LogCore.get() 消费 logger/events/dshWriter/hub。

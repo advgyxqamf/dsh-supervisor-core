@@ -5,6 +5,22 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 完整设计见 [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) 与
 [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md)。
 
+## 文档索引
+
+| 文档 | 性质 | 说明 |
+|---|---|---|
+| [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md) | **规范（权威）** | 阶段 0 契约：会话生命周期 · 所有权矩阵 · 状态机 · 时序 |
+| [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划 | 会话生命周期与所有权重构的根因级计划 |
+| [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) | **规范（权威）** | 跨平台能力矩阵（14 项 × 3 平台）+ 证据 + 缺口；配套 `test/platform-capability-audit-test.js` |
+| [AUDIT-CROSS-PLATFORM.md](AUDIT-CROSS-PLATFORM.md) | 审计 | 跨平台规范审计；§五.a 含 2026-09-11 复核更正 |
+| [RELEASE-AND-UPDATE-MECHANISM.md](RELEASE-AND-UPDATE-MECHANISM.md) | 规范 | 发布与更新机制总纲 |
+| [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 规范 | 跨平台构建与自更新完整方案 |
+| [CHANGELOG.md](CHANGELOG.md) | 记录 | 版本变更 |
+| [archive/](archive/) | 归档 | 已完成/被取代的历史文档（见 [archive/README.md](archive/README.md)） |
+
+> **文档可信度不变量**（2026-09-11 确立）：能力声明必须由**可执行断言**支撑；
+> 本仓的文字（注释/审计/文档）**不构成证据**。新增能力请同步 `test/platform-capability-audit-test.js`。
+
 ## 桌面面板（原生 Linux 应用）
 
 守卫内置一个运维面板（`http://127.0.0.1:3100/`，浏览器可直接打开），并用 **Tauri** 打包成原生桌面应用（~10MB，无 Electron 大壳）：

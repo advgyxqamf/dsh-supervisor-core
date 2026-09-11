@@ -198,7 +198,7 @@ function createServer(sup) {
     };
 
     // 每实例的 DSH 访问令牌（随实例重启轮换）只有一个权威来源：唯一令牌节点
-    // DshTokenService（原生与沙箱共用同一套获取/分发，见 src/domain/token）。生成直连认证 URL
+    // DshTokenService（原生与沙箱共用同一套获取/分发，见 src/platform/token.js）。生成直连认证 URL
     // 时按目标查取，绝不跨实例借用（主实例令牌套到沙箱实例 → 401 “dsh web authentication required”）。
     const tokOf = (id) => {
       try { if (sup.tokenService && typeof sup.tokenService.get === 'function') return sup.tokenService.get(id) || ''; } catch {}

@@ -160,7 +160,7 @@ function createRelay(targetHost, targetPort, opts) {
   const relayId = o.id || '';
   const events = o.events || null;
   const emit = (type, data) => { try { if (events && events.append) events.append(type, Object.assign({ id: relayId }, data || {})); } catch {} };
-  // 注入状态（可诊断层，docs/token-management.md §可观测）：tokenSet=有令牌、cookieReady=已换到 dsh-auth cookie、
+  // 注入状态（可诊断层）：tokenSet=有令牌、cookieReady=已换到 dsh-auth cookie、
   // lastOkAt/lastError/lastErrorAt——经 server.status() 暴露，LAN 面板据此显示「远程就绪/正在注入/令牌缺失」。
   const state = { tokenSet: !!o.dshToken, cookieReady: false, lastAttemptAt: null, lastOkAt: null, lastError: null, lastErrorAt: null };
   const recordOk = (c, via) => {

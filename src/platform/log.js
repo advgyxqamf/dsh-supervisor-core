@@ -94,7 +94,7 @@ function createLogger(opts) {
   const o = opts || {};
   const threshold = LEVELS[o.level] || LEVELS.info;
   const writer = new Rotator(o.file, o.maxBytes);
-  // 系统日志框架（docs/SYSTEM-LOGGING-ARCHITECTURE.md）：可选 process 标识日志归属进程（additive）。
+  // 系统日志框架（历史设计文档）：可选 process 标识日志归属进程（additive）。
   const tag = o.process ? '[' + o.process + '] ' : '';
   const emit = (lv, msg) => {
     if ((LEVELS[lv] || 0) < threshold) return;

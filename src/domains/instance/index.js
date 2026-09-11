@@ -45,7 +45,7 @@ class InstanceManager {
     this.instances = [];
     this._timer = null;
     // 唯一令牌节点注入（DshTokenService）：本模块只登记“源”（journald 单元）并触发捕获，
-    // 不持有/不转发任何令牌——获取、存储、分发全部收敛到令牌服务（见 src/domain/token）
+    // 不持有/不转发任何令牌——获取、存储、分发全部收敛到令牌服务（见 src/platform/token.js）
     this.tokens = opts.tokenService || null;
     // 沙箱实例版本更新：npm 最新版缓存（内存瞬态，list 5s tick 不查网）+ 更新 job 表（防并发，前端轮询）
     this._updCache = {};   // id -> { latest, checkedAt, error }
@@ -69,7 +69,7 @@ class InstanceManager {
       this.instances = Array.isArray(doc.instances) ? doc.instances : [];
     } catch { this.instances = []; }
     for (const inst of this.instances) {
-      // 令牌收敛（2026-09，docs/token-management.md）：DSH 会话令牌唯一权威是 DshTokenService——
+      // 令牌收敛（2026-09）：DSH 会话令牌唯一权威是 DshTokenService——
       // instances.json 历史遗留的 dshToken 列一律剔除（内存即刻断行，下次 save 落盘即清）；
       // 会话令牌不落盘、不透传（展示用 tokenPresent 布尔在 api 层派生）。
       if (Object.prototype.hasOwnProperty.call(inst, 'dshToken')) delete inst.dshToken;
@@ -830,7 +830,7 @@ class InstanceManager {
     try {
       const st = this._probeState(inst);
       inst.state.lastProbeOk = st.running;
-      // 令牌回填与实例 phase 解耦（2026-09，docs/token-management.md）：
+      // 令牌回填与实例 phase 解耦（2026-09）：
       // 原仅在 RUNNING 分支 ensureCaptured——长驻/孤立（单元在跑但状态机非 RUNNING）实例在守卫重启后
       // 令牌永远不回填 → 远程 relay 无 cookie 401（实测 inst-…920）。服务内自带节流（已有令牌即返回）。
       if (inst.domain === 'sandbox' && this.tokens) { try { this.tokens.ensureCaptured(inst.id); } catch {} }

@@ -1,7 +1,7 @@
 'use strict';
 
 // ═══════════════════════════════════════════════════════════════════════
-// EventHub —— 守卫事件汇聚枢纽（系统日志框架 docs/SYSTEM-LOGGING-ARCHITECTURE.md P1b）。
+// EventHub —— 守卫事件汇聚枢纽（系统日志框架）。
 //
 // 定位：守卫是唯一对外汇聚面。各进程事件文件单写者（guard / router-daemon / lan-daemon），
 // EventHub 只读聚合三源 → 转写入守卫唯一的聚合事件流文件（单写者=守卫），对外 /events 读它。

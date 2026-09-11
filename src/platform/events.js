@@ -19,7 +19,7 @@ class Events {
   constructor(file, maxBytes, opts) {
     this.file = file;
     this.maxBytes = typeof maxBytes === 'number' && maxBytes > 0 ? maxBytes : 5 * 1024 * 1024;
-    // 系统日志框架（docs/SYSTEM-LOGGING-ARCHITECTURE.md）：行级 producer.process（additive）——
+    // 系统日志框架（历史设计文档）：行级 producer.process（additive）——
     // 由事件文件所属进程注入（守卫/daemon），跨进程聚合/审计据此区分来源。
     this.process = (opts && opts.process) || null;
     this.rotatedSeq = null; // 旧文件（.1）中最后一条事件的 seq

@@ -32,7 +32,7 @@ class ControlView {
 
   // ---- L3 监督模式：router 控制通道（daemon 唯一事实源，2026-09）----
   // 守卫 API/视图统一从 routerApi() 取 router 门面：daemon 在跑 → 方法调用转发 ctl
-  // （POST /ctl {method,args}，见 src/service-daemon/router-ctl.js）——写即 daemon 生效、
+  // （POST /ctl {method,args}，见 src/domains/router/ctl.js）——写即 daemon 生效、
   // 读即 daemon 最新（消除此前「守卫本地副本视图陈旧 / 写不生效」的双脑不一致，HANDOFF #4）；
   // daemon 未跑 → 守卫本地实例（内嵌回退路径，行为不变）。
   routerApi() {
@@ -191,7 +191,7 @@ class ControlView {
     return map;
   }
 
-  // ---- L3b：lan(relay) daemon 解耦（config.lanDaemon=true，2026-09，见 docs/L3-process-decoupling.md）----
+  // ---- L3b：lan(relay) daemon 解耦（config.lanDaemon=true，2026-09）----
   // 门控默认关：关闭时行为与历史一致（LanManager 驻守卫）。开启后：
   //   - relay/frpc 由独立 lan-daemon 承载（守卫重启不影响远程控制）
   //   - 守卫写 lan-state.json（实例清单+令牌）供 daemon 轮询；本守卫不再本地建 relay
@@ -464,7 +464,7 @@ class ControlView {
 
   // ---- 远程控制委托：全部转发给 LanManager（system-services/relay/manager.js）----
   // L3b：daemon 监督模式 → 经 43108 ctl 委托（异步）；本地模式 → LanManager（同步）
-  // 令牌收敛（2026-09，docs/token-management.md P1）：listLan 输出剔除 token/dshToken——
+  // 令牌收敛（2026-09）：listLan 输出剔除 token/dshToken——
   // /lan-access 允许 LAN/私网 Host 访问，直出 dshToken 会把 DSH 会话令牌泄漏给局域网；
   // 权威仍在 DshTokenService（relay 经 tokenOf 内部读取，无需经此透传）。返回形如 {items,addresses}。
   listLan() {

@@ -39,7 +39,7 @@ const DEFAULTS = {
   // providerApi = 智能路由供应商独立端点池（按供应商规模调大）。null = 用内置默认池。
   portPools: null,
   stateFile: '~/.dsh/supervisor/state.json',
-  // 系统日志框架目录布局（docs/SYSTEM-LOGGING-ARCHITECTURE.md §2/§8）：log/ 与 events/ 分目录；
+  // 系统日志框架目录布局：log/ 与 events/ 分目录；
   // 守卫(guard) 事件在 events/guard.events.log、分级日志在 log/guard.log（daemon 用 router/lan 同构文件）。
   // 显式配置（既有生产 config.json / 测试）仍尊重用户给定路径——不强行改写。
   logFile: '~/.dsh/supervisor/events/guard.events.log',

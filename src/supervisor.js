@@ -137,7 +137,7 @@ class Supervisor {
     this._shadowDiffBeats = 0;
     this._shadowLast = null;   // 最近一拍影子记录 {seq,phase,shadow,actual,diff}
     this._shadowLoggedSeq = 0; // 已记账的事件拍号（心跳聚合去重）
-    // 系统日志框架（docs/LOGGING-SINGLETON-AUDIT.md S2）：守卫经每进程唯一 LogCore 取
+    // 系统日志框架（历史设计文档）：守卫经每进程唯一 LogCore 取
     // logger/events/dshWriter/EventHub（单例 init；消灭散落 new Events/createLogger/Rotator/EventHub）。
     const logCore = require('./platform/logcore').init({
       process: 'guard',
@@ -333,7 +333,7 @@ class Supervisor {
     });
     // 概念清分（2026-09-06）：原生 DSH 是主干，软件本体由 NativeManager 独立管理（/native/* + /lifecycle/dsh/*）；
     // 沙箱实例由 InstanceManager 管理（/instances/*）。原生不挂进沙箱实例出口——不注入任何句柄/委托。
-    // （EventHub 汇聚已由 LogCore.init 统一装配（docs/LOGGING-SINGLETON-AUDIT.md S2）；
+    // （EventHub 汇聚已由 LogCore.init 统一装配）；
     //  this.eventHub = logCore.hub，聚合文件按 stateFile 派生唯一。）
     // 系统级端口登记：固定端口统一注册，冲突启动即 fail-fast，杜绝各子系统各管各的端口
     this._registerFixedPorts();

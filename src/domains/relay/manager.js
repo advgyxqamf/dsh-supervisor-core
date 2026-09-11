@@ -276,7 +276,7 @@ class LanManager {
       }
       // 目标必须真的在监听（TCP 可达，跨平台判定），否则代理无意义且会白占端口
       if (!(await this.targetReachable(inst))) return;
-      // ── 确定性槽位仲裁（2026-09 架构定稿，docs/port-architecture.md）──
+      // ── 确定性槽位仲裁（2026-09 架构定稿）──
       //  一个入口负责：byOwner 复用 → 槽位被旧代占则 cmdline 回收+等待 → main 偏好段池首 → 段内最小空闲；
       //  外部长期占用 → 显式 conflict（不静默跳号，reconcile 下轮重试由事件暴露）。
       // inst.wanPort 是持久化绑定记忆（无论数值）：作为 bindingPreferred 复用。

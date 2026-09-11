@@ -20,7 +20,7 @@
 //                          alias：opencode-usage（历史直连 adapter id）、proxy-usage（历史本地 usage id）。
 //   commandcode-billing —— Command Code 官方 billing 面：/alpha/billing/credits（窗口+credits 池）
 //                          + /alpha/billing/subscriptions（月度重置 periodEnd，6h 缓存、仅受限账号取）。
-//                          真实采样见 docs/auto-evidence-and-monthly-reset.md。
+//                          真实采样见运行期日志与事件流。
 // 返回值约定：{ ok, quota }（quota 不含 overallStatus——展示措辞由模式层按统一语义填）。
 // ═══════════════════════════════════════════════════════════════════════════
 

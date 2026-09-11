@@ -65,7 +65,7 @@ class MainProcess {
       const clean = sanitizeToken(line);
       this.dshWriter.write(clean);
       // 实时镜像同样走脱敏后的完整行——dsh-supervisor 单元 journald 不再残留 token 明文
-      // （docs/token-management.md P3：原 raw chunk 镜像会把 ?token= 明文写进 journald）
+      // （原 raw chunk 镜像会把 ?token= 明文写进 journald）
       process.stdout.write('[dsh] ' + clean + '\n');
     });
     const errBuf = new LineBuffer((line) => {
