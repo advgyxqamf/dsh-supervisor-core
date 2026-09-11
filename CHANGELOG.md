@@ -6,6 +6,37 @@
 
 ## [未发布]
 
+### 仓库迁移至新账号 + 修复一起 SSH 私钥入库事故（2026-09-11）
+
+#### ⚠ 安全事故：私有 SSH 私钥曾被提交并推送
+- **事实**：`.ssh/id_ed25519_dshpush`（`wasi7mglns` 账号级私有 SSH 私钥）在 `ae51753` 被 `git add -A`
+  扫入仓库，并随 master 与多个 tag 推送到远端。**原 `.gitignore` 只忽略 `*.key`/`*.key.pub`，未覆盖 `.ssh/`**。
+- **暴露面**：旧仓为**私有仓**，可读面仅限账号所有者与协作者；全历史扫描**未发现** npm token / PAT 泄露
+  （仅有文档中对 `rsign encrypted secret key` 格式的文字说明）。
+- **处置**：
+  1. `.gitignore` 显式忽略 `.ssh/`、`*.pem`、`id_ed25519*`、`id_rsa*`（**主仓与壳仓同步加固**）。
+  2. 用 `git filter-branch` 重写全部历史移除 `.ssh/`，并**同样强制推送到旧仓**，
+     使远端历史中的私钥不可达（事后全新克隆验证：`0` 处 `.ssh/`、`0` 处私钥标记）。
+  3. 改用**仓库级部署密钥**替代账号级 SSH 密钥 —— 细粒度 PAT **无权管理账号级密钥**（403），
+     但可由 API 管理部署密钥，故推送凭据不再需要人工登记。
+  4. ⛔ **仍待人工完成**：在 `wasi7mglns` 账号中**删除**那把已泄露的账号级 SSH 公钥。
+     删除前该密钥对所有该账号仓库仍有效。
+
+#### 迁移：内核仓 → `advgyxqamf/dsh-supervisor-core`
+- **动机**：`wasi7mglns` 私有仓 Actions 额度耗尽（实测 run #1–#24 均分配到 runner，#25 起 `steps=0`、
+  无 runner、秒级失败；同时间公开壳仓 4 平台全绿）。根因是计费倍率：**macOS 10×、Windows 2×**，
+  本仓 3 job 矩阵约 **110 分钟/次**，免费额度 2000 分钟/月仅够约 **18 次**。
+- **过程**（顺序关键）：镜像克隆 → 历史清洗 → **只推 master**（不触发任何 run）→
+  **临时禁用 workflow** → 推其余分支与 21 个 tag → 重新启用 workflow。
+  禁用这一步**不可省略**：否则每个历史 tag 推送都会触发一次完整矩阵，会瞬间烧光新账号额度。
+  实测整个迁移触发 **0** 个 run。
+- **验证**：一次性 ubuntu 探针确认新账号可正常分配 runner（`runner_name="GitHub Actions …"`、
+  步骤全成功，随后已删除探针）。
+- **凭据**：新仓 `NPM_TOKEN` secret 已由 `gh-secrets/set-secrets.js` 写入。
+
+#### 文档
+- `release/README.md` 运维条目更新为新仓地址与部署密钥方案；本地 `origin` 与 `core.sshCommand` 已切换。
+
 ### 修复：构建冒烟后的目录清理竞态（mac/win 发布失败的最后一环）
 - **现象**：CI 中所有测试全绿，却在 `build:launcher` 末尾以 exit 1 结束，报
   `rm: <tmp>: Directory not empty`。

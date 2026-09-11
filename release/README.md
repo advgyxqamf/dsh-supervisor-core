@@ -1,8 +1,10 @@
 # release/ —— 发布工程（单一入口）
 
 > 本目录是 **dsh-supervisor 内核发布自动化**的唯一事实源：构建、版本、发布、CI、验收流程全部收拢于此。
-> 2026-09 双仓拆分定案：内核仓 `wasi7mglns/dsh-supervisor-core`（私有，本仓）只管内核 npm 子包；
+> 双仓：内核仓 **`advgyxqamf/dsh-supervisor-core`**（私有，本仓）只管内核 npm 子包；
 > 壳仓 `wasi7mglns/dsh-supervisor-launcher`（公开 MIT）管桌面安装程序（见壳仓自身 workflow）。
+> （2026-09-11：内核仓由 `wasi7mglns` 迁至 `advgyxqamf` —— 原账号私有仓 Actions 额度耗尽；
+>   迁移动机与事故处置见 `CHANGELOG.md` 的「仓库迁移至新账号」一节。）
 > 命令**统一在仓库根执行**；所有脚本以仓库根为基准定位产物（绝对 ROOT 解析），可任意 cwd 调用。
 
 ## 目录结构
@@ -106,8 +108,8 @@ CI 产线（.github/workflows/build.yml → release/scripts/ci-core.sh）：mac/
 
 | 令牌 | 消费方 | 最小权限 |
 |---|---|---|
-| GitHub PAT | REST 查状态/建 secret（不用于 git push） | wasi7mglns 账号 |
-| SSH key | `git push`（SSH 443，**repo-local `core.sshCommand`**） | 账号级 key（已注册） |
+| GitHub PAT | REST 查状态/建 secret/管部署密钥（不用于 git push） | `advgyxqamf` 账号（内核仓）；壳仓用 `wasi7mglns` PAT |
+| SSH key | `git push`（SSH 443，**repo-local `core.sshCommand`**） | **仓库级部署密钥**（非账号级）：内核仓 `~/.ssh/id_ed25519_advgyxqamf`、壳仓 `~/.ssh/id_ed25519_wasi7` |
 | `GITHUB_TOKEN` | CI 挂 Release 附件 | Actions 自动注入（workflow 声明 contents: write） |
 | NPM token | npm 真发子包（CI 发 mac/win；本机发 linux） | `Automation`，仅 `@dsh-sup` scope |
 
