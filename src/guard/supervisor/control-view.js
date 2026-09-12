@@ -57,33 +57,15 @@ class ControlView {
     } catch { return false; }
   }
 
-  /** 通用 ctl 调用（router 43107 / lan 43108 共用）。 */
+  /** 通用 ctl 调用（router 43107 / lan 43108 共用）。
+   *
+   *  ⚠ 2026-09-12（P2 去重）：实现已收敛到 `platform/loghub.ctlCall` ——
+   *    此前这里是**第二份逐行近似**的实现，与 loghub 那份已分叉：
+   *      默认超时不同（此处 120s / 那边 3s）、错误对象形状不同。
+   *    本包装只负责本层契约：默认 120s（面板写操作可达秒级） + 在 Error 上挂 ok/error。
+   */
   _ctlCall(port, method, args, timeoutMs) {
-    const http = require('node:http');
-    return new Promise((resolve, reject) => {
-      const body = JSON.stringify({ method, args: Array.isArray(args) ? args : [] });
-      const req = http.request({
-        host: '127.0.0.1', port, path: '/ctl', method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-        timeout: timeoutMs || 120000,
-      }, (res) => {
-        let buf = '';
-        res.on('data', (c) => { buf += c; });
-        res.on('end', () => {
-          try {
-            const j = JSON.parse(buf || '{}');
-            if (j && j.ok) return resolve(j.value);
-            const err = new Error((j && j.error) || ('ctl:' + port + ' ' + method + ' failed'));
-            err.ok = false;
-            err.error = (j && j.error) || null;
-            return reject(err);
-          } catch { return reject(new Error('ctl:' + port + ' 响应解析失败')); }
-        });
-      });
-      req.on('timeout', () => req.destroy(new Error('ctl:' + port + ' 超时')));
-      req.on('error', reject);
-      req.end(body);
-    });
+    return require('../../platform/loghub').ctlCall(port, method, args, timeoutMs || 120000, { withErrorFields: true });
   }
 
   /** router-daemon 控制通道端口（单一来源：config；缺省见 platform/config DEFAULTS）。

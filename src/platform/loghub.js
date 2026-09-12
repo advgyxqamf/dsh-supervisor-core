@@ -52,8 +52,24 @@ function humaneMsg(type, data) {
   }
 }
 
-/** 调 ctl POST /ctl {method,args}，返回 value；失败抛错。 */
-function ctlCall(port, method, args, timeoutMs) {
+/** 调 daemon 的 ctl 通道（`POST /ctl {method,args}`），返回 `value`；失败抛错。
+ *
+ *  ⚠ 2026-09-12（P2 去重）：本函数是 ctl 客户端的**唯一实现**。
+ *    此前 `guard/supervisor/control-view.js:_ctlCall` 有一份**逐行近似**的副本，
+ *    两处已分叉：默认超时不同（此处 3s / 彼处 120s）、错误对象形状不同
+ *    （彼处额外挂 `err.ok=false` / `err.error`）—— 同一协议两种行为。
+ *    现由 `platform/` 统一提供（本层是跨域共享能力的正确归属），
+ *    `control-view` 改为薄包装并显式传自己的默认超时。
+ *
+ *  @param {number} port ctl 端口（router 43107 / lan 43108）
+ *  @param {string} method daemon 侧 RouterService/LanManager 的方法名
+ *  @param {Array} args 方法参数
+ *  @param {number} [timeoutMs=3000] 超时（超时即 destroy，不悬挂调用方）
+ *  @param {object} [opts] { withErrorFields?: boolean } —— true 时在 Error 上挂 `ok/error`
+ *    （control-view 的既有契约需要，便于上游判定 `r.ok === false`）
+ */
+function ctlCall(port, method, args, timeoutMs, opts) {
+  const o = opts || {};
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({ method, args: Array.isArray(args) ? args : [] });
     const req = http.request({
@@ -67,7 +83,9 @@ function ctlCall(port, method, args, timeoutMs) {
         try {
           const j = JSON.parse(buf || '{}');
           if (j && j.ok) return resolve(j.value);
-          reject(new Error((j && j.error) || ('ctl:' + port + ' ' + method + ' failed')));
+          const err = new Error((j && j.error) || ('ctl:' + port + ' ' + method + ' failed'));
+          if (o.withErrorFields) { err.ok = false; err.error = (j && j.error) || null; }
+          return reject(err);
         } catch { reject(new Error('ctl:' + port + ' 响应解析失败')); }
       });
     });
@@ -410,4 +428,4 @@ class EventReader {
   sync() { return Promise.resolve(); } // 无聚合流水位需同步
 }
 
-module.exports = { EventHub, EventReader, tailFile, isInternalEvent };
+module.exports = { EventHub, EventReader, tailFile, isInternalEvent, ctlCall };
