@@ -248,6 +248,17 @@ class DshTokenService {
       try { size = fs.statSync(fp).size; } catch {}
       if (size > 256 * 1024) { try { fs.rmSync(fp); } catch {} } // 超限重置只留新行
       fs.appendFileSync(fp, String(tokenLine).replace(/\r?\n$/, '') + '\n', { mode: 0o600 });
+      // ⚠ P3 修复（2026-09-13，失效模式 a+g）：**mode 只对新建文件生效**。
+      //
+      //   缺陷：`appendFileSync(..., { mode: 0o600 })` 的 mode 仅在 open(O_CREAT) **创建**文件时
+      //     生效；对**已存在**的文件被内核直接忽略 —— 文件保留其原有权限位。
+      //     而本文件头注（:15/:26/:28）与函数注释都声称「恢复文件 0600 私有」。
+      //   后果：若该文件曾以 0644 落盘（旧版本 / 备份还原 / 手工放置 / stateDir 权限退化），
+      //     此后每次令牌轮换都会把**新的明文会话令牌**继续追加进一个**世界可读**的文件；
+      //     该令牌即 DSH Web 会话凭据（可直接进面板）。
+      //   修法：写后显式 chmodSync 收口（同仓 frpmgr.js 已是「写后 chmod」的写法）。
+      //     放在 append 之后：无论文件是新建还是既有，最终权限都收敛到 0600。
+      try { fs.chmodSync(fp, 0o600); } catch {}
     } catch (e) { this.logger.warn && this.logger.warn('[token] persist file(' + id + ') failed: ' + e.message); }
   }
 

@@ -445,6 +445,24 @@ class InstanceManager {
 
   removeInstance(id) {
     const inst = this.instances.find((i) => i.id === id);
+    // ⚠ P1 修复（2026-09-13，失效模式 g+h）：**删除必须与「进行中的安装/升级作业」互斥**。
+    //
+    //   缺陷：同一「实例目录操作」纪律在**其它三条路径**都做了 tasks.isBusy 互斥
+    //     （upgradeInstance:581、_installSandbox:279、startInstance:928），**唯独本路径没有** ——
+    //     既不查 tasks.isBusy('instance', id)，也不取消 _updJobs[id]，也不看 phase === 'INSTALLING'。
+    //
+    //   后果（实测复现）：升级进行到 npm install 阶段时用户点删除 ——
+    //     · 此刻实例已被 stop、isUnitActive 为 false，故 L-b 的「仍活跃则不删」门禁**放行**；
+    //     · 内存中实例先被移除，随后 setImmediate 里的 rmSync(root, recursive) 删掉数据目录；
+    //     · 而仍在跑的 npm install 又把 install/ 重建并写入 →
+    //       目录**永留盘上**，而守卫内存里已无该实例 → **再无任何路径清理它**（孤儿永久占盘）；
+    //     · 升级作业随后的失败原因打在已移除的实例上（no-op），排障信息永久丢失。
+    //
+    //   修法：与其它三条路径同规 —— 有在飞作业即拒绝，并给出可操作的提示。
+    //     ⚠ 检查必须在任何状态变更（filter/save/detach）**之前**，否则仍会留下半删状态。
+    if (this.tasks && this.tasks.isBusy('instance', id)) {
+      return { ok: false, error: '该实例有进行中的安装/升级作业，请等待其完成后再删除' };
+    }
     const before = this.instances.length;
     this.instances = this.instances.filter((i) => i.id !== id);
     if (this.instances.length === before) return { ok: false, error: '实例不存在' };

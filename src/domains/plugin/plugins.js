@@ -211,8 +211,41 @@ class PluginManager {
   /** 跨层残留清理/检测（卸载调用）：home 补丁层 + 原生 overlay 清理，profile 补丁层检测报告。 */
   async _scrubPluginLayers(target, name, onLog) {
     // 与 setBundleEnabled 共用补丁层写串行队列（防并发读改写丢失更新）
-    const run = this._bundleOpQueue = this._bundleOpQueue.then(() => this._scrubPluginLayersInner(target, name, onLog));
-    return run;
+    //
+    // ⚠ P1 修复（2026-09-13，失效模式 g）：**队列不得被单次异常永久毒化**。
+    //   见下方 _enqueueBundleOp 的完整说明（两处共用同一收敛点）。
+    return this._enqueueBundleOp('scrub', () => this._scrubPluginLayersInner(target, name, onLog));
+  }
+
+  /** 补丁层写串行队列的**唯一入队点**（setBundleEnabled / _scrubPluginLayers 共用）。
+   *
+   *  ⚠ P1 修复（2026-09-13，失效模式 g：纪律只在一处执行）：
+   *
+   *    缺陷：两处入队都写成 `this._bundleOpQueue = this._bundleOpQueue.then(fn)` ——
+   *      **没有 catch**。一旦某个 fn 抛异常（补丁层写盘失败：EACCES / EIO / ENOSPC 等），
+   *      队列 Promise 变为 rejected，此后**每一次** .then() 都直接跳过回调、继续向下传播
+   *      同一个 rejection —— 队列被**永久毒化**。
+   *    后果：进程剩余生命周期内，
+   *      · 每次 POST /plugins/enable|disable 都返回**上一次的旧错误**，写盘根本没发生；
+   *      · 每次卸载的 _scrubPluginLayers 静默跳过，而 uninstall 的 .then 照常推进 →
+   *        **卸载报成功但 home 补丁层未清**；
+   *      · 全程无 warn/error 日志（调用方拿到 rejection 但多为 .catch 忽略）。
+   *
+   *    同文件 _withScopeLock(:396) 正是**正确写法**（`= run.catch(() => {})`）——
+   *    同一纪律只在两条路径中的一条执行。
+   *
+   *    修法：收敛到本唯一入队点，链尾永远 .catch 掉错误（不毒化），
+   *      同时把错误落日志并如实返回给调用方（不吞错）。
+   */
+  _enqueueBundleOp(tag, fn) {
+    const run = this._bundleOpQueue.then(fn);
+    // 链尾吞掉 rejection（仅用于**续链**，不影响下面 return 给调用方的 run）。
+    this._bundleOpQueue = run.catch(() => {});
+    return run.catch((e) => {
+      const msg = (e && e.message) || String(e);
+      if (this.logger && this.logger.error) this.logger.error('[plugins] 补丁层写失败(' + tag + '): ' + msg);
+      return { ok: false, error: msg };
+    });
   }
 
   async _scrubPluginLayersInner(target, name, onLog) {
@@ -769,8 +802,8 @@ class PluginManager {
   async setBundleEnabled(name, on, targetStr) {
     // 补丁层读改写必须串行：并发 enable/disable（或与卸载的 scrub）会在同一文件上
     // 各自 read→write 导致丢失更新（原子 rename 只防撕裂，不防丢改）
-    const run = this._bundleOpQueue = this._bundleOpQueue.then(() => this._setBundleEnabledInner(name, on, targetStr));
-    return run;
+    // ⚠ P1 修复（2026-09-13）：经**唯一入队点**（异常不毒化队列）——见 _enqueueBundleOp。
+    return this._enqueueBundleOp('setBundleEnabled', () => this._setBundleEnabledInner(name, on, targetStr));
   }
 
   async _setBundleEnabledInner(name, on, targetStr) {
