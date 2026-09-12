@@ -193,6 +193,62 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   }
 }
 
+// ── J-h：daemon stop 必须如实回报（P2-2）──
+//   超时是唯一的失败信号，此前被丢弃：仍 return ok:true 且抹掉身份 →
+//   对 SIGTERM 无响应的 daemon 成为「无人知道 pid」的孤儿。
+{
+  const dl = read('src/guard/proc/daemon-lifecycle.js');
+  const m = dl.match(/async stop\(\) \{[\s\S]*?\n  \}/);
+  const body = m ? m[0] : '';
+  check('J-h 定位到 stop', !!m, m ? 'ok' : '未找到');
+  // ⚠ 必须断言「`ok:false` 的返回**位于** `!dead` 分支内」——
+  //   只做两处字符串存在性检查时，把 `if (!dead)` 改成 `if (false)` 仍会通过（我第一版如此）。
+  // ⚠ 必须匹配**独立的 guard 行**（行首 `if (!dead) {`）——
+  //   我第一版用 `indexOf('if (!dead)')`，命中的却是上面那行 `if (!dead) this.logger.warn(...)`，
+  //   于是把 guard 改成 `if (false)` 仍然通过（假门禁）。
+  const iGuardDead = body.search(/^\s*if \(!dead\) \{$/m);
+  const iFailRet = body.indexOf('ok: false, stopped');
+  const iClearFn = body.lastIndexOf('_clearIdentity()');
+  check('J-h 存在独立的 `if (!dead) {` guard 行', iGuardDead >= 0, 'guard@' + iGuardDead);
+  check('J-h 进程未死时返回 ok:false（且在 guard 之后）',
+    iGuardDead >= 0 && iFailRet > iGuardDead, 'guard@' + iGuardDead + ' ret@' + iFailRet);
+  check('J-h 失败分支位于 clearIdentity 之前（结构正确）',
+    iFailRet > 0 && iClearFn > iFailRet, 'ret@' + iFailRet + ' clear@' + iClearFn);
+  // ⚠ 剥离注释行后定位 —— 说明文字里会提到 `_clearIdentity`（我第一版数错了位置）。
+  const codeLines = body.split(String.fromCharCode(10))
+    .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*'); })
+    .join(String.fromCharCode(10));
+  const iClear = codeLines.lastIndexOf('_clearIdentity()');
+  const iGuard = codeLines.indexOf('if (!dead)');
+  check('J-h 进程未死时**不**清身份（保留可寻址性）',
+    iClear > iGuard && iGuard >= 0, 'clear@' + iClear + ' guard@' + iGuard);
+  check('J-h 失败时记事件供面板可见', /daemon_stop_timeout/.test(body), '有');
+  // 配套：调用方必须消费返回值（否则记录又丢了）
+  const sup = read('src/supervisor.js');
+  check('J-h shutdownAll 消费 stop() 返回值',
+    /r\.ok === false/.test(sup) && /shutdown_daemon_stop_incomplete/.test(sup), '已改');
+}
+
+// ── J-i：插件 CLI 超时必须杀**整棵树**（P1-7）──
+//   原实现只 child.kill() 直接子进程 → pnpm 的孙进程成孤儿，占 profile/store 锁。
+{
+  const pg = read('src/domains/plugin/plugins.js');
+  check('J-i 插件 CLI spawn 用 detached（自成进程组）',
+    /target\.bin, \[\.\.\.cliArgs, \.\.\.args\], \{ env, stdio: \['ignore', 'pipe', 'pipe'\], windowsHide: true, detached: true \}/.test(pg),
+    '已改');
+  check('J-i 超时经 killTree（POSIX 杀进程组 -pid）',
+    /process\.kill\(-child\.pid, sig\)/.test(pg), '有');
+  check('J-i 保留 SIGTERM → SIGKILL 升级',
+    /killTree\('SIGTERM'\)/.test(pg) && /killTree\('SIGKILL'\)/.test(pg), '有');
+  // 反向：确认旧的「只 kill 直接子进程」写法已消失
+  check('J-i 超时分支不再只用 child.kill（单进程）',
+    !/try \{ child\.kill\('SIGTERM'\); \} catch \{\}/.test(pg), '已改');
+  // 对照：dist/index.js 的 npm 安装早已用同模式（证明这才是本仓的既有正确做法）
+  const dist = read('src/domains/dist/index.js');
+  check('对照：dist 的 npm 安装早已用 detached + -pid',
+    /detached: o\.detached !== false/.test(dist) && /process\.kill\(-child\.pid, 'SIGKILL'\)/.test(dist), '是');
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

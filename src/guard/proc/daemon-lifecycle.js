@@ -300,19 +300,34 @@ class DaemonLifecycle {
       const owner = this._ctlOwnerPid();
       if (owner) { this._stopPid(owner); stopped = owner; }
     }
+    // ⚠ P2-2 修复（2026-09-12）：**停止失败必须如实回报**，且不得清身份。
+    //
+    //   缺陷：原实现超时只 `warn`，随后**无条件** `_clearIdentity()` 并 `return {ok:true}` ——
+    //     对 SIGTERM 无响应（D 状态/被停住/忽略信号）的 daemon，守卫宣告「已停」并抹掉身份，
+    //     此后**没有任何人再知道这个 pid**：孤儿继续占 ctl 端口与 relay 端口，
+    //     而「按身份找 pid」的路径已因身份丢失而失效（只剩 cmdMark 扫描兜底）。
+    //     「门禁恒真」的又一例：超时是**唯一**的失败信号，却被丢弃。
+    //
+    //   修法：超时 → `ok:false` 且**保留身份**（让下一轮 hasPendingStop/监督仍能找到它重试），
+    //     并记事件供面板可见；端口未释放同理降级为部分成功。
+    let dead = true;
     if (stopped) {
-      const dead = await waitProcessExit(stopped, this.stopGraceMs + 1500);
+      dead = await waitProcessExit(stopped, this.stopGraceMs + 1500);
       if (!dead) this.logger.warn && this.logger.warn('[' + this.name + '] 停止超时 pid=' + stopped);
     }
-    if (!(await waitPortFree(this.ctlPort, this.portReleaseTimeoutMs))) {
-      this.logger.warn && this.logger.warn('[' + this.name + '] 停止后端口 ' + this.ctlPort + ' 未释放');
-    }
-    this._clearIdentity();
+    const portFree = await waitPortFree(this.ctlPort, this.portReleaseTimeoutMs);
+    if (!portFree) this.logger.warn && this.logger.warn('[' + this.name + '] 停止后端口 ' + this.ctlPort + ' 未释放');
     // 复位停止闸门：实例在被 stop 后可再次 ensureRunning（原实现置 true 后永不复位 → 实例被复用则
     // 永远返回 {mode:'stopping'}，不可恢复的死状态）。2026-09 审计修正。
     this._stopping = false;
     this._spawnWindowUntil = 0; // 清 latch，允许下轮直接裁决（不留陈旧 spawn 窗口）
-    return { ok: true, stopped };
+    if (!dead) {
+      // 进程未死：**不清身份**（否则孤儿再无人可寻），如实上报。
+      try { if (this.events && this.events.append) this.events.append('daemon_stop_timeout', { name: this.name, pid: stopped, port: this.ctlPort }); } catch {}
+      return { ok: false, stopped, error: 'daemon 未在超时内退出（pid=' + stopped + ' 可能已忽略 SIGTERM）', portFree };
+    }
+    this._clearIdentity();
+    return { ok: true, stopped, portFree };
   }
 
   status() {

@@ -851,8 +851,22 @@ class Supervisor {
     // 2) 停全部沙箱（按实际单元名——glob 不经 shell 不展开，V5 修复）
     await this._stopAllSandboxes();
     // 3) 停路由/远程 daemon（独立进程；DaemonLifecycle.stop 串行换代语义）
-    try { const rl = this._daemonLifecycle('router'); if (rl) await rl.stop(); } catch (e) { this.logger.warn && this.logger.warn('shutdownAll stop router: ' + e.message); }
-    try { const ll = this._daemonLifecycle('lan'); if (ll) await ll.stop(); } catch (e) { this.logger.warn && this.logger.warn('shutdownAll stop lan: ' + e.message); }
+    // ⚠ 2026-09-12（P2-2 配套）：`stop()` 现在**会如实返回 ok:false**（进程未在超时内退出时）。
+    //   此前该返回值被直接丢弃 → 孤儿 daemon 会被静默放过（与「已全部停止」的回执矛盾）。
+    //   现：失败即记事件 + warn，让面板/日志可见（仍继续后续步骤，不阻断关停流程）。
+    const stopDaemon = async (kind) => {
+      try {
+        const lc = this._daemonLifecycle(kind);
+        if (!lc) return;
+        const r = await lc.stop();
+        if (r && r.ok === false) {
+          this.logger.warn && this.logger.warn('shutdownAll stop ' + kind + ' 未完成: ' + (r.error || '未知'));
+          this.events && this.events.append('shutdown_daemon_stop_incomplete', { kind, pid: r.stopped || null, error: r.error || null });
+        }
+      } catch (e) { this.logger.warn && this.logger.warn('shutdownAll stop ' + kind + ': ' + e.message); }
+    };
+    await stopDaemon('router');
+    await stopDaemon('lan');
     // 4) 会话置 stopped 并回执——**守卫不停止自己**：守卫所属单元的所有者是外部（systemd + 壳，
     //    契约 §2/§4.1）。壳收到本回执后执行 systemctl --user stop，守卫进程随之收到 SIGTERM 自然退出。
     this._setSessionState('stopped');

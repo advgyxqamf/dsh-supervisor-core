@@ -354,12 +354,25 @@ class PluginManager {
           // 防止 HOME 变化（沙箱隔离）导致 ERR_PNPM_UNEXPECTED_STORE。
           const cliArgs = ['plugin', '--profile', target.profileName];
           if (target.storeDir) cliArgs.push('--store-dir', target.storeDir);
-          child = spawn(target.bin, [...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+          // ⚠ P1-7 修复（2026-09-12）：`detached: true` 让子进程**自成进程组**，
+          //   这样才能用 `process.kill(-pid)` 杀**整棵树**（同 dist/index.js:452 的 npm 安装）。
+          //   缺陷：原实现无 detached，且超时只用 `child.kill()` 杀**直接子进程** ——
+          //     dsh plugin → pnpm 的**孙进程**（真正在跑安装的那个）会成为孤儿，
+          //     继续占用 profile 目录与 pnpm store 锁。
+          child = spawn(target.bin, [...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: true });
         } catch (e) { return settle({ ok: false, error: e.message }); }
+        // 整树终止（POSIX 进程组 / Windows 退化为单进程，与平台能力声明一致）
+        const killTree = (sig) => {
+          if (!child) return;
+          try {
+            if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, sig);
+            else child.kill(sig);
+          } catch { try { child.kill(sig); } catch {} }
+        };
         timer = setTimeout(() => {
-          try { child.kill('SIGTERM'); } catch {}
+          killTree('SIGTERM');
           // 兜底：SIGTERM 后 3s 若未退出则 SIGKILL（防不响应挂死）
-          setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 3000).unref();
+          setTimeout(() => killTree('SIGKILL'), 3000).unref();
           settle({ ok: false, error: '执行超时（' + Math.round(timeoutMs / 1000) + 's）' });
         }, timeoutMs);
         const push = (buf) => {
