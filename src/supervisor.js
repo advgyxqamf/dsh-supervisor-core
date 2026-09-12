@@ -3,7 +3,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { spawn, execFileSync } = require('node:child_process');
+// ⚠ 此处的 `node:child_process` 导入已删除（2026-09-12，P2 死代码清理）：
+//   全文件对 `spawn`/`execFileSync` **零调用**（仅注释提及）——
+//   它还是 G9 门禁的盲区：G9 只扫**调用**，不扫**导入**，故这一行得以长期存活。
+//   子进程一律经统一执行器（platform/exec.js / platform/os/*）。
 const pidlook = require('./platform/os/pidlookup');
 const { DaemonLifecycle } = require('./guard/proc/daemon-lifecycle');
 // 平台抽象层：通知/进程/pid反查/浏览器/自启/图形会话。

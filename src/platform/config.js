@@ -53,8 +53,11 @@ const DEFAULTS = {
   routerAutostart: false, // 智能路由启动开关（旧键 switcherAutoStart 已迁移）
   // 守卫自更新（2026-09 收敛：npm 通道取代 manifest）：corePackageName = 内核自身 npm 子包名
   //（形如 @dsh-sup/dsh-core-linux-x64，按平台/架构发布；null = 不启用自更新）。
-  // 旧 manifest 模式键保留仅作兼容（已无默认源）。
   corePackageName: null,
+  // ⚠ `selfUpdateManifestUrl` / `selfUpdateDir` 是**旧 manifest 模式的残留键**（2026-09-12 核实）：
+  //   全仓**无任何赋值点**（默认恒 null），其唯一消费方 `env-catalog.selfUpdateEntry()` 已改为
+  //   按 `corePackageName` 判定。保留它们只为兼容既有用户 config.json（读到即忽略，不报错）。
+  //   新代码**不得**再依赖这两个键。
   selfUpdateManifestUrl: null,
   selfUpdateDir: null,
   pluginsProfileName: 'web',

@@ -114,10 +114,11 @@ class SettingsView {
   }
 
   // ---- 守卫自更新（2026-09 收敛：npm 通道取代 manifest/目录翻转）----
-  guardSelfUpdateDir() {
-    return this.config.selfUpdateDir || null;
-  }
-
+  //
+  // ⚠ 此处原有 `guardSelfUpdateDir()` —— 已于 2026-09-12 删除（P2 死代码）：
+  //   全仓**零调用点**，且它所依赖的 `config.selfUpdateDir` 也从未被任何发行流程赋值
+  //   （默认恒为 null）。保留它会造成「自更新仍走 manifest/目录翻转」的错误印象，
+  //   而真实机制是 npm 通道（`guardCorePkg()` + `runNpmInstall`）。
   /** 内核 npm 子包名（按当前平台/架构）。corePackageName 可为显式常量或含 {os}/{arch} 占位的模板。 */
   guardCorePkg() {
     const raw = this.config.corePackageName;
