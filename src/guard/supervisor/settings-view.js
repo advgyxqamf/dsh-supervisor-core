@@ -229,11 +229,20 @@ class SettingsView {
     } catch { return false; }
   }
 
-  /** 读磁盘上运行位二进制的自报版本（A1 校验用）：spawn --version，解析 guardVersion= 行。
-   *  仅 SEA 二进制支持（source-shell 形态在读 package.json，与 npm 安装无关）。 */
+  /** 读磁盘上**运行位**的自报版本（A1 校验用）：spawn `--version`，解析 guardVersion= 行。
+   *
+   *  ⚠ 2026-09-12（P0 配套）：条件从 `form === 'sea-binary'` 放宽为「**可更新的标准形态**」
+   *    （`updatable === true`，即 sea-binary **或** launcher）。
+   *    理由：发布形态早已弃 SEA 改为文本 launcher，而 launcher 的 `<pkg>/bin/dsh-supervisor`
+   *    同样是可执行入口（`require('../core.cjs')`），spawn 它能得到同样的 --version 输出。
+   *    若仍只认 sea-binary，则真实用户永远读不到磁盘实况版本 → `updatePending` 恒 false
+   *    （「已装好待重启」永不显示）。
+   *
+   *    source-shell（源码形态）仍不支持：其 `--version` 报的是开发目录版本，与 npm 安装无关。
+   */
   _readBinarySelfVersion() {
     const dep = deploy.detect();
-    if (dep.form !== 'sea-binary' || !dep.runningTarget) return null;
+    if (!dep.updatable || !dep.runningTarget) return null;
     try {
       const out = ex.runOut(dep.runningTarget, ['--version'], { timeoutMs: 20000 });
       // ⚠ 2026-09-11 修复（K9）：原为 /dsh-supervisor v([^s]+)/ —— 字符类 [^s] 的意图
@@ -324,7 +333,8 @@ class SettingsView {
     // A3：磁盘运行位实况版本 vs 进程运行版本——不一致 = 「更新已安装、待重启生效」
     const dep = deploy.detect();
     let diskVersion = null;
-    if (dep.form === 'sea-binary') diskVersion = this._readBinarySelfVersion();
+    // P0 配套：launcher 形态同样有运行位自报版本（见 _readBinarySelfVersion 说明）。
+    if (dep.updatable) diskVersion = this._readBinarySelfVersion();
     const updatePending = !!(diskVersion && diskVersion !== this.guardVersion);
     return { ...base, diskVersion, updatePending };
   }

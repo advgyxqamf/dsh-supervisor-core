@@ -231,6 +231,8 @@ class ControlView {
     }
     if (rr.mode === 'barrier') return { active: false, mode: 'barrier', reason: '生命周期窗口内' };
     if (rr.mode === 'reclaiming') return { active: false, mode: 'reclaiming', stale: rr.stale };
+    // P1-3 配套：spawn 未能启动（脚本不可执行等）时如实上报，不再被当作「已 started」。
+    if (rr.mode === 'failed') return { active: false, mode: 'error', error: rr.error || ('daemon 未启动: ' + this.name) };
     return { active: false, mode: 'error', error: 'unexpected lifecycle mode: ' + rr.mode };
   }
 

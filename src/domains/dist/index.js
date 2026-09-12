@@ -34,8 +34,26 @@ const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?
 function semverCompare(a, b) {
   const parse = (v) => {
     const clean = String(v).split('+')[0]; // 剥离 build metadata（不参与比较）
-    const [core, pre] = clean.split('-');
-    return { nums: core.split('.').map((n) => parseInt(n, 10) || 0), pre: pre || '' };
+    // ⚠ P1-2 修复（2026-09-12）：按**第一个**连字符切分 core/prerelease。
+    //
+    //   缺陷：原为 `clean.split('-')` —— 那会**切出多段**，而解构 `[core, pre]`
+    //     只取前两段，故 `1.0.0-beta-2` 得到 core='1.0.0'、pre='beta' ——
+    //     **`-2` 被丢弃**。于是 `1.0.0-beta-2` 与 `1.0.0-beta-1` 比较结果相等
+    //     （实测均为 0，应 >0）。
+    //   而 `:30` 的 `VERSION_RE` 明确允许标识符内含连字符（`[0-9A-Za-z-]+`）——
+    //     即正则与比较器对「合法版本号」的认知**互相矛盾**。
+    //
+    //   后果：`fetchNpmLatest` 取「最高版本」时会取错；
+    //     `guardSelfUpdateStatus` 的 `updateAvailable` 漏报更新。
+    //     本仓自身版本 `0.1.5-BETA.1` 即该命名族（无内嵌连字符，暂未爆发；
+    //     但 `-beta-1` / `-rc-2` 这类是常见命名）。
+    //
+    //   修法：只在**第一个**连字符处切分（`pre` 保留其余全部内容，交由下方
+    //     既有的 prerelease 分段比较逻辑处理 —— 那段本来就是对的）。
+    const dash = clean.indexOf('-');
+    const core = dash === -1 ? clean : clean.slice(0, dash);
+    const pre = dash === -1 ? '' : clean.slice(dash + 1);
+    return { nums: core.split('.').map((n) => parseInt(n, 10) || 0), pre: pre };
   };
   const A = parse(a);
   const B = parse(b);

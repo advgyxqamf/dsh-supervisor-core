@@ -26,7 +26,20 @@ const CC_APP = {
   pkg: 'commandcode-api-proxy',
   healthPath: '/health', modelPath: '/v1/models', upstream: 'https://api.commandcode.ai',
   repo: null, registry: 'commandcode-api-proxy',
-  quota: { type: 'commandcode-billing', apiBase: 'https://api.commandcode.ai', creditsPath: '/alpha/billing/credits', windowMap: { rolling: 'fiveHour', weekly: 'weekly', monthly: null } },
+  // ⚠ 2026-09-12 校正：fixture 必须与生产配置（proxy-apps.js）**逐键一致** ——
+  //   此前缺 `subscriptionsPath` 与 `monthlyCapUsd`，而两者在 `quota-strategies.js`
+  //   里**都被消费**（:106 拉订阅期、:124 推导月用量百分比）。
+  //   于是本测试一直在跑「回退分支」（无 subscriptionsPath → 用常量路径；
+  //   无 monthlyCapUsd → monthly 为 null），**从未覆盖生产的真实路径**。
+  //   这类「fixture 与生产配置漂移」会给出虚假的覆盖信心。
+  quota: {
+    type: 'commandcode-billing',
+    apiBase: 'https://api.commandcode.ai',
+    creditsPath: '/alpha/billing/credits',
+    subscriptionsPath: '/alpha/billing/subscriptions',
+    windowMap: { rolling: 'fiveHour', weekly: 'weekly', monthly: null },
+    monthlyCapUsd: 10,
+  },
   real: true,
 };
 

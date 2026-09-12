@@ -9,6 +9,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const exec = require('../../platform/exec'); // 统一有界执行（sanityCheck 语法自检等）
 const { extractTarGz } = require('../../platform/fs-utils');
+// P1-1：版本排序必须用真正的 semver 比较，而非字符串比较（见 currentDir / prune）。
+const { semverCompare } = require('./index');
 
 async function httpGetBytes(url, timeoutMs = 30000) {
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
@@ -69,7 +71,9 @@ function currentDir(installDir) {
     if (!st.isDirectory()) continue;
     if (e === 'current') continue;
     const v = versionOf(full);
-    if (v && (!best || v > best[0])) best = [v, full];
+    // ⚠ P1-1 修复（2026-09-12）：用 semver 比较，不再用字符串 `>`。
+    //   旧实现把 `v0.9.0` 判为大于 `v0.10.0`（字典序 '9' > '1'）→ 取错目录。
+    if (v && (!best || semverCompare(v, best[0]) > 0)) best = [v, full];
   }
   return best ? best[1] : null;
 }
@@ -137,7 +141,11 @@ function prune(installDir, keepOld) {
   const dirs = fs.readdirSync(installDir)
     .filter((e) => e.startsWith('v') && fs.statSync(path.join(installDir, e)).isDirectory())
     .map((e) => ({ e, v: versionOf(path.join(installDir, e)) || e }))
-    .sort((a, b) => (a.v < b.v ? -1 : a.v > b.v ? 1 : 0));
+    // ⚠ P1-1 修复（2026-09-12）：**必须 semver 排序，不能字符串排序**。
+    //   旧实现按字典序升序：['v0.7.0','v0.8.0','v0.9.0','v0.10.0'] → v0.10.0 排最前，
+    //   而 prune 从**下标 0** 开删 → keep=3 时删掉的正是刚装上的 v0.10.0。
+    //   后果：apply() 翻转 current 后立即删它 → current 悬空/回退，「回滚保留」语义被破坏。
+    .sort((a, b) => semverCompare(a.v, b.v));
   const keep = keepOld + 1; // current 也算一个
   for (let i = 0; i < dirs.length - keep; i++) {
     try { fs.rmSync(path.join(installDir, dirs[i].e), { recursive: true, force: true }); } catch {}

@@ -270,9 +270,35 @@ async function restartShell(opts) {
   }
 
   // 拉起新壳（门 0 将在其启动时执行：检测 → 下载 → 验签 → 安装 → 重启进新版）
+  //
+  // ⚠ P0-1 修复（2026-09-12）：**必须监听 `'error'`，且不能在 spawn 返回时就报成功**。
+  //
+  //   缺陷：原实现 `try { spawn(...); child.unref(); return {ok:true,restarted:true} }` ——
+  //    而 Node 的 `spawn` 对**不存在的可执行文件不抛同步错**，只发异步 `'error'`
+  //    （实测：`syncThrew=无 / child.pid=undefined / uncaughtException=ENOENT`）。
+  //    该 child 无 `'error'` 监听 → 异常逃逸为**进程级 uncaughtException** →
+  //    而 `bin/dsh-supervisor` 对「60s 内 3 次未捕获异常」会**自杀**（交给 systemd 拉起）。
+  //    同时 `watchdog.js` 收到 `ok:true` 就写「已拉起」事件并把 `missingSince` 清零 →
+  //    **假成功 + 每 90s 一拍的慢速风暴**，直到 5 次/30min 上限才罢休。
+  //
+  //   修法：a) 监听 `'error'`，把失败**如实回报**并让调用方（watchdog）保留下次重试；
+  //         b) `spawn` 返回后先看 `child.pid`（未定义即失败）—— 这是同步可判的；
+  //         c) `'error'` 可能晚于返回（ENOENT 是下一 tick），故同时提供**异步确认**：
+  //            返回的 pid 已同步校验；后续 error 只记事件，不再逃逸。
   try {
     const child = spawn(exe, [], { detached: true, stdio: 'ignore', env: process.env });
+    // 异步 error 必须被接住（否则逃逸为 uncaughtException → 守卫自杀）。
+    //   注：此刻已无法回滚「壳没起来」这一事实（spawn 已返回），
+    //   但如实记事件让 watchdog/面板可见，且不再让异常逃逸。
+    child.on('error', (e) => {
+      // 注：本模块无 logger 依赖（见下方记账注释），事件经 opts.events 注入（可选）。
+      try { if (o.events && o.events.append) o.events.append('shell_restart_spawn_error', { exe, error: (e && e.message) || String(e) }); } catch {}
+    });
     child.unref();
+    // 同步可判的失败：spawn 对 ENOENT 返回 pid=undefined（错误在下一 tick 才 emit）。
+    if (!child.pid) {
+      return { ok: false, error: '拉起新壳失败：子进程未启动（' + exe + ' 不存在或不可执行）', killed };
+    }
     // 记账交给 API 层（events.append('shell_restart_requested')）——本模块保持纯函数式、无 logger 依赖。
     return { ok: true, restarted: true, killed, pid: child.pid, exe };
   } catch (e) {

@@ -71,6 +71,34 @@ class DaemonLifecycle {
     this.args = o.args || [];
     this.ctlPort = o.ctlPort;
     this.cmdMark = o.cmdMark;
+    // ⚠ P0-2 修复（2026-09-12）：`cmdMark` 与实际命令行**永不匹配**。
+    //
+    //   缺陷：daemon 由 `spawn(process.execPath, [this.script, ...this.args])` 拉起，
+    //     故真实 cmdline 形如 `node <pkg>/src/domains/router/daemon.js -c <cfg>`；
+    //     而调用方传的 `cmdMark` 是 `'router-daemon'` —— 该子串**不在** cmdline 里
+    //     （实测 indexOf = -1）。于是 `_ctlOwnerPid()` 恒 null：
+    //       · 换代分支（旧代占 ctl 时 TERM + 等端口释放）**永不执行**；
+    //       · `classify()` 的 external / reclaiming 状态**永不可达**
+    //         →「ctl 被外部进程占用，不接管不拉起」这条红线形同不存在。
+    //
+    //   对照：同仓另两处反查监听者（supervise-view.js、control-view.js）**都**额外
+    //     匹配 `/domains/router/daemon.js` 路径形态 —— 只有本核心这一条路径失明，
+    //     属「同一纪律在多条路径中只在一处执行」的反面（此处是唯一漏的那处）。
+    //
+    //   修法：**从 `script` 派生权威标记**（它就是 spawn 时真正写进 cmdline 的那个路径），
+    //     与调用方给的语义标记**并列**匹配。这样不依赖调用方记住传路径，
+    //     且脚本位置演进（src/ 移动）时自动跟随。
+    const path = require('node:path');
+    const norm = (s) => String(s || '').replace(/\\/g, '/');
+    this._cmdMarks = [];
+    if (o.cmdMark) this._cmdMarks.push(String(o.cmdMark));
+    if (this.script) {
+      // ① 绝对路径原样（spawn 用的就是它）
+      this._cmdMarks.push(norm(this.script));
+      // ② 相对包根的尾段（处理 cwd/相对调用差异）
+      const m = /[/\\](src[/\\][^\s]+|domains[/\\][^\s]+)$/.exec(norm(this.script));
+      if (m) this._cmdMarks.push(m[1]);
+    }
     this.identityFile = o.identityFile;
     this.spawnEnv = o.spawnEnv || (() => ({}));
     this.logger = o.logger || console;
@@ -109,7 +137,8 @@ class DaemonLifecycle {
       const pid = pidlook.findListeningPid(this.ctlPort);
       if (!pid) return null;
       const cmd = pidlook.readCmdline(pid) || '';
-      return cmd.indexOf(this.cmdMark) >= 0 ? pid : null;
+      // P0-2：按**全部**标记匹配（含从 script 派生的路径形态）——见构造器说明。
+      return this._cmdMarks.some((mk) => mk && cmd.indexOf(mk) >= 0) ? pid : null;
     } catch { return null; }
   }
 
@@ -129,12 +158,22 @@ class DaemonLifecycle {
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '-c' || args[i] === '--config') { cfg = String(args[i + 1] || ''); break; }
     }
-    const marker = this.cmdMark;
+    // P0-2：pgrepList 每次只接受一个 pattern，故对**每个**标记各查一遍并按 pid 去重。
+    //   此前只用语义标记（'router-daemon'）→ 匹配 0 个 → 孤儿回收恒空跑。
+    const marks = this._cmdMarks.length ? this._cmdMarks : [this.cmdMark];
+    const seen = new Set();
+    const candidates = [];
+    for (const mk of marks) {
+      if (!mk) continue;
+      let list = [];
+      try { list = pidlook.pgrepList(mk) || []; } catch { list = []; }
+      for (const m of list) { if (m && !seen.has(m.pid)) { seen.add(m.pid); candidates.push(m); } }
+    }
     let killed = 0;
     try {
       const mine = this.expectedPid();
       const ctlOwner = this._ctlOwnerPid();
-      for (const m of pidlook.pgrepList(marker)) {
+      for (const m of candidates) {
         const pid = m.pid;
         const cmd = m.cmdline;
         if (pid === process.pid) continue;
@@ -182,8 +221,30 @@ class DaemonLifecycle {
     const child = spawn(process.execPath, [this.script, ...this.args], {
       stdio: 'ignore', detached: true, env: { ...process.env, ...(this.spawnEnv() || {}) },
     });
+    // ⚠ P1-3 修复（2026-09-12）：**必须接住异步 'error'，且不得在未确认时写入身份**。
+    //
+    //   缺陷：原实现 spawn 后直接 `_writeIdentity(child.pid)` 并返回 `{mode:'started'}`。
+    //     而 spawn 对 ENOENT/EPERM **不抛同步错**，只发异步 'error'（同 shell/index.js 的 P0-1，
+    //     实测 pid=undefined + uncaught ENOENT）。于是：
+    //       · 无 'error' 监听 → 异常逃逸为守卫 uncaughtException（60s 内 3 次即自杀）；
+    //       · 身份文件被写成 `daemonPid: undefined` → `expectedPid()` 恒 null、
+    //         `_pidAlive(undefined)` 恒 false → **每轮监督都 spawn**（仅 25s latch 压制），
+    //         表现为「每 25~30s 拉起一次、面板永远不 ready」。
+    //
+    //   修法：① 接住 'error'（记事件，不再逃逸）；
+    //         ② 用同步可判的 `child.pid` 决定是否写身份 —— 未定义即失败，**不写**，
+    //            并如实返回 `{mode:'failed'}` 让调用方（superviseOnce/control-view）可见。
+    child.on('error', (e) => {
+      if (this.logger && this.logger.warn) this.logger.warn('[' + this.name + '] daemon spawn error: ' + ((e && e.message) || e));
+      try { if (this.events && this.events.append) this.events.append('daemon_spawn_error', { name: this.name, error: (e && e.message) || String(e), script: this.script }); } catch {}
+    });
     child.unref();
     this._spawnWindowUntil = Date.now() + this.spawnWindowMs;
+    if (!child.pid) {
+      // 未启动：**不写身份**（写了会让后续监督永久误判「期望进程存在」）。
+      this.logger.warn && this.logger.warn('[' + this.name + '] daemon 未启动（' + this.script + ' 不存在或不可执行）');
+      return { mode: 'failed', error: 'daemon 未启动（脚本不可执行或 Node 不可用）', script: this.script };
+    }
     this._writeIdentity(child.pid);
     if (this.logger && this.logger.info) this.logger.info('[' + this.name + '] 已拉起独立 daemon pid=' + child.pid + '（spawn 窗口至 ' + new Date(this._spawnWindowUntil).toISOString() + '）');
     return { mode: 'started', pid: child.pid };
