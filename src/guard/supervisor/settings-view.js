@@ -109,7 +109,17 @@ class SettingsView {
     // 先回执（HTTP 响应发出）再退出，避免响应丢失。
     if (this.events) this.events.append('guard_self_update_restart', { expectedVersion: this._selfUpdateExpectedVersion || null, via: 'exit+systemd-restart' });
     this.logger && this.logger.info && this.logger.info('[self-update] 守卫将退出，由 systemd Restart=always 拉起新内核');
-    setTimeout(() => { try { this.shutdown(); } catch {} process.exit(0); }, 500).unref();
+    // ⚠ 2026-09-12（P1）：等 shutdown 完成再退出（此前 shutdown() 是同步函数、
+    //   内部未 await stopAll → stop 被 process.exit 截断，router/lan 残留成孤儿）。
+    //   同理加 8s 兜底：自更新路径绝不该因某个 stop 卡住而永不退出。
+    setTimeout(() => {
+      const bail = setTimeout(() => process.exit(0), 8000);
+      if (bail.unref) bail.unref();
+      Promise.resolve()
+        .then(() => this.shutdown())
+        .catch((e) => { this.logger && this.logger.warn && this.logger.warn('[self-update] shutdown 异常: ' + ((e && e.message) || e)); })
+        .then(() => { clearTimeout(bail); process.exit(0); });
+    }, 500).unref();
     return { ok: true, restarted: true, via: 'exit+systemd-restart' };
   }
 

@@ -146,13 +146,44 @@ function main() {
   events.append('lan_daemon_started', { pid: process.pid });
   logger.info('[lan-daemon] started pid=' + process.pid + ' state=' + stateFile);
 
+  // ⚠ 2026-09-12（P1 修复）：优雅停机必须**等 SIGKILL 兜底窗口走完**再退出。
+  //
+  //   缺陷：`lan.shutdown()` → `frpmgr.stop()` 是**同步**函数 —— 它只发 SIGTERM（立即返回），
+  //     SIGKILL 兜底由内部 250ms 间隔轮询在 3s 后执行（frpmgr.js:259-266）。
+  //     而此处紧接着 `process.exit()` 会**终止该定时器** → 忽略 SIGTERM 的 frpc
+  //     **永久存活成孤儿**，占用公网隧道端口。
+  //
+  //   `router/daemon.js` 早已是 async 等待式（可对照），本文件是同类缺陷的另一处。
+  //
+  //   修法：等 frpmgr 的子进程真正退出（或 3.5s 兜底）再 exit。
+  const waitFrpcExit = () => new Promise((resolve) => {
+    const fm = lan && lan.frpmgr;
+    const child = fm && fm.child;
+    if (!child || child.exitCode !== null) return resolve();
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (child.exitCode !== null || Date.now() - t0 > 3500) { clearInterval(iv); resolve(); }
+    }, 100);
+    if (iv.unref) iv.unref();
+    // 兜底：即便轮询异常，也不能让进程永不退出
+    setTimeout(resolve, 4000).unref();
+  });
+  let _exiting = false;
   const shutdown = (code) => {
+    if (_exiting) { process.exit(code || 0); }
+    _exiting = true;
     logger.info('[lan-daemon] shutting down');
     try { clearInterval(timer); } catch {}
     try { ctl.close(); } catch {}
+    let frpc = null;
+    try { frpc = lan && lan.frpmgr ? lan.frpmgr.child : null; } catch {}
     try { lan.shutdown(); } catch {}
-    try { events.append('lan_daemon_stopped', {}); } catch {}
-    process.exit(code || 0);
+    // 等 frpc 真正退出（SIGTERM → 3s 后 SIGKILL 兜底），再落事件并退出。
+    void waitFrpcExit().then(() => {
+      if (frpc && frpc.exitCode === null) logger.warn('[lan-daemon] frpc 未在窗口内退出（已发 SIGKILL）');
+      try { events.append('lan_daemon_stopped', {}); } catch {}
+      process.exit(code || 0);
+    });
   };
   process.on('SIGTERM', () => shutdown(0));
   process.on('SIGINT', () => shutdown(0));

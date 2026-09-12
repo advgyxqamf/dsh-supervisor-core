@@ -247,8 +247,32 @@ function cmdDaemon() {
   // 否则 SEA 二进制只含 CLI 壳、daemon 运行期仍依赖发行目录旁置的 src/（2026-09 架构审计实证）。
   const { Supervisor } = require('../src/supervisor');
   const sup = new Supervisor(cfg, cfgPath);
-  process.on('SIGTERM', () => { sup.shutdown(); process.exit(0); });
-  process.on('SIGINT', () => { sup.shutdown(); process.exit(0); });
+  // ⚠ 2026-09-12（P1 修复）：**必须等 shutdown 真正完成再退出**。
+  //
+  //   缺陷：原为 `sup.shutdown(); process.exit(0);` —— 但 `shutdown()` 内部要
+  //     `await lifecycleManager.stopAll()`（停内嵌 router/lan：反代实例、relay、frpc、
+  //     端口释放）。那是**异步**的，而 `process.exit` 立即终止进程 → stop 只跑了同步前缀，
+  //     子进程与端口**残留成孤儿**（正是 shutdown 里那段注释声称要防的事）。
+  //
+  //   修法：等 shutdown 的 Promise settle 后再 exit；并加**兜底超时**（8s），
+  //     防止某个模块的 stop 卡住导致进程永不退出（systemd 会再 SIGKILL，但那样更难排查）。
+  //     重复信号：第二次直接强退（用户/服务管理器连续发信号时不该再等）。
+  let _exiting = false;
+  function gracefulExit(code) {
+    if (_exiting) { process.exit(code); }
+    _exiting = true;
+    const bail = setTimeout(() => {
+      console.error('[supervisor] shutdown 超时（8s），强制退出');
+      process.exit(code);
+    }, 8000);
+    if (bail.unref) bail.unref();
+    Promise.resolve()
+      .then(() => sup.shutdown())
+      .catch((e) => { console.error('[supervisor] shutdown 异常:', (e && e.message) || e); })
+      .then(() => { clearTimeout(bail); process.exit(code); });
+  }
+  process.on('SIGTERM', () => { gracefulExit(0); });
+  process.on('SIGINT', () => { gracefulExit(0); });
   // uncaughtException：守卫尽量自愈；但短时间内反复异常说明内部状态已坏，
   // 以非零退出交给 systemd 拉起（比带病运行更安全）。
   let excCount = 0;
@@ -266,8 +290,8 @@ function cmdDaemon() {
     excCount += 1;
     if (excCount >= 3) {
       console.error('[supervisor] 60s 内第 ' + excCount + ' 次未捕获异常，退出交由 systemd 拉起。');
-      try { sup.shutdown(); } catch {}
-      process.exit(1);
+      // 同样等 shutdown 完成（P1 修复）；此处已有强退意图，故用优雅退出+超时兜底。
+      gracefulExit(1);
     }
   });
   process.on('unhandledRejection', (e) => {

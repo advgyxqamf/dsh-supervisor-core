@@ -562,8 +562,21 @@ class Supervisor {
     }
   }
 
+  /** 优雅停机（**异步**）。
+   *
+   *  ⚠ 2026-09-12（P1）：改为返回 Promise —— 此前是同步函数，但内部调用
+   *    `lifecycleManager.stopAll(...)`（**async**）而**不 await**：
+   *    而 `stopAll` 依次 `await lc.stop()` 停 router/lan（含反代实例、relay、frpc、端口释放）。
+   *
+   *    调用方（bin 的 SIGTERM/SIGINT 处理、settings-view 的退出）都在 `shutdown()` 之后
+   *    **立即 `process.exit(0)`** —— 于是那些 stop 只跑了同步前缀就被**截断**：
+   *    router/lan 的子进程与端口残留成孤儿（正是该段注释声称要防的事）。
+   *
+   *    现语义：返回 Promise；调用方必须 `await`（或 `.then(()=>exit())`）后再退出。
+   *    重复调用返回**同一个** Promise（幂等；`_stopping` 守卫语义保留）。
+   */
   shutdown() {
-    if (this._stopping) return;
+    if (this._stopping) return this._shutdownPromise || Promise.resolve();
     this._stopping = true;
     this.lifecycle.beginShutdown();
     this.events.append('guard_exit', {});
@@ -586,24 +599,29 @@ class Supervisor {
     // （反代实例进程、relay/frpc、41000+ 端口残留）。解耦后此段改为「只停观测，不停进程」：
     // 守卫重启不应影响任何被管模块（它们独立生命周期，由 systemd/自身 supervisor 维持）。
     // 统一经 lifecycleManager 出口（而非直调模块对象），保证启停路径收敛到一处。
-    try {
-      if (this.lifecycleManager) {
-        // L3 解耦：router 若为独立 daemon（detached）→ 守卫退出不停它（daemon 独立生命周期继续服务）；
-        // 仅内嵌 router/lan（仍驻守卫进程的）需停防孤儿。实现：先把 daemon 型 router 项从 stopAll 豁免。
-        try {
-          const rlc = this.lifecycleManager.get('router');
-          if (rlc && this._routerDaemonActive()) {
-            rlc._monitoring = false; // 守卫退出不再监督该 daemon（daemon 自身继续运行）
-          }
-        } catch {}
-        this.lifecycleManager.stopAll('guard-shutdown', { exclude: ['dsh'] }); // 守卫退出绝不动 DSH（RC2 契约，不再依赖 exit 竞态）
-      } else {
-        // 兜底（lifecycleManager 未初始化时保持原行为防孤儿）
-        try { if (this.lan) this.lan.shutdown(); } catch (e) { this.logger.warn && this.logger.warn('lan shutdown: ' + (e && e.message)); }
-        try { if (this.router) this.router.stop(); } catch (e) { this.logger.warn && this.logger.warn('router stop: ' + (e && e.message)); }
-      }
-    } catch (e) { this.logger.warn && this.logger.warn('lifecycle stopAll: ' + (e && e.message)); }
-    // 守护语义：守卫退出不动 DSH，恢复后幂等调和
+    // ⚠ 2026-09-12（P1）：`stopAll` 是 async —— 必须 **await**，否则调用方 exit 会截断它。
+    //   返回的 Promise 存到 `_shutdownPromise`，使重复调用拿到同一个（幂等）。
+    this._shutdownPromise = (async () => {
+      try {
+        if (this.lifecycleManager) {
+          // L3 解耦：router 若为独立 daemon（detached）→ 守卫退出不停它（daemon 独立生命周期继续服务）；
+          // 仅内嵌 router/lan（仍驻守卫进程的）需停防孤儿。实现：先把 daemon 型 router 项从 stopAll 豁免。
+          try {
+            const rlc = this.lifecycleManager.get('router');
+            if (rlc && this._routerDaemonActive()) {
+              rlc._monitoring = false; // 守卫退出不再监督该 daemon（daemon 自身继续运行）
+            }
+          } catch {}
+          await this.lifecycleManager.stopAll('guard-shutdown', { exclude: ['dsh'] }); // 守卫退出绝不动 DSH（RC2 契约）
+        } else {
+          // 兜底（lifecycleManager 未初始化时保持原行为防孤儿）
+          try { if (this.lan) await this.lan.shutdown(); } catch (e) { this.logger.warn && this.logger.warn('lan shutdown: ' + (e && e.message)); }
+          try { if (this.router) await this.router.stop(); } catch (e) { this.logger.warn && this.logger.warn('router stop: ' + (e && e.message)); }
+        }
+      } catch (e) { this.logger.warn && this.logger.warn('lifecycle stopAll: ' + (e && e.message)); }
+      // 守护语义：守卫退出不动 DSH，恢复后幂等调和
+    })();
+    return this._shutdownPromise;
   }
 
   // ---- 状态持久化 ----
