@@ -26,7 +26,13 @@ function hasIcacls(platform) {
   if ((platform || process.platform) !== 'win32') return false;
   if (_icacls !== null) return _icacls;
   // 经统一执行器（`icacls /?` 退出码非 0 即视为不可用）。
-  _icacls = ex.run('icacls', ['/?'], { stdio: 'ignore', timeoutMs: 3000 }) !== null;
+  // ⚠ 2026-09-13（P0 修复）：改用 runOut —— 同 platform/os/index.js hasTool 的缺陷：
+  //   execFileSync 在 stdio:'ignore' 下**成功也返回 null**，故旧的 '!== null' 判据恒为 false
+  //   → hasIcacls() 在 Windows 上恒 false → 所有敏感文件/目录的 icacls 收紧**静默失效**
+  //     （protectFile/protectDir/writePrivate 一律返回 {ok:false, mode:'none'}，
+  //      只落一行警告，用户与审计都看不到权限没收紧）。runOut 下 null 只可能是失败。
+  //   注：runDetail 在 stdio:'ignore' 下不受影响 —— 它以「是否抛异常」判 ok，不依赖返回值。
+  _icacls = ex.runOut('icacls', ['/?'], { timeoutMs: 3000 }) !== null;
   return _icacls;
 }
 

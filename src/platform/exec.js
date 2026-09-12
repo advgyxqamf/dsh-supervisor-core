@@ -71,7 +71,23 @@ function options(opts) {
 function run(bin, args, opts) {
   const o = opts || {};
   try {
-    return execFileSync(bin, args, options(o));
+    const out = execFileSync(bin, args, options(o));
+    // ⚠ 2026-09-13（P0 修复）：**成功也可能返回 null** —— 这必须与「失败」区分开。
+    //
+    //   缺陷：execFileSync 在 stdio 不捕获 stdout（如 'ignore' 或 ['ignore','ignore','ignore']）
+    //     时，**命令成功也返回 null**（不是空串、不是空 Buffer）。而本函数对外的契约是
+    //     「失败/超时返回 null（调用方自行降级）」—— 于是**每一个以 !== null 判成功的调用方
+    //     都把成功读成失败**。
+    //
+    //   实测（本机）：execFileSync('node',['--version'],{stdio:'ignore'}) === null，
+    //     而 {stdio:['ignore','pipe','pipe']} 返回 Buffer —— 与命令是否成功无关。
+    //
+    //   修法：异常仍返回 null（=失败）；**成功一律返回非 null 值**
+    //     （无 stdout 可捕获时给空 Buffer / 空串）。这样 '!== null' 才真正等价于「成功」。
+    if (out === null || out === undefined) {
+      return o.encoding ? '' : Buffer.alloc(0);
+    }
+    return out;
   } catch (e) {
     if (o.logger && o.logger.warn) {
       try {

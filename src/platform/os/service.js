@@ -26,7 +26,22 @@ const PLATFORM = process.platform;
 function run(cmd, args, opts) {
   // ⚠ 经统一执行器（默认 15s 硬超时 + SIGKILL）—— 防 systemd/dbus 挂起时无限阻塞。
   //   调用方传的 timeoutMs 仍生效（exec.options 会用它覆盖默认值）。
-  return exec.run(cmd, args, Object.assign({ stdio: 'ignore' }, opts || {}));
+  //
+  // ⚠ 2026-09-13（P0 修复）：**不再强制 stdio:'ignore'**。
+  //
+  //   缺陷：本包装曾无条件 `Object.assign({ stdio: 'ignore' }, opts)` ——
+  //     于是即便调用方要**读输出**（如 isUnitActive 传 encoding:'utf8'），stdio 也被压成 'ignore'，
+  //     execFileSync 便**不捕获 stdout** → 返回 null → isUnitActive 恒得 '' ≠ 'active' → **恒 false**。
+  //     实测：对一个确实 active 的 --user 单元调用 isUnitActive() 返回 false。
+  //
+  //   后果（不止一处）：
+  //     · 实例就绪判定要求 unitActive() → 永远不满足 → 升级在稳定期判「未能启动」→ 误回滚；
+  //     · 实例域删数据目录前的 isUnitActive 复核恒 false → 「仍活跃则不删」的保护**永不生效**（数据丢失防线失效代）;
+  //     · 任何未来「经本包装读输出」的调用都会静默拿到空值。
+  //
+  //   修法：默认沿用 exec 自己的 stdio（['ignore','pipe','pipe']）—— 不捕获也不丢输出。
+  //     写类命令（start/stop/reload）不关心 stdout，piping 只是多几字节，无副作用。
+  return exec.run(cmd, args, opts || {});
 }
 
 /* ── Linux：systemd --user ── */

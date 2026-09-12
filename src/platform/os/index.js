@@ -51,8 +51,15 @@ function hasTool(name, args) {
     if (Date.now() - (hit.at || 0) < _NEG_TTL_MS) return false; // 负结果：TTL 内沿用
     // 负结果过期 → 落到下面重探
   }
-  // 经统一执行器：失败返回 null（不再依赖 try/catch 吞异常）。
-  const ok = ex.run(name, args || ['--version'], { stdio: 'ignore', timeoutMs: 3000 }) !== null;
+  // 经统一执行器。⚠ 2026-09-13（P0 修复）：改用 runOut ——
+  //   旧实现 `ex.run(..., { stdio: 'ignore' }) !== null` 表面上与「命令存在」等价，实际
+  //   **恒 false**：execFileSync 在 stdio:'ignore'（不捕获 stdout）时**成功也返回 null**，
+  //   于是 hasTool('node') / hasTool('systemctl') / hasTool('systemd-run') 全部为假
+  //   （实测），capabilities() 随之把 multiInstance/desktopNotify/autostart 一律降为 false
+  //   → Linux 上「沙箱实例」功能对**所有**用户不可用（UI 报「当前平台不支持」），
+  //     而平台其实完全支持。
+  //   runOut 走 pipe 并返回字符串，null **只可能是失败** —— 判据与语义一致。
+  const ok = ex.runOut(name, args || ['--version'], { timeoutMs: 3000 }) !== null;
   _toolCache[name] = ok ? true : { at: Date.now() };
   return ok;
 }
