@@ -184,17 +184,41 @@ class ManagedLifecycle {
     }
   }
 
-  /** 重启（stop → start 语义由调用方决定；这里提供便捷）。 */
+  /** 重启（stop → start 语义由调用方决定；这里提供便捷）。
+   *
+   *  ⚠ 2026-09-12（P1 修复）：**回退路径必须尊重 stop/start 的显式失败**。
+   *
+   *    缺陷：原实现在无 `_restart` 回调时 `await this.stop(); await this.start(); return {ok:true}`
+   *      —— **两个返回值都被丢弃**，`{ok:true}` 无条件返回。
+   *      于是 `POST /lifecycle/{id}/restart`（api/lifecycle.js:73）在「停不掉」或「起不来」时
+   *      仍报成功 → 面板显示「已重启」而模块实际是死的/还活着。
+   *
+   *    这是 K4 修复（start/stop 尊重 `{ok:false}`）的**对称面被遗漏** ——
+   *      同一纪律只覆盖了两条路径中的两条，第三条（restart 回退）漏了。
+   *
+   *    现：任一步骤显式失败即如实上报（并把该步的 error 带出）。
+   *    语义：`stop` 失败 → 模块仍在跑，重启未发生；`start` 失败 → 已停但未起。
+   */
   async restart() {
     if (this._restart) {
       const r = await this._restart();
-      if (r && r.ok === false) return { ok: false, error: r.error, ...this.snapshot() };
-      return { ok: r && r.ok !== false, ...this.snapshot() };
+      // ⚠ 同上：snapshot 含 `error`，必须放前，否则回调的 error 被覆盖（实测 error=null）。
+      if (r && r.ok === false) return { ...this.snapshot(), ok: false, error: r.error };
+      return { ...this.snapshot(), ok: r && r.ok !== false };
     }
     const wasDesired = this.desired;
-    await this.stop('restart');
-    if (wasDesired === 'running') await this.start();
-    return { ok: true };
+    const rs = await this.stop('restart');
+    if (rs && rs.ok === false) {
+      // ⚠ `...this.snapshot()` 必须**在前** —— 它也含 `error` 字段，放后面会覆盖这里的显式错误。
+      return { ...this.snapshot(), ok: false, error: 'restart: 停止失败 — ' + (rs.error || '未知') };
+    }
+    if (wasDesired === 'running') {
+      const rt = await this.start();
+      if (rt && rt.ok === false) {
+        return { ...this.snapshot(), ok: false, error: 'restart: 启动失败 — ' + (rt.error || '未知') };
+      }
+    }
+    return { ...this.snapshot(), ok: true };
   }
 }
 
