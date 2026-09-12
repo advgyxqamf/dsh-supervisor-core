@@ -185,10 +185,34 @@ class PortRegistry {
     if (removed) this._save();
   }
 
-  /** 释放单个端口（按端口号）。 */
-  release(port) {
+  /** 释放端口。
+   *
+   *  ⚠ 2026-09-12（P2）：新增可选的 `ownerId` 校验 —— 此前第二参被**静默忽略**。
+   *
+   *    缺陷：`guard/lifecycle/objects.js:264` 以 owner 意图调用
+   *    `this.ports.release(port, ownerId)`（失败才回退 `release(port)`），
+   *    但本函数的签名只有 `(port)` —— ownerId 被丢掉，**任何持有端口号的调用方
+   *    都能删掉别人 owner 的登记记录**。
+   *
+   *    危害：若某 managed 对象的 port 已被回收并**重新分配给另一 owner**，
+   *    旧对象迟到的 release 会误删新记录 → 新 owner 的端口失去登记（泄漏/被重复分配）。
+   *
+   *  现语义：
+   *    · 不传 `ownerId`（既有调用方）→ 保持原「按端口号释放」语义（向后兼容）；
+   *    · 传了 `ownerId` → **仅当登记 owner 匹配才释放**（不匹配即 no-op，并返回 false）。
+   *
+   *  @returns {boolean} 是否真的释放了一条记录
+   */
+  release(port, ownerId) {
     const p = Number(port);
-    if (this._records.has(p)) { this._records.delete(p); this._save(); }
+    const rec = this._records.get(p);
+    if (ownerId !== undefined && ownerId !== null && rec.owner !== ownerId) return false;
+    if (!rec) return false;
+    // ownerId 为 undefined/null = 调用方未声明归属（既有语义：无条件按端口号释放）。
+
+    this._records.delete(p);
+    this._save();
+    return true;
   }
 
   /* ═══════ 查询 ═══════ */
@@ -387,8 +411,9 @@ class PortRegistry {
     const o = opts || {};
     const anchor = (o.range) ? 0 : this._anchorOffset(rangeKey);
     const start = anchor + ((o.skipFirst) ? 1 : 0);
-    while (this._allocLock) { await new Promise((r) => setTimeout(r, 10)); }
-    this._allocLock = true;
+    // ⚠ 2026-09-12（P2）：此处原**内联**了一遍与 `_acquireAlloc()` 完全相同的自旋等待 ——
+    //   「同一事实两处实现」，任一处将来加超时/加日志都会分叉。已统一经该 helper。
+    await this._acquireAlloc();
     try {
       for (let n = 0; n < range.count; n++) {
         const p = range.base + ((start + n) % range.count);

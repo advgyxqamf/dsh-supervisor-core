@@ -484,7 +484,33 @@ const auxMethods = {
     if (!p) return { ok: false, error: '供应商不存在' };
     const rm = new Set((opts && opts.removeMasked) || []);
     const before = (p.accounts || []).length;
+    // ⚠ P2-4 修复（2026-09-12）：删除反代账号时**必须做与 removeProxyKey 同等的收尾**。
+    //
+    //   缺陷：本函数此前只 `filter(accounts)` —— 对 **proxy 类**供应商而言，
+    //     `stopInstance` / `ports.unregister('proxy:'+keyId)` / `p.instances` 同步**全都没做**，
+    //     而 `removeProxyKey`（下方）三者齐备。同一事实两处实现且已分叉。
+    //
+    //   后果：经公开 API `POST /router/providers/keys/set {removeMasked:[...]}`
+    //     （api/router.js 只校验 id、**不校验 kind**）删掉反代账号 → 实例进程继续跑、
+    //     `proxy:<keyId>` 端口记录永久残留；而该 keyId 已不在 accounts，
+    //     `accountOf` 恒 null → orphan 实例/端口**再无释放路径**，最终耗尽代理池。
+    //
+    //   修法：对将被移除的 proxy 账号逐个执行与 removeProxyKey 相同的收尾。
+    const doomed = (p.accounts || []).filter((a) => rm.has(a.maskedKey));
+    if (p.kind === 'proxy') {
+      for (const a of doomed) {
+        if (a.instance) {
+          try { p.stopInstance(a.instance); } catch {}
+          try { ports.unregister('proxy:' + a.keyId); } catch {}
+          a.instance.port = null;
+        }
+      }
+    }
     p.accounts = (p.accounts || []).filter((a) => !rm.has(a.maskedKey));
+    if (p.kind === 'proxy') {
+      const gone = new Set(doomed.map((a) => a.keyId));
+      p.instances = (p.instances || []).filter((i) => !gone.has(i.keyId));
+    }
     const removed = before - p.accounts.length;
     let added = 0;
     for (const k of (opts && opts.add) || []) {

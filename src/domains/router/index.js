@@ -30,7 +30,20 @@ class RouterService {
     this.usageTotalsFile = opts.usageTotalsFile || null; // 账号统计持久化文件（byKey/请求/Token 累计）
     // 自动取证（2026-09）：上游限流/拒绝响应证据 JSONL（与 providers.json 同目录，测试经 providerFile 天然隔离）
     this.evidenceFile = opts.evidenceFile || (this.providerFile ? path.join(path.dirname(this.providerFile), 'router-upstream-evidence.jsonl') : null);
-    this.evidence = this.evidenceFile ? new UpstreamEvidence({ file: this.evidenceFile }) : null;
+    // ⚠ 2026-09-12（P1-3）：取证改为**显式 opt-in**（默认关）。
+    //
+    //   此前它**无条件启用**，但整条链路**零消费点**：
+    //     · 产出：本文件 onEvidence → switch._capture（对上游 >=400）→ evidence.append；
+    //     · 读取：evidenceTail/evidenceStats **全仓无调用方**，surface.js 未登记任何路由，
+    //       前端 grep evidence = 0。
+    //   即：持续按 4MB 轮转写 JSONL，却没有任何出口可读回 ——
+    //     而 append 每次做 statSync + appendFileSync，**同步执行在转发主路径上**（4xx/5xx）。
+    //
+    //   模块自身头部也写着「（2026-09，下一步）」—— 它是**为后续工作预留的脚手架**，
+    //   尚未接线。故不删除（设计已完成且有测试），但不再让它对主路径征税：
+    //     需要者显式传 `evidenceEnabled: true`（或后续补上读取出口时默认开）。
+    this.evidenceEnabled = opts.evidenceEnabled === true;
+    this.evidence = (this.evidenceFile && this.evidenceEnabled) ? new UpstreamEvidence({ file: this.evidenceFile }) : null;
     // 端口注册表隔离：直接构造 RouterService（测试/嵌入）注入 portsFile → 使用独立记录文件，
     // 绝不触碰生产 ports.json（守卫路径已由 Supervisor.configureFile 指向同域文件，此处跳过）
     if (opts && opts.portsFile) ports.configureFile(opts.portsFile);

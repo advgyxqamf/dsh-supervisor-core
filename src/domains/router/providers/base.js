@@ -562,6 +562,20 @@ class ProviderBase {
         this._setStatus(acc, 'banned', null, det.error || '账号被禁用', false);
       } else {
         acc.lastProbeError = (det && det.error) || '状态检测失败';
+        // ⚠ P1-1 修复（2026-09-12）：**探测失败也必须给一个重探时刻**。
+        //
+        //   缺陷：本分支此前只写 lastProbeError 就返回，**不设 nextResetAt**。
+        //     而 router 的探测闸门是 `missingReset = frozen && !nextResetAt` ——
+        //     于是「frozen + 探测持续失败」的账号 `needProbe` **恒真**：
+        //     每 5 分钟 start→detect→stop 一次实例（启停风暴 + 高频打上游 billing），
+        //     与注释声称的「立即探测**一次**确认真实额度」并不相符。
+        //
+        //   现补兜底重探时刻（复用 credits 的 10min 周期）：失败 → 退避重探，
+        //     额度真恢复时仍会解冻（最多晚 10 分钟），但不再有启停风暴。
+        //     ⚠ 仅在「没有既有恢复点」时补，避免把已精确的 nextResetAt 推后。
+        if (acc.status === 'frozen' && !acc.nextResetAt) {
+          acc.nextResetAt = Date.now() + CREDITS_RECHECK_MS;
+        }
         this._persist();
       }
       return;
