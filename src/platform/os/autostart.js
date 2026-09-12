@@ -324,9 +324,20 @@ function setGuiAutostart(on, platform) {
       // ⚠ 2026-09-12（P3）：Desktop Entry 规范的 `Exec=` 也是**空格分词**的——
       //   路径含空格时（家目录如 `/home/john smith`）必须用引号界定，否则
       //   桌面环境把 `/home/john` 当可执行、`smith/...` 当参数 → 自启静默失败。
-      //   规范要求：值内的双引号用 `\\"` 转义，反斜杠用 `\\\\`。
-      //   （与 systemd ExecStart、schtasks /TR 是**同一类**缺陷，三处都要处理。）
-      const execQuote = (p) => '"' + String(p).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+      //   规范要求（两处，缺一不可）：
+      //     ① 值内的双引号用 `\\"` 转义，反斜杠用 `\\\\`；
+      //     ② **字面 `%` 必须写成 `%%`** —— 因为 `%` 是字段码前缀，
+      //        未转义的 `%u`/`%f`/`%k` 会被桌面环境解释成「传入 URL/文件/图标名」，
+      //        Exec 解析失败 → **登录自启静默失效**。
+      //
+      //   ⚠ 2026-09-12 补 ②：此前只做了 ①（修好「路径含空格」），
+      //     而「家目录含 `%`」（如 `/home/100%user`）仍是同一类缺陷的**未修面** ——
+      //     注释当时已自称「规范要求」，实际只覆盖了引号与反斜杠。
+      //   （与 systemd ExecStart、schtasks /TR 同属一类，三处都需处理。）
+      const execQuote = (p) => '"' + String(p)
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/%/g, '%%') + '"';
       entry = entry.replace(/^Exec=.*$/m, 'Exec=' + execQuote(guiBin));
       // Icon 同样按实际安装解析（deb 装到 /usr/share，本地装到 ~/.local/share）
       const iconCandidates = [

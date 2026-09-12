@@ -129,6 +129,31 @@ class EventHub {
     this._tickSeq = 0;
   }
 
+  /** 内部告警出口（P1-1 修复，2026-09-12）。
+   *
+   *  ⚠ 此前本类有 **4 处 `this._log('warn', …)` 调用，却从未定义 `_log`**
+   *    （`_logFileFor` 是唯一带 `_log` 前缀的成员，且它是赋值而非同名方法）——
+   *    与内核 `markNetFail` 同型：「声明了调用但方法不存在」。
+   *
+   *    后果（比一般 no-op 更严重：它是**抛异常**）：
+   *      · `_ingest` 在「写盘失败」这一唯一应触发分支先调 `_log` → TypeError →
+   *        被**同一条 try 的 catch** 捕获 → catch 里再调 `_log` → 再抛 → 逃出整个 for 循环；
+   *        结果不是注释承诺的「水位不推进、下轮补齐」，而是**该批剩余事件直接丢弃**，
+   *        且**告警本身也丢失**；
+   *      · daemon 路径上该异常被 `_syncDaemon` 的 catch 记为「eventsTail 不可用」，
+   *        把「本地写盘失败」误报成「daemon 不可达」→ 排障方向被带偏。
+   *
+   *    修法：定义本方法（与文件内既有用法一致：可选 logger + 不抛）。
+   *    这是把「契约」补全，而非改语义 —— 调用点的意图从注释即可读出。
+   */
+  _log(level, msg) {
+    try {
+      const lg = this.logger;
+      // 注：调用点的 msg 多已自带 '[hub] ' 前缀，故此处不再叠加。
+      if (lg && typeof lg[level] === 'function') lg[level](msg);
+    } catch { /* 告警出口本身绝不抛：它是失败路径上的最后一环 */ }
+  }
+
   /** 事件人性化 data：浅拷贝源 data 并注入可读中文 message（前端优先显示 data.message）。
    *  不改源事件对象（审计源行仍为原始 data）。 */
   _humaData(type, data) {

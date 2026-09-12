@@ -32,7 +32,7 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
     const id = 'u1';
     const tasksStub = { isBusy: () => true, current: () => ({ action: 'upgrade' }) };
     const mgr = new InstanceManager({ dir: TMP, logger, tasks: tasksStub, dist: null });
-    mgr.sandboxSupported = true;                 // 绕过平台能力门
+    mgr._setSandboxSupportedForTest(true);       // 绕过平台能力门（显式测试入口）
     mgr._prepareSystemd = () => {};
     let started = 0;
     mgr._systemdStart = () => { started++; return { ok: true }; };

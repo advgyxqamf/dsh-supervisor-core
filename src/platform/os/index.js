@@ -29,12 +29,32 @@ const isMac = PLATFORM === 'darwin';
 const isWindows = PLATFORM === 'win32';
 
 // ---- 工具可执行性探测（模块级缓存：capabilities 可被 API/UI 多次调用）----
+//
+// ⚠ P2-2 修复（2026-09-12）：**负结果加 TTL**，不再永久缓存。
+//
+//   缺陷：原先 `_toolCache[name] !== undefined` 即返回（**含 false**，无 TTL、无失效入口）；
+//    而 `domains/instance/index.js` 在**构造期**求值一次
+//       `this.sandboxSupported = caps.multiInstance === true`
+//     之后不再重算。于是若守卫启动时 PATH 缺 systemd 工具（登录早期/服务环境），
+//     该能力会**永久**停在 false，直到守卫重启 —— 而 `capabilities()` 是 `/env/status`
+//     的对外声明面（用户看到「不支持沙箱」却无从恢复）。
+//     正是本仓高频模式「门禁/阈值因时序恒真或不可达」。
+//
+//   现：正结果永久缓存（工具装好了不会自己消失）；**负结果只在 NEG_TTL_MS 内有效**，
+//     过期后重探 —— 用户事后安装 systemd 工具即可自愈，无需重启守卫。
 const _toolCache = {};
+const _NEG_TTL_MS = 60000; // 负结果 60s 内不重探（避免每次 /env/status 都 spawn 一遍）
 function hasTool(name, args) {
-  if (_toolCache[name] !== undefined) return _toolCache[name];
+  const hit = _toolCache[name];
+  if (hit !== undefined) {
+    if (hit === true) return true; // 正结果：永久
+    if (Date.now() - (hit.at || 0) < _NEG_TTL_MS) return false; // 负结果：TTL 内沿用
+    // 负结果过期 → 落到下面重探
+  }
   // 经统一执行器：失败返回 null（不再依赖 try/catch 吞异常）。
-  _toolCache[name] = ex.run(name, args || ['--version'], { stdio: 'ignore', timeoutMs: 3000 }) !== null;
-  return _toolCache[name];
+  const ok = ex.run(name, args || ['--version'], { stdio: 'ignore', timeoutMs: 3000 }) !== null;
+  _toolCache[name] = ok ? true : { at: Date.now() };
+  return ok;
 }
 /** 统一数据目录：~/.dsh（三平台一致，os.homedir 通用）。 */
 function dataDir() {

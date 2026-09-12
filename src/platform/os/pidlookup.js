@@ -148,11 +148,25 @@ function readCmdline(pid) {
   if (isWindows) {
     // wmic process where ProcessId=<pid> get CommandLine /value
     const out = ex.runOut('wmic', ['process', 'where', 'ProcessId=' + pid, 'get', 'CommandLine', '/value'], { timeoutMs: 5000 });
+    // ⚠ P1-2 修复（2026-09-12）：**wmic 取不到命令行时也必须走下方回退**。
+    //
+    //   缺陷：原实现 `return m ? m[1].trim() : null;` —— 只要 wmic **存在**
+    //     （Win10/11 出厂仍在，仅标记弃用）且退出码 0，即便输出是
+    //     `No Instance(s) Available.`（进程已退出/权限不足/名称不中），
+    //     正则不命中就**直接 return null** → 下方回退**永远不可达**；
+    //     而回退上方的注释恰好声称「wmic 失败或在新 Windows 已弃用：回退 PowerShell CIM」。
+    //
+    //   后果：`isDshCmdline` 恒 false → `_isManagedProcess` 恒 false →
+    //     Windows 上**既不能接管手动启动的 DSH、也不给出任何错误**（与「三端保留防线」的声明相反）。
+    //
+    //   修法：wmic 仅在**确实解析出非空命令行**时返回；否则继续走回退。
     if (out) {
       const m = /CommandLine=([\s\S]*)/.exec(out);
-      return m ? m[1].trim() : null;
+      const viaWmic = m ? m[1].trim() : '';
+      if (viaWmic) return viaWmic;
+      // 落空 → 继续尝试回退（不再直接 return null）
     }
-    // wmic 失败或在新 Windows 已弃用：回退 PowerShell CIM
+    // wmic 缺失/不可用/无输出/解析不中：回退 PowerShell CIM
     {
       const ps = "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine";
       const o = ex.runOut('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeoutMs: 5000 });

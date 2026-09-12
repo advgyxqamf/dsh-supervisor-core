@@ -34,8 +34,16 @@ class InstanceManager {
     // 平台能力门（2026-09 审计修复）：沙箱实例经 systemd-run 独立 cgroup 管理 → 仅 Linux+systemd 可用。
     // 非支持平台在此显式记录，启停方法返回明确错误——原实现各 execFileSync 逐点 catch 吞错后
     // 误报「启动失败/端口冲突」等误导性原因（mac/win 上静默半瘫的根因之一）。
-    const caps = require('../../platform/os/index').capabilities();
-    this.sandboxSupported = !!(caps && caps.multiInstance === true);
+    //
+    // ⚠ P2-2 修复（2026-09-12）：**不再在构造期冻结该能力**。
+    //   缺陷：原先构造时求值一次 `this.sandboxSupported = caps.multiInstance === true`，
+    //     之后永不重算。若守卫启动时 PATH 缺 systemd 工具（登录早期/服务环境），
+    //     该能力**永久**为 false（直到重启），用户事后安装也无从恢复；
+    //     而 `/env/status` 的 capabilities 是外面对照面，两者会长期不一致。
+    //
+    //   现改为**取用点实时求值**（见下方 `get sandboxSupported()`）——
+    //     `platform/os/index.js` 的 hasTool 负结果已有 60s TTL，不会每次都 spawn。
+    //   ⚠ 刻意**不**另存「启动快照」字段：那会引入一个无人消费的声明（本仓已清理多例）。
     this.instancesFile = path.join(this.dir, 'instances.json');
     // 沙箱实例各自独立根目录（数据+依赖），与原生(~/.dsh)及彼此零共享
     this.instancesRoot = path.join(path.dirname(this.instancesFile), 'instances');
@@ -60,6 +68,41 @@ class InstanceManager {
     this.onCreate = opts.onCreate || null;
     this.onDestroy = opts.onDestroy || null;
   }
+
+  /** 沙箱能力（**实时**求值，P2-2 修复）。
+   *
+   *  原先这是构造期冻结的实例字段；若守卫启动时 PATH 缺 systemd 工具，
+   *  该能力会永久为 false（用户事后安装也无从恢复）。
+   *  现改为 getter：取用点实时问 `platform/os/index.capabilities()`；
+   *  后者对工具的**负结果有 60s TTL**，故不会每次都 spawn 探测进程。
+   *
+   *  ⚠ 保留一个**显式覆写位** `_sandboxSupportedOverride`：
+   *    测试需要在非 Linux 环境绕过平台能力门（stub 掉 systemd 相关方法后验证上层逻辑），
+   *    这是长期存在的用法。改为 getter 后直接赋值会抛「only a getter」，
+   *    故把该用法收敛为受支持的单字段覆写，而不是让测试去改平台探测。
+   *    生产过程不设置该字段 → 恒走实时探测。
+   */
+  get sandboxSupported() {
+    if (this._sandboxSupportedOverride !== undefined && this._sandboxSupportedOverride !== null) {
+      return this._sandboxSupportedOverride === true;
+    }
+    try {
+      const caps = require('../../platform/os/index').capabilities();
+      return !!(caps && caps.multiInstance === true);
+    } catch { return false; }
+  }
+
+  /** 显式覆写沙箱能力（**仅供测试/嵌入方**）。
+   *
+   *  为什么用**方法**而非 setter：setter 会让 `mgr.sandboxSupported = x` 这类
+   *  普通赋值静默生效 —— 生产代码一旦误写就绕过了平台能力门（本仓刚修过多起
+   *  「纪律被静默绕过」）。方法名把意图写在调用点，便于审查与 grep。
+   *  @param {boolean|null} v true/false 覆写；null 恢复实时探测
+   */
+  _setSandboxSupportedForTest(v) { this._sandboxSupportedOverride = (v === null ? null : v === true); }
+
+  /** 测试/嵌入方可显式覆写沙箱能力（见 `sandboxSupported` 说明）。传 null 恢复实时探测。 */
+  set sandboxSupported(v) { this._sandboxSupportedOverride = (v === null ? null : v === true); }
 
   /* ── 实例持久化 ── */
   load() {

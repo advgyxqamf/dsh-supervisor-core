@@ -75,18 +75,33 @@ function ensurePrivateDir(dir) {
 }
 
 /** 写入敏感文件并施加保护（原子写 + 保护；避免「写完到保护之间」的可读窗口）。
+ *
+ *  ⚠ P2-1 修复（2026-09-12）：**保护失败必须如实返回 `ok:false`**。
+ *
+ *    缺陷：此前两处 `protectFile(...)` 的返回值被**丢弃**，末尾无条件 `return {ok:true}` ——
+ *      Windows 上 `icacls` 不可用/被策略拦截时，文件最终保持继承 ACL 可读，
+ *      而调用方拿到「已 0600 写入」的假成功（本仓禁忌「catch 后当成功」）。
+ *
+ *    ⚠ 该函数当前**生产零调用点**（唯一调用方是 cross-platform-test）——
+ *      也就是说这条事故链目前被「功能未接线」挡住；但同目录的 `protectDir`
+ *      （`supervisor.js` 对 swDir/supervisorDir 调用）**是真正生效的那一半**，
+ *      其失败同样只 `console.warn`（见 `supervisor.js` 的调用点）。
+ *      这里先把 `writePrivate` 的契约修正确，避免将来接线时踩坑。
+ *
  *  @param {string} file 目标文件（自动创建父目录）
  *  @param {string|Buffer} data
- *  @returns {{ok:boolean, reason?:string}} */
+ *  @returns {{ok:boolean, reason?:string, mode?:string}} */
 function writePrivate(file, data) {
   try {
     const dir = path.dirname(file);
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
     const tmp = file + '.tmp' + process.pid;
     fs.writeFileSync(tmp, data, { mode: 0o600 });
-    protectFile(tmp);
+    const p1 = protectFile(tmp);
+    if (p1 && p1.ok === false) { try { fs.rmSync(tmp, { force: true }); } catch {} return { ok: false, reason: 'protect(tmp): ' + (p1.reason || p1.mode), mode: p1.mode }; }
     fs.renameSync(tmp, file);
-    protectFile(file); // rename 后再次确保（部分平台 rename 不保留 ACL）
+    const p2 = protectFile(file); // rename 后再次确保（部分平台 rename 不保留 ACL）
+    if (p2 && p2.ok === false) return { ok: false, reason: 'protect(file): ' + (p2.reason || p2.mode), mode: p2.mode };
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }
 }
