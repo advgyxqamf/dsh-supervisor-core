@@ -120,6 +120,21 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
 check('E-e 源码调用 tasks.step 登记步骤', /this\.tasks\.step\(task\.id/.test(ops), '有');
 check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(task\.id/.test(ops), '有');
 
+// ── E-g：`setProviderKeys(add)` 的 added 必须反映真实结果（P2-5）──
+//   行为级用不到（需真供应商），故做源码级不变量 + 契约字段检查。
+{
+  const m = ops.match(/async setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);
+  check('E-g setProviderKeys 为 async（需 await 检测结果）', !!m, m ? 'ok' : '未找到');
+  const body = m ? m[0] : '';
+  check('E-g 等待 addAccount 结果（不再 fire-and-forget）',
+    /await Promise\.all\(/.test(body), '有');
+  check('E-g 返回 discarded / discardedKeys（供 UI 如实提示）',
+    /discardedList\.length/.test(body) && /discardedKeys:/.test(body), '有');
+  // 反向：确认「不 await + added++」的旧写法已消失（那正是缺陷本体）
+  check('E-g 旧的 fire-and-forget 写法已消失',
+    !/addAccount\(t\)\.catch\(\(\) => \{\}\);\s*\n\s*added\+\+/.test(body), '已改');
+}
+
 // ── E-f：OAuth 登录的**两条退出路径**必须对称清理（P2-6）──
 //   成功与超时/异常分支都必须清 `_ccLoginResolve`/`_ccLoginReject`；
 //   否则残留的 reject 会被上一轮浏览器的退出回调取到，误杀**下一次**登录。

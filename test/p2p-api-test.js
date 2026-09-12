@@ -149,7 +149,17 @@ registerDryRunApp();
 
   // 14. keys/set（给直连加 key）
   r = await api('POST', '/router/providers/keys/set', { id: directP.id, add: ['sk-api-2'] });
-  check('P17 keys/set 添加', r.code === 200 && r.body.ok === true && r.body.added === 1, r.code + ' ' + JSON.stringify(r.body));
+  // ⚠ P2-5 修复（2026-09-12）：本条原先断言 `added === 1` —— 但那是**假成功**。
+  //   本测试用的 key 是 'sk-api-2'（伪造值），detectAccount 必然失败 → 账号被置 discarded。
+  //   旧实现的 `added++` 不 await 检测，故恒报 1；现在 added 反映真实结果（应为 0）。
+  //   故断言改为：端点正常（200/ok）且**如实回报**被丢弃的 Key（这恰是修复的意图）。
+  check('P17 keys/set 添加（如实回报：伪造 key 应被丢弃）',
+    r.code === 200 && r.body.ok === true && r.body.added === 0 && r.body.discarded === 1
+      && Array.isArray(r.body.discardedKeys) && r.body.discardedKeys.length === 1,
+    r.code + ' ' + JSON.stringify(r.body));
+  check('P17b 被丢弃的 Key 带原因（供 UI 如实提示）',
+    !!(r.body.discardedKeys && r.body.discardedKeys[0] && r.body.discardedKeys[0].error),
+    JSON.stringify((r.body.discardedKeys || [])[0] || {}));
 
   // 15. proxy/key 添加反代账号（会 spawn 实例；dry-run 可重复起）
   r = await api('POST', '/router/providers/proxy/key', { id: proxyP.id, key: 'pk-2' });

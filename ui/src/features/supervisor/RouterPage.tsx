@@ -355,6 +355,21 @@ function EditKeysDialog({ open, onOpenChange, p }: {
       } else {
         const r = await supervisorApi.providerKeysSet(p.id, { add: keys });
         if (r.ok === false) { toast.error(r.error || "添加失败"); return; }
+        // ⚠ P2-5 修复（2026-09-12）：如实呈现**真实结果**，不再一律报 keys.length。
+        //   此前无论后端丢弃多少个，这里都提示「已添加 N 个」——
+        //   而 keys/set 过去根本不等检测结果（现已修），UI 也无从知道谁失败。
+        const okN = typeof r.added === "number" ? r.added : keys.length;
+        const badKeys = r.discardedKeys || [];
+        if (badKeys.length) {
+          const detail = badKeys.slice(0, 3).map((d) => `${d.key}（${d.error}）`).join("；");
+          toast.warning(`已添加 ${okN} 个，${badKeys.length} 个失败被丢弃：${detail}${badKeys.length > 3 ? " …" : ""}`);
+        } else {
+          toast.success("已添加 " + okN + " 个 Key（" + (isProxy ? "反代账号" : "API Key") + "）");
+        }
+        setInput("");
+        onOpenChange(false);
+        await supervisorStore.refresh();
+        return;
       }
       toast.success("已添加 " + keys.length + " 个 Key（" + (isProxy ? "反代账号" : "API Key") + "）");
       setInput("");

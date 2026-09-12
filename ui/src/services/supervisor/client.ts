@@ -137,7 +137,12 @@ export const supervisorApi = {
   providerDeactivate: (id: string) => post<GenericOk>("/router/providers/deactivate", { id }),
   providerRefresh: (id: string) => post<GenericOk>("/router/providers/refresh", { id }),
   providerKeysSet: (id: string, p: { removeMasked?: string[]; add?: string[] }) =>
-    post<GenericOk & { added?: number; removed?: number }>("/router/providers/keys/set", { id, ...p }),
+    // P2-5：新增 discarded/discardedKeys —— 后端如实回报被丢弃的 Key 及原因，
+    //   UI 据此提示「N 个里 M 个失败」，不再一律报成功。
+    post<GenericOk & {
+      added?: number; removed?: number;
+      discarded?: number; discardedKeys?: { key: string; error: string }[];
+    }>("/router/providers/keys/set", { id, ...p }),
   providerKeyUse: (id: string, fingerprint: string) =>
     post<GenericOk & { active?: string }>("/router/providers/key/use", { id, fingerprint }),
   providerAccountConfirm: (id: string, keyId: string) => post<GenericOk>("/router/providers/account/confirm", { id, keyId }),

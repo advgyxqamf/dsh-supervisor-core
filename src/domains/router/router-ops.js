@@ -6,6 +6,8 @@
 const ports = require('../../guard/lifecycle/ports').shared;
 const { PROXY_APPS } = require('./proxy-apps');
 const { semverCompare } = require('../dist/index');
+// P2-5：脱敏 Key 供「已丢弃」提示（复用 base 的同一实现，不重写第二份）。
+const { maskKey } = require('./providers/base');
 
 /**
  * 防风控调起浏览器（OAuth 一键登录专用）——审计后最强方案。
@@ -508,7 +510,8 @@ const auxMethods = {
   },
 
   /* ---- 账号/供应商管理辅助 ---- */
-  setProviderKeys(id, opts) {
+  // P2-5：改为 async —— `added` 需 await 每个 addAccount 的真实结果（见函数内说明）。
+  async setProviderKeys(id, opts) {
     const p = this.getProvider(id);
     if (!p) return { ok: false, error: '供应商不存在' };
     const rm = new Set((opts && opts.removeMasked) || []);
@@ -541,17 +544,47 @@ const auxMethods = {
       p.instances = (p.instances || []).filter((i) => !gone.has(i.keyId));
     }
     const removed = before - p.accounts.length;
-    let added = 0;
-    for (const k of (opts && opts.add) || []) {
-      const t = String(k).trim();
-      if (t && !p.accounts.some((a) => a.key === t)) {
-        // 直连：直接注册（异步检测由前端触发）；反代：走 addAccount 启动检测
-        p.addAccount(t).catch(() => {});
-        added++;
-      }
+    // ⚠ P2-5 修复（2026-09-12）：`added` 必须反映**真实结果**，不是「发起了几次尝试」。
+    //
+    //   缺陷：此前的 `p.addAccount(t).catch(() => {}); added++;` **不 await** ——
+    //     `addAccount` 内部要 await `detectAccount`，失败时会把账号置 `discarded`
+    //     （base.js:245-249）。于是返回的 `added: N` 可能对应「N 个全被 discarded」，
+    //     而 UI 直接把它读成「已添加 N 个 Key」（client.ts 的 `added?: number`）——
+    //     提示与视图不一致，用户以为加成功了。
+    //
+    //   修法：逐个 await，按真实结果分类返回：
+    //     · added      —— 注册成功（含 ready / frozen-limited 等合规状态）；
+    //     · discarded  —— 检测失败被丢弃（带原因，供 UI 如实提示）。
+    //   本函数因此变为 async；调用方（api/router.js）已用 Promise.resolve(...).then() 包装，
+    //   故无需改动路由。
+    //   ⚠ 并发**保持**原语义：每个 addAccount 都要起实例 + 探活 + 取配额（秒级），
+    //     逐个 await 会让 N 个 Key 串行等 N 倍时间。故用 Promise.all 并发，
+    //     只是**等齐结果**再统计（这正是原实现缺的那一步）。
+    const candidates = ((opts && opts.add) || [])
+      .map((k) => String(k).trim())
+      .filter((t) => t && !p.accounts.some((a) => a.key === t));
+    const settled = await Promise.all(candidates.map((t) =>
+      Promise.resolve()
+        .then(() => p.addAccount(t))
+        .catch((e) => ({ ok: false, error: (e && e.message) || String(e) }))
+        .then((res) => ({ t, res }))
+    ));
+    const addedList = [];
+    const discardedList = [];
+    for (const { t, res } of settled) {
+      if (res && res.ok) addedList.push(res.account ? res.account.maskedKey : maskKey(t));
+      else discardedList.push({ key: maskKey(t), error: (res && res.error) || '未知错误' });
     }
     this._save();
-    return { ok: true, keys: p.accounts.length, added, removed };
+    return {
+      ok: true,
+      keys: p.accounts.length,
+      added: addedList.length,
+      removed,
+      // 新增字段（向后兼容）：被丢弃的 Key 及原因 —— 让 UI 能如实告知「N 个里 M 个失败」。
+      discarded: discardedList.length,
+      discardedKeys: discardedList,
+    };
   },
 
   async setSelectedProxyKey(providerId, keyId) {
