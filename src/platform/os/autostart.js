@@ -159,7 +159,11 @@ function status() {
       kind: 'launchagent',
       on: guardLoaded,
       gui: guiDefined && macLoaded(GUI_LABEL),
-      guiSupported: true,          // 2026-09-11 起 macOS 有壳自启（独立 LaunchAgent）
+      // ⚠ 2026-09-12：删除 `guiSupported` 字段 —— 它是**死声明**：
+      //   · 只有本分支（macOS）产出它，Windows/Linux 两个分支都没有；
+      //   · 全仓**零消费者**：前端契约 `AutostartStatus` 只有 {on, unit?, gui?}，
+      //     壳（Tauri src）grep 零命中，内核自身也只有那个「恒真断言」的测试在读。
+      //   且 macOS 分支恒为 `true`（无信息量）。删除以免读者以为存在跨端能力协商。
       guardDefined,                // 供面板解释「定义缺失 → 请先启动一次桌面壳」
       guardLabel: GUARD_LABEL,
       guiLabel: GUI_LABEL,

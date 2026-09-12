@@ -114,7 +114,10 @@ class EventHub {
     this._warnedKey = {};
     this._shortKey = (which) => (which === 'lan-daemon' ? 'lan' : 'router');
     this._portFor = (which) => this.ctlPorts[this._shortKey(which)];
-    this._logFileFor = (which) => this.daemonLogs[this._shortKey(which)] || null;
+    // ⚠ 2026-09-12：删除 `_logFileFor` —— 全仓**零调用点**（`tailLog` 走直读路径）。
+    //   它的存在还有副作用：`_log`（本类真正的告警出口）此前**未被定义**，
+    //   而 `_logFileFor` 是唯一带 `_log` 前缀的成员 —— 极易让读者（和当初的调用者）
+    //   误以为告警出口已存在（P1-1 的成因之一）。
     this.logger = opts.logger || null;
     this.aggDir = path.join(this.stateDir, 'events');
     this.aggFile = path.join(this.aggDir, this.aggBase + '.aggregated.events.log');

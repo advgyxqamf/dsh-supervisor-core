@@ -113,7 +113,15 @@ console.log('== P4/P5 边界行为 ==');
   check('P5 darwin 不再是 unsupported（已实现原生自启）', d.unsupported !== true && d.via === 'launchagent', JSON.stringify(d));
   // status() 的 guiSupported 在 darwin 必须为 true
   const st = autostart.status();
-  check('P5 status().guiSupported 在本平台为布尔值', typeof st.guiSupported === 'boolean' || st.guiSupported === undefined, String(st.guiSupported));
+  // ⚠ 2026-09-12 修正：本条原为 `typeof st.guiSupported === 'boolean' || st.guiSupported === undefined`
+  //   —— **恒真断言**（undefined 也通过，等于什么都没检查）。
+  //   经复核该字段本身是死声明（仅 macOS 分支产出、全仓零消费），已从源码删除；
+  //   故本断言改为检查**真实契约**：status() 至少要有 kind 与非 undefined 的 on。
+  check('P5 status() 返回 kind 与布尔 on（真实契约）',
+    typeof st.kind === 'string' && st.kind.length > 0 && typeof st.on === 'boolean',
+    'kind=' + st.kind + ' on=' + st.on);
+  check('P5b status() 不再产出已删除的死字段 guiSupported',
+    st.guiSupported === undefined, String(st.guiSupported));
 }
 
 const failed = results.filter((r) => !r);
