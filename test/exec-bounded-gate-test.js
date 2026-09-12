@@ -76,7 +76,13 @@ function stripComments(src) {
   return out;
 }
 
-/** 收集 src/ 下所有 js 文件（排除测试与构建产物）。 */
+/** 收集 `src/` 下的 .js **以及 `bin/` 下的入口脚本**（排除测试与构建产物）。
+ *
+ *  ⚠ 2026-09-12（P2）：原先只扫 `src/` —— 于是 `bin/dsh-supervisor` 里的
+ *    **7 处裸 `execFileSync`（全部无 timeout）**长期逃过门禁：
+ *    systemctl/dbus 挂起时 CLI 会**无限阻塞**（用户看到命令卡死）。
+ *  `bin/` 与会话/安装路径同属产品代码，必须同规。
+ */
 function jsFiles() {
   const out = [];
   (function walk(dir) {
@@ -87,6 +93,13 @@ function jsFiles() {
       if (e.name.endsWith('.js')) out.push(p);
     }
   })(path.join(ROOT, 'src'));
+  // bin/ 入口是无扩展名的脚本（无 .js 后缀），必须单独收集。
+  const binDir = path.join(ROOT, 'bin');
+  if (fs.existsSync(binDir)) {
+    for (const e of fs.readdirSync(binDir, { withFileTypes: true })) {
+      if (e.isFile()) out.push(path.join(binDir, e.name));
+    }
+  }
   return out;
 }
 

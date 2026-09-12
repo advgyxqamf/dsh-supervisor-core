@@ -92,19 +92,34 @@ function macBootout(label) {
  * LimitLoadToSessionType=Aqua：只在实际图形会话中加载（守规矩的做法，
  *   与 domains/shell/watchdog 的 sessionAvailable 判定语义一致）。
  */
+/** XML 文本节点转义（plist 是 XML）。
+ *
+ *  ⚠ 2026-09-12（P3）：原实现只做 `replace(/"/g, '\\"')` —— 那是 **JSON/字符串** 的转义，
+ *   对 XML **无效且不必要**：
+ *     · XML 里 `"` 在文本节点中本就合法，无需转义；
+ *     · 而真正会让 XML 非法的 `&`、`<`、`>` **完全没处理**。
+ *   家目录含 `&`（如 `/Users/a&b/...`）时 plist 非法 → `launchctl bootstrap` 失败，
+ *   报错只是 syntax error，且上层降级为「已建立未加载」→ **壳自启静默失效**。
+ *
+ *   注意 `&` 必须**最先**替换，否则会把后续插入的实体二次转义（`&amp;lt;`）。
+ */
+function xmlEscape(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function macGuiPlist(guiExe) {
   const log = path.join(os.homedir(), '.dsh', 'shell', 'gui-stdio.log');
   return '<?xml version="1.0" encoding="UTF-8"?>\n'
     + '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
     + '<plist version="1.0"><dict>\n'
-    + '  <key>Label</key><string>' + GUI_LABEL + '</string>\n'
+    + '  <key>Label</key><string>' + xmlEscape(GUI_LABEL) + '</string>\n'
     + '  <key>ProgramArguments</key>\n'
-    + '  <array><string>' + String(guiExe).replace(/"/g, '\\"') + '</string></array>\n'
+    + '  <array><string>' + xmlEscape(guiExe) + '</string></array>\n'
     + '  <key>RunAtLoad</key><true/>\n'
     + '  <key>LimitLoadToSessionType</key><string>Aqua</string>\n'
     + '  <key>ProcessType</key><string>Interactive</string>\n'
-    + '  <key>StandardOutPath</key><string>' + log + '</string>\n'
-    + '  <key>StandardErrorPath</key><string>' + log + '</string>\n'
+    + '  <key>StandardOutPath</key><string>' + xmlEscape(log) + '</string>\n'
+    + '  <key>StandardErrorPath</key><string>' + xmlEscape(log) + '</string>\n'
     + '</dict></plist>\n';
 }
 function guiFile() {
@@ -306,6 +321,13 @@ function setGuiAutostart(on, platform) {
       const guiBin = guiCommand();
       const oldExec = os.homedir() + '/.local/bin/dsh-supervisor-gui';
       if (entry.includes(oldExec)) entry = entry.split(oldExec).join(guiBin);
+      // ⚠ 2026-09-12（P3）：Desktop Entry 规范的 `Exec=` 也是**空格分词**的——
+      //   路径含空格时（家目录如 `/home/john smith`）必须用引号界定，否则
+      //   桌面环境把 `/home/john` 当可执行、`smith/...` 当参数 → 自启静默失败。
+      //   规范要求：值内的双引号用 `\\"` 转义，反斜杠用 `\\\\`。
+      //   （与 systemd ExecStart、schtasks /TR 是**同一类**缺陷，三处都要处理。）
+      const execQuote = (p) => '"' + String(p).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+      entry = entry.replace(/^Exec=.*$/m, 'Exec=' + execQuote(guiBin));
       // Icon 同样按实际安装解析（deb 装到 /usr/share，本地装到 ~/.local/share）
       const iconCandidates = [
         path.join(os.homedir(), '.local', 'share', 'icons', 'dsh-supervisor.png'),

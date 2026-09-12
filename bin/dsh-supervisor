@@ -5,7 +5,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const http = require('node:http');
-const { execFileSync } = require('node:child_process');
+// ⚠ P2 修复（2026-09-12）：本文件原直接 `require('node:child_process')` 并**裸调 execFileSync**（7 处），
+//   全部**无 timeout** —— systemctl/dbus 挂起时 CLI 会**无限阻塞**（用户看到命令卡死）。
+//   而 G9 门禁只扫 `src/`，**看不见 `bin/`** —— 故这些调用长期绕过统一执行器。
+//   现经 `src/platform/exec` 统一入口（有界 + SIGKILL + maxBuffer）；
+//   需要用户看到输出的场合传 `stdio: 'inherit'`（exec.js 支持透传）。
+const ex = require('../src/platform/exec');
+// systemctl / loginctl 是用户级操作，给足时间但**有上限**（挂起时如实报错而非卡死）。
+const CLI_SVC_TIMEOUT_MS = 30000;
+
+/** 执行外部命令并**继承** stdio（CLI 场景：用户要看到 systemctl 的实时输出）。
+ *  失败时抛错（保持与原 execFileSync 相同的调用方语义：外层 try/catch 依赖它抛）。 */
+function execInherit(bin, args) {
+  const r = ex.runDetail(bin, args, { stdio: 'inherit', timeoutMs: CLI_SVC_TIMEOUT_MS });
+  if (!r.ok) throw new Error((r.error || (bin + ' 退出码 ' + r.code)) + (r.timedOut ? '（超时）' : ''));
+  return r;
+}
 
 // 包根解析（2026-09-11 修复 off-by-one）：
 //   本文件有两种运行形态，__dirname 语义不同：
@@ -357,13 +372,13 @@ function cmdInstall() {
   console.log('[install] systemd unit: ' + UNIT_PATH);
   // 启用
   try {
-    execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' });
-    execFileSync('systemctl', ['--user', 'enable', 'dsh-supervisor.service'], { stdio: 'inherit' });
+    execInherit('systemctl', ['--user', 'daemon-reload']);
+    execInherit('systemctl', ['--user', 'enable', 'dsh-supervisor.service']);
   } catch (e) {
     console.warn('[install] systemctl 执行失败（可能不在 systemd 会话中）:', e.message);
   }
   try {
-    execFileSync('loginctl', ['enable-linger', os.userInfo().username], { stdio: 'inherit' });
+    execInherit('loginctl', ['enable-linger', os.userInfo().username]);
     console.log('[install] loginctl enable-linger 已启用');
   } catch {
     console.warn('[install] enable-linger 失败，开机自启可能不生效');
@@ -425,10 +440,10 @@ function cmdGuiAutostart(onoff) {
 
 function cmdUninstall() {
   try {
-    execFileSync('systemctl', ['--user', 'stop', 'dsh-supervisor.service'], { stdio: 'inherit' });
+    execInherit('systemctl', ['--user', 'stop', 'dsh-supervisor.service']);
   } catch {}
   try {
-    execFileSync('systemctl', ['--user', 'disable', 'dsh-supervisor.service'], { stdio: 'inherit' });
+    execInherit('systemctl', ['--user', 'disable', 'dsh-supervisor.service']);
   } catch {}
   try {
     fs.unlinkSync(UNIT_PATH);
@@ -439,11 +454,11 @@ function cmdUninstall() {
     console.log('[uninstall] 已移除命令行: ' + BIN_PATH);
   } catch {}
   try {
-    execFileSync('loginctl', ['disable-linger', os.userInfo().username], { stdio: 'inherit' });
+    execInherit('loginctl', ['disable-linger', os.userInfo().username]);
     console.log('[uninstall] loginctl disable-linger 已撤销');
   } catch {}
   try {
-    execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' });
+    execInherit('systemctl', ['--user', 'daemon-reload']);
   } catch {}
   console.log('[uninstall] 完成。DSH 自身不受影响。');
 }

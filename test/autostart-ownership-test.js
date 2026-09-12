@@ -80,10 +80,17 @@ console.log('== P3 GUI plist 只表达「登录启动」==');
     check('P3-b 含 RunAtLoad', /RunAtLoad/.test(body), 'ok');
     check('P3-c **不含** KeepAlive（崩溃归守卫看护，避免两套机制争抢）', !/KeepAlive/.test(body), 'ok');
     check('P3-d 限定 Aqua 会话', /LimitLoadToSessionType/.test(body) && /Aqua/.test(body), 'ok');
-    check('P3-e Label 使用 GUI_LABEL 常量（不硬编码字符串）',
-      /\+\s*GUI_LABEL\s*\+/.test(body), 'ok');
-    check('P3-f 可执行路径做 XML 转义（防路径含引号破坏 plist）',
-      /replace\(\/"\/g/.test(body), 'ok');
+    // ⚠ 2026-09-12 更新（P3 转义修复）：下面两条原先是**错的**，把缺陷当成了要求 ——
+    //   · P3-e 断言 `+ GUI_LABEL +`（裸拼接），但正确做法是经 xmlEscape（防 Label 含特殊字符）；
+    //   · P3-f 断言 `replace(/"/g, ...)`，而那是 **JSON 转义**：XML 文本节点里 `"` 本就合法，
+    //     真正会破坏 XML 的 `&`/`<`/`>` 完全没处理。测试锁定了错误实现，故修复后会红。
+    //   现改为断言**真正的 XML 转义**。
+    check('P3-e Label 经 xmlEscape（而非裸拼接）',
+      /xmlEscape\(\s*GUI_LABEL\s*\)/.test(body), 'ok');
+    check('P3-f 可执行路径经 xmlEscape（XML 真规则：& < >）',
+      /xmlEscape\(\s*guiExe\s*\)/.test(body), 'ok');
+    check('P3-f2 plist 内不再有把双引号当 XML 转义的旧写法',
+      !/replace\(\/"\/g/.test(body), 'ok');
     check('P3-g 输出 stderr/stdout 落 ~/.dsh/shell（与壳同域，便于排障）',
       /\.dsh.*shell/.test(body) || /'shell'/.test(body), 'ok');
   }

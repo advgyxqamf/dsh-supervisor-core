@@ -165,10 +165,25 @@ class DistributionManager {
   }
 
   // ---- 镜像源探测/选择 ----
-  /** 内核平台标签（用于展开契约的 pathTemplate；与壳的 package_name 同源）。 */
+  /** 内核平台标签（用于展开契约的 pathTemplate；与壳的 package_name 同源）。
+   *
+   *  ⚠ 2026-09-12（P2）：原实现把「非 arm64」**静默当 x64** ——
+   *   于是 ppc64le / s390x / ia32 等架构会按 x64 去取产物：
+   *   轻则 404，重则**下载到架构不符的包**（比明确报错更糟）。
+   *   现改为**白名单 + 未支持即抛**，与壳 `core.rs::package_name()` 同一形态
+   *   （那里 `other => return Err(...)`，此处对齐语义）。
+   *
+   *   注：本函数在 `_probeRegistry` 的 URL 展开路径上，抛错会被上层捕获
+   *   并如实上报（见该函数的 try/catch），不会让守卫崩溃。
+   */
   _platformTag() {
-    const os = process.platform === 'darwin' ? 'darwin' : (process.platform === 'win32' ? 'win' : 'linux');
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const osMap = { darwin: 'darwin', win32: 'win', linux: 'linux' };
+    const archMap = { arm64: 'arm64', x64: 'x64' };
+    const os = osMap[process.platform];
+    const arch = archMap[process.arch];
+    if (!os || !arch) {
+      throw new Error('不支持的平台组合: ' + process.platform + '/' + process.arch + '（仅 linux/darwin/win32 × x64/arm64）');
+    }
     return os + '-' + arch;
   }
 
