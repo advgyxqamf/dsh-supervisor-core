@@ -18,6 +18,9 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+// P2-2：「谁是壳主程序」的**唯一判定**在 watchdog.js（`isShellProcess`）。
+//   此处不复制规则 —— 此前 restartShell 内联了一份只有 3 个 flag 的弱化版，
+//   与 watchdog 的 6 flag 版分叉，导致运维自检进程（--mirror-plan 等）被误杀。
 // 版本比较复用内核**同一份**实现（dist 模块导出），避免两处 semver 语义分叉。
 const { semverCompare } = require('../dist/index');
 
@@ -253,12 +256,17 @@ async function restartShell(opts) {
   const pattern = o.procPattern || 'dsh-supervisor-gui';
   let procs = [];
   try { procs = pidlook.pgrepList(pattern) || []; } catch { procs = []; }
-  // 过滤掉明显不是壳主程序的匹配（例如本模块的 --shell-update-plan 自检进程）
-  procs = procs.filter((p) => {
-    const c = String(p.cmdline || '');
-    if (/--shell-update-plan|--core-plan|--node-plan/.test(c)) return false;
-    return /dsh-supervisor-gui(\.exe)?/.test(c);
-  });
+  // ⚠ P2-2 修复（2026-09-12）：改用**与 watchdog 同一个**判定函数。
+  //
+  //   缺陷：这里内联的排除表只有 3 个 flag（--shell-update-plan|--core-plan|--node-plan），
+  //     而 `watchdog.js:isShellProcess` 有 6 个（多 --mirror-plan|--env-plan|--service-plan）。
+  //     于是运行 `dsh-supervisor-gui --mirror-plan`（运维自检）时：
+  //       watchdog 判「壳缺失」→ 触发 restartShell → 后者**弱过滤**把该自检进程算作壳
+  //       → SIGTERM/SIGKILL **杀掉运维自检进程**。
+  //   同一事实两处实现且已分叉 —— 现由一个共享谓词消除。
+  // 共享判定（见文件顶部说明）；按需 require 避免与 watchdog 的循环依赖。
+  const { isShellProcess } = require('./watchdog');
+  procs = procs.filter((p) => isShellProcess(p));
 
   const exe = procs.length ? exeFromCmdline(procs[0].cmdline) : (o.exePath || null);
   if (!exe) return { ok: false, error: '无法定位桌面壳可执行文件（壳未运行且未提供 exePath）' };
