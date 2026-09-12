@@ -340,6 +340,9 @@ class NativeManager {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.installing) return { ok: false, error: '安装已在进行中' };
     if (this.uninstalling) return { ok: false, error: '卸载进行中，请稍后再装' };
+    // ⚠ 2026-09-12（P2）：显式拒绝「升级进行中」（见 upgrade 内的对称说明）。
+    //   `busy()` 覆盖 installing/restarting/verifying/rolling_back（upgradeState 非 idle/done/failed）。
+    if (this.busy()) return { ok: false, error: '升级进行中，请稍后再装（state=' + this.upgradeState + '）' };
     if (version && !VERSION_RE.test(version)) return { ok: false, error: '非法版本号: ' + version };
     const env = this.checkEnvironment();
     if (!env.ok) return { ok: false, error: '环境检查失败: ' + env.errors.join('; ') };
@@ -438,6 +441,15 @@ class NativeManager {
   async upgrade(requestedVersion) {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.busy()) return { ok: false, error: 'upgrade already in progress (state=' + this.upgradeState + ')' };
+    // ⚠ 2026-09-12（P2）：**显式**检查安装/卸载锁，不再只依赖 tasks。
+    //   缺陷：本方法**从不设置** `this.installing`，而 `install()` 也**不检查** `busy()` ——
+    //     两者的互斥完全依赖 `tasks.isBusy('native','main')` 这一**可选**依赖。
+    //     生产中 `tasks` 总被注入（supervisor.js:328-334）故当前成立；
+    //     但一旦未注入（嵌入/测试/将来重构），install 与 upgrade 会**并发跑两个
+    //     `npm install -g`** —— 同前缀并发写 npm 全局目录，结果不可预期。
+    //   现补上与 install/uninstall 对称的三个显式锁（`installing` 同时充当 upgrade 的安装互斥）。
+    if (this.installing) return { ok: false, error: '安装/升级已在进行中' };
+    if (this.uninstalling) return { ok: false, error: '卸载进行中，请稍后再试' };
     if (requestedVersion && !VERSION_RE.test(requestedVersion)) return { ok: false, error: '非法版本号: ' + requestedVersion };
     this.upgradeState = 'installing';
     this.upgradeStartedAt = new Date().toISOString();
@@ -624,6 +636,10 @@ class NativeManager {
   startUninstall() {
     if (this.installing) return { ok: false, error: '安装进行中，无法卸载' };
     if (this.uninstalling) return { ok: false, error: '卸载已在进行中' };
+    // P2 配套：与 uninstall() 对称 —— 升级进行中同样拒绝（否则前置检查通过后，
+    //   uninstall() 内部的 busy() 会拒绝，但那时已 begin 了 task 并置了 uninstalling，
+    //   徒增一次「已接受却立即失败」的体验）。
+    if (this.busy()) return { ok: false, error: '升级进行中，无法卸载（state=' + this.upgradeState + '）' };
     this.uninstall().then(() => {}).catch((e) => {
       this.uninstalling = null;
       this.lastUninstall = { ok: false, removed: [], error: e.message, at: new Date().toISOString() };
@@ -638,6 +654,13 @@ class NativeManager {
     if (this.tasks && this.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
     if (this.installing) return { ok: false, error: '安装进行中，无法卸载' };
     if (this.uninstalling) return { ok: false, error: '卸载已在进行中' };
+    // ⚠ 2026-09-12（P2）：**必须也拒绝「升级进行中」**。
+    //   缺陷：`upgrade()` 全程只改 `upgradeState`，**从不设置** `this.installing` ——
+    //     故升级期间 uninstall 的三个旧检查全部通过 → 会在 npm 正装新版时**卸载它**，
+    //     留下「包装了一半 + manifest 被清」的不可恢复状态。
+    //     （由新增的行为测试 K-d 抓出：升级中 uninstall 返回了 ok:true。）
+    if (this.busy()) return { ok: false, error: '升级进行中，无法卸载（state=' + this.upgradeState + '）' };
+
     // 先停运行中的 DSH：运行进程中直接删包/数据文件会懒加载崩溃；且 desired=running 时守卫会
     // 用已删的 bin 反复重启（ENOENT crash loop）。通过升级 hold 语义让守卫卸载期间不自动拉起。
     if (this.hooks && this.hooks.isDshActive && this.hooks.isDshActive()) {
