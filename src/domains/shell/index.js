@@ -76,6 +76,24 @@ function markPending(from, to) {
  *    'pending'       更新已安装，等待壳下次启动确认
  *    'confirmed'     壳已成功运行新版本（健康确认）
  *    'should-rollback' 判定为坏版本，应回退（内核据此动作）
+ *
+ *  ⚠ 2026-09-12 事实说明（审计 P0，**未修改逻辑，仅如实记录现状**）：
+ *
+ *    本判定链的**输入**在当前双仓实现下无法被填充，故 `evaluate()` 实际恒返回 `idle`：
+ *      · `journal.to` 只能由 `markPending()` 设置；其唯一非测试调用方是
+ *        `POST /shell/update-pending`（api/shell.js）；
+ *      · 而壳仓（Tauri）**从不 POST 该端点**（grep 零命中）—— 壳用自己的一套：
+ *        本地命令 `shell_set_phase`（update.rs::set_phase）+ 独立账本
+ *        `~/.dsh/shell/update-guard.json`，与内核的 `update-journal.json` **不是同一份**；
+ *      · 同理壳也从不 POST `/shell/health`，故 `id.phase === 'ready'` 的确认路径也不会被触发。
+ *
+ *    即：`should-rollback` / `confirmed` 两个状态在当前实现下**不可达**，
+ *    回退能力实际由**壳自己的护栏**（update-guard + 冷却）承担。
+ *
+ *    ⚠ 刻意**不删除**本模块：它是「内核侧安全网」的设计落点，
+ *      且 `watchdog.expectedAbsence()` 会读 `journal.to`（`markPending` 一旦被接线即生效）；
+ *      删除会连带移除既有的状态机与测试。但**必须**让读者知道现状 ——
+ *      否则会像 `api/surface.js` 那样把「壳(阶段上报/健康确认)」写成既成事实。
  */
 function evaluate() {
   const id = identity();

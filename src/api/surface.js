@@ -109,8 +109,12 @@ const SURFACE = [
   // 定位：内核**不是**壳的更新源（壳直连 npm CDN 自更新）；本域只做安全网：
   // 预取/备份/观察/有界回退/审计。壳不受监督（崩溃无人拉起），内核是唯一能救它的角色。
   { path: '/shell/status',         methods: ['GET'],  domain: 'shell', category: 'public',      consumers: ['UI(壳状态卡)', 'CLI'], note: '壳身份 + 更新账本 + 判定结论' },
-  { path: '/shell/health',         methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['壳(阶段上报/健康确认)'], note: 'phase=ready 即更新确认信号' },
-  { path: '/shell/update-pending', methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['壳(安装完成后告知)'], note: '建立更新账本（待重启确认）' },
+  // ⚠ 2026-09-12（审计 P0）：以下两个端点的 `consumers` 曾声明为「壳」——**与事实不符**。
+  //   实测壳仓（Tauri）**从不 POST 它们**（grep 零命中）；壳走本地命令 `shell_set_phase`
+  //   + 独立账本 `update-guard.json`。声明成「壳在用」会让读者以为该安全网已闭环。
+  //   现按真实情况标注为「无人消费（待接线）」，并保留端点（运维/未来接线可用）。
+  { path: '/shell/health',         methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工上报壳阶段（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：phase=ready 即更新确认信号，供排障手工驱动安全网；当前 evaluate() 因缺输入恒 idle' },
+  { path: '/shell/update-pending', methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工建立更新账本（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：建立更新账本（待重启确认），供排障手工驱动内核侧安全网' },
   { path: '/shell/check-update',   methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['UI(关于卡)'], note: '壳版本检测（与内核自更新同源：npm registry + 镜像回退）' },
   { path: '/shell/restart',        methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['UI(关于卡)'], note: '重启桌面壳以应用更新（壳门 0 在新进程内完成安装）' },
   { path: '/shell/rollback',       methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['排障/运维'], note: '诊断/运维：手动回退，把待确认版本拉黑（拉黑后壳门 0 不再尝试）' },
