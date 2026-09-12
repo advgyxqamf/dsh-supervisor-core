@@ -177,7 +177,16 @@ function cookieByName(headerValue, name) {
  */
 function createRelay(targetHost, targetPort, opts) {
   const o = opts || {};
-  const token = o.token || '';
+  // ⚠ P1 修复（2026-09-13）：必须是 **let** —— 门卫令牌需支持热更新。
+  //   缺陷：原为 const，创建后**永不变化**。而 LanManager.syncProxy 的「已存在则直接返回」
+  //   快路径不会重建 server，applyToken 又只热换 dshToken（DSH 会话 cookie）——
+  //   于是 remoteToken 变更**没有任何传播路径**到已在运行的 relay。
+  //   后果：正常顺序「开远程控制 → 设令牌 → 开公网暴露」下，
+  //     令牌闸（manager.setFrp）看到的是**已更新**的 inst.remoteToken（放行），
+  //     而 relay 进程内 token 仍是空串 → tokenGate 恒放行（见 tokenGate: if (!token) return true）
+  //     → 公网/LAN **零认证**触达 DSH 特权 API，直到 daemon 重启。
+  //   现：配合 server.setToken() 支持热换，由 syncProxy 在令牌变化时下发。
+  let token = o.token || '';
   const logger = o.logger || null;
   const log = (lv, msg) => { if (logger && logger[lv]) { try { logger[lv]('[relay] ' + msg); } catch {} } };
   const authority = targetHost + ':' + targetPort;
@@ -493,6 +502,16 @@ function createRelay(targetHost, targetPort, opts) {
 
   /** 热更新 DSH 启动令牌（实例重启后令牌轮换）。 */
   server.setDshToken = (t) => { refreshDshSession(t); return server; };
+
+  /** 热更新**门卫令牌**（remoteToken 变更时由 LanManager.syncProxy 下发）。
+   *
+   *  ⚠ P1 修复（2026-09-13）：此前**没有**这个入口 —— 门卫 token 只能经 createRelay 的
+   *  opts 传入一次，故 remoteToken 的后续变更永远到不了已在运行的 relay（见上面 token 声明处）。
+   *  返回 server 以便链式调用。 */
+  server.setToken = (t) => { token = String(t || ''); return server; };
+
+  /** 当前门卫令牌是否已设置（**只回布尔**，绝不回传令牌明文）。 */
+  server.hasToken = () => !!token;
 
   /** 注入状态快照（远程就绪诊断；不含任何令牌/cookie 明文）。 */
   server.status = () => ({ ...state });

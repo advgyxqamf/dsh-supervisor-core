@@ -578,7 +578,38 @@ class ProxyProvider extends ProviderBase {
     inst._restartPending = null;
     if (this.logger && this.logger.warn) this.logger.warn('[proxy-instance] 实例重启 key=' + inst.maskedKey + ' port=' + inst.port + ' reason=' + reason);
     const hadPid = !!inst.pid;
-    try { this.stopInstance(inst); } catch (e) { this.logger.warn && this.logger.warn('[proxy-instance] 重启 stop 异常: ' + (e && e.message)); }
+    // ⚠ P2 修复（2026-09-13，失效模式 e/g）：**重启必须真正停掉进程**，且失败不得静默。
+    //
+    //   缺陷：原为 `this.stopInstance(inst)`（不带 force）。而 stopInstance 的仲裁
+    //     `_canStopInstance`(:353-360) 在「账号 ready + 可用 + 被 selected/activeAccount 指向」时
+    //     为 false —— 这正是**正在服务的实例**（也恰恰是最需要重启的那类）。
+    //     于是：stopInstance 只置 _stopPendingUntilIdle 就 return，**不 kill**；
+    //     而上一行已把 `inst._restartPending = null` → flushRestartPending 无内容可补做；
+    //     调用它的 _endInflight 也不会再来（此处 inflight 本就为 0）。
+    //     同时 `_restartAt = now + 120s` 已置位 → 之后 2 分钟内所有重启尝试都被退避拦下。
+    //
+    //   后果：upstream-timeout → 实例级重启这条自愈链对该账号**彻底失效至少 2 分钟**，
+    //     且没有任何事件/日志表明「重启被丢弃」。触发它的正是「health 秒回但 completion 挂死」
+    //     这类生命周期探活看不出的病态 → 坏实例持续吃流量。
+    //
+    //   修法：本函数**已自行处理**在途情形（上方 inflight>0 分支延后并记 _restartPending），
+    //     故此处到达即代表「可以停」→ 用 force 语义跳过在用仲裁（重启的语义就是要杀掉它）。
+    //     并做**失败可观测**：若 stop 后进程仍活，重新武装 _restartPending 并清退避，
+    //     让 reconcile/flush 能再试，而不是静默黑洞 2 分钟。
+    try { this.stopInstance(inst, true); } catch (e) { this.logger.warn && this.logger.warn('[proxy-instance] 重启 stop 异常: ' + (e && e.message)); }
+    if (inst.pid) {
+      let stillAlive = true;
+      try { stillAlive = (typeof pidlook !== 'undefined' && pidlook.isAlive) ? pidlook.isAlive(inst.pid) : true; } catch {}
+      if (stillAlive) {
+        // 未能真正停掉 → 退避清零并重新记待重启（避免「静默丢弃 + 黑名单 2 分钟」）
+        inst._restartAt = 0;
+        inst._restartPending = reason || 'restart-stop-failed';
+        if (this.logger && this.logger.warn) {
+          this.logger.warn('[proxy-instance] 重启未能停止进程 pid=' + inst.pid + ' key=' + inst.maskedKey + '，已重新记待重启（不静默）');
+        }
+        return;
+      }
+    }
     if (acc && acc.status === 'ready') {
       // kill 后重拉：短延迟（端口释放）后启动；失败必须记录并保持 pid=null——
       // 后续请求按需激活路径（forward-core 见 !acc.instance.pid → startInstance）自动兜底重拉，

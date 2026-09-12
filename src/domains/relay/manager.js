@@ -297,6 +297,30 @@ class LanManager {
       if (existing && existing.wanPort) {
         const srv = this._lanServers && this._lanServers[inst.id];
         if (!srv) this._startLanServer(existing);
+        // ⚠ P1 修复（2026-09-13）：**令牌变化必须热换到已在运行的 relay**。
+        //
+        //   缺陷：本快路径直接 return，既不重读 inst.remoteToken 也不重建 server；
+        //     而 applyToken 只处理 dshToken（DSH 会话 cookie），remoteToken（**门卫**令牌）
+        //     没有任何传播路径 → 已在跑的 relay 永远持创建时的旧值（常见为空串）。
+        //   后果：令牌闸（manager.setFrp）已放行，而 relay 内 token 为空 → tokenGate 恒放行
+        //     （relay/index.js: if (!token) return true）→ 公网零认证触达特权 API。
+        //   修法：比对并热换。写回 existing.token 使快照与真实一致（展示/审计用）。
+        const want = String(inst.remoteToken || '');
+        if (existing.token !== want) {
+          const s = this._lanServers && this._lanServers[inst.id];
+          if (s && typeof s.setToken === 'function') {
+            try { s.setToken(want); } catch {}
+            existing.token = want;
+            if (this.events) this.events.append('lan_token_updated', { id: inst.id, tokenSet: !!want });
+          }
+        }
+        // ⚠ 同时热换 frp 开关/远端端口（same 快路径：setFrp 改的就是这两个字段）
+        const wantFrp = !!inst.frpEnabled;
+        if (existing.frpEnabled !== wantFrp || existing.frpRemotePort !== (inst.frpRemotePort || null)) {
+          existing.frpEnabled = wantFrp;
+          existing.frpRemotePort = inst.frpRemotePort || null;
+          this.syncFrpc();
+        }
         return;
       }
       // 目标必须真的在监听（TCP 可达，跨平台判定），否则代理无意义且会白占端口

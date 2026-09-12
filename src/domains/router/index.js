@@ -708,7 +708,16 @@ class RouterService {
     if (idx < 0) return { ok: false, error: '供应商不存在' };
     const removed = this.providers.splice(idx, 1)[0];
     this._stopProviderServer(id); // 删除即停用：关闭其独立端点
-    if (removed.kind === 'proxy') { for (const i of removed.instances || []) removed.stopInstance(i); }
+    // ⚠ P1 修复（2026-09-13，失效模式 g）：**删除路径必须 force 停实例**。
+    //   缺陷：stopInstance(inst) 不带 force 时，若账号 ready+可用且被 selected/activeAccount
+    //     指向（正是在用的最常见态），proxy.js:374 只置 _stopPendingUntilIdle 就 return，**不 kill**；
+    //     而本函数紧接着把整个 provider 从 this.providers 摘除 ——
+    //     延迟标记所在对象随即**不可达**，reconcile/monitor 再也看不到该实例，
+    //     补刀路径（_retryPendingStop / 周期停循环）也无从触发。
+    //   后果：正在服务、持用户 API Key 并占用端口的反代实例进程**永不被回收**（端口登记已释放，
+    //     注册表视图还显示空闲）。对照 index.js:196（停服）是传 force=true 的。
+    //   修法：删除语义统一 force=true —— 与「删除即回收」的契约一致。
+    if (removed.kind === 'proxy') { for (const i of removed.instances || []) { try { removed.stopInstance(i, true); } catch {} } }
     // 端口登记级联释放（「删除对象即释放端口」契约，ports.js）：删供应商必须释放其
     // providerApi 端点 + 各反代实例（proxy:<keyId>）记录，否则 owner 永久累积、池最终耗尽。
     try { this._releaseProviderPorts(removed); } catch (e) { this.logger.warn && this.logger.warn('release provider ports ' + id + ': ' + (e && e.message)); }

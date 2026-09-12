@@ -532,7 +532,9 @@ const auxMethods = {
     if (p.kind === 'proxy') {
       for (const a of doomed) {
         if (a.instance) {
-          try { p.stopInstance(a.instance); } catch {}
+          // ⚠ P1 修复（2026-09-13）：删除路径必须 force（见 index.js removeProvider 说明）——
+          //   下面紧接就已把账号从 accounts 摘除，延迟停标记将变为不可达 → 进程永久泄漏。
+          try { p.stopInstance(a.instance, true); } catch {}
           try { ports.unregister('proxy:' + a.keyId); } catch {}
           a.instance.port = null;
         }
@@ -631,7 +633,8 @@ const auxMethods = {
     const idx = (p.accounts || []).findIndex((a) => a.keyId === keyId);
     if (idx < 0) return { ok: false, error: '账号不存在' };
     if (p.kind === 'proxy' && p.accounts[idx].instance) {
-      try { p.stopInstance(p.accounts[idx].instance); } catch {}
+      // ⚠ P1 修复（2026-09-13）：删除路径必须 force（见 index.js removeProvider 说明）。
+      try { p.stopInstance(p.accounts[idx].instance, true); } catch {}
       // 删除账号：释放持久化端口绑定（registry 登记 + inst.port）
       try { ports.unregister('proxy:' + keyId); } catch {}
       p.accounts[idx].instance.port = null;

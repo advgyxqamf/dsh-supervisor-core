@@ -112,6 +112,36 @@ class RegistryView {
     if (p.frpEnabled !== undefined) meta.frpEnabled = !!p.frpEnabled;
     if (p.frpRemotePort !== undefined) meta.frpRemotePort = p.frpRemotePort ? Number(p.frpRemotePort) : null;
     if (p.wanPort !== undefined) meta.wanPort = p.wanPort ? Number(p.wanPort) : null;
+    // ⚠ P1 修复（2026-09-13，失效模式 g + b）：**公网暴露安全闸必须与 setFrp 同规**。
+    //
+    //   缺陷：manager.js::setFrp(:104-116) 设了「开启公网暴露前必须已设 remoteToken」的安全闸
+    //     （外加端口合法性 + 端口占用校验），而本函数**同样能开启 frpEnabled**却没有该闸 ——
+    //     /native/settings 把 body **原样透传**到 patchDshMain（api/native.js:64），于是
+    //     POST /native/settings { frpEnabled:true, frpRemotePort:7001 }
+    //     即可**绕过令牌闸**打开公网暴露。
+    //   为什么后果严重：frpc 以 127.0.0.1 回环身份连 relay（frpmgr.js），来源闸对回环放行；
+    //     而 relay 的 token 为空时 tokenGate 恒放行 —— 公网流量即**零认证**触达
+    //     DSH 特权方法面（settings/credentials/host.*）。这正是 setFrp 那道闸要防的事。
+    //   修法：本函数对「开启 frp」做与 setFrp **同一条**校验（令牌 + 端口合法性 + 端口占用）。
+    //     校验必须发生在 _writeDshMain **之前**（否则已落盘半改状态）。
+    //     注意：remoteToken 若在同一次 patch 里提供，视为已设置（用户一次提交两字段是合法的）。
+    if (p.frpEnabled === true) {
+      const effToken = (p.remoteToken !== undefined) ? String(p.remoteToken || '') : String(meta.remoteToken || '');
+      if (!effToken.trim()) {
+        return { ok: false, error: '开启公网暴露前请先为该实例设置远程访问令牌（remoteToken），否则 DSH 特权接口将对公网完全开放' };
+      }
+      const port = parseInt((p.frpRemotePort !== undefined) ? p.frpRemotePort : meta.frpRemotePort, 10);
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+        return { ok: false, error: '无效的公网端口' };
+      }
+      const clash = (this.instances && this.instances.instances ? this.instances.instances : [])
+        .filter((i) => i.id !== 'main')
+        .find((x) => x.frpRemotePort === port && x.frpEnabled);
+      if (clash) {
+        return { ok: false, error: '公网端口 ' + port + ' 已被实例「' + clash.name + '」占用' };
+      }
+      meta.frpRemotePort = port;
+    }
     this._writeDshMain(meta);
     if (this.lanDaemonEnabled()) { try { this._syncLanState(); } catch {} }
     // 开关变更事件（2026-09 收敛：所有 main 开关记录进事件日志，可审计回放）
