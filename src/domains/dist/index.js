@@ -173,12 +173,44 @@ class DistributionManager {
     } catch (e) { this.logger.warn && this.logger.warn('dist: registry config load failed: ' + e.message); }
   }
 
+  /** 落盘 registry 配置。
+   *
+   *  ⚠ 2026-09-12（P2 修复）：**必须保留壳写入的 v2 字段**，只覆盖本内核拥有的三项。
+   *
+   *    背景：该文件（`~/.dsh/supervisor/registry.json`）的**所有者是桌面壳**
+   *      （`platform/registry-contract.js` 明确声明；理由：装壳时机器上还没有内核）。
+   *    壳写入 v2 格式：`{ schema, writtenBy, catalog, probe, selected, mode, origins, manualOrigin }`；
+   *      其中 `catalog`（全集）/`probe`（探测规格）/`selected`（选择结果）是**壳的产物**。
+   *
+   *    缺陷：本方法此前直接 `JSON.stringify(this.registryConfig)` —— 而 `registryConfig`
+   *      只含 `{mode, origins, manualOrigin}`（见 `_loadRegistryConfig` 的重建）→
+   *      一次 `POST /dist/registry/set` 就把壳的 v2 字段**全部抹掉**。
+   *      而壳**确实会读回**该文件（`core.rs:150` 的镜像候选解析），
+   *      故这会实际削弱壳自身的镜像解析能力。
+   *
+   *    修法：读回原文档 → 只覆盖内核拥有的三键 → 写回。
+   *      「内核只消费契约」的纪律由此在**写路径**上也被遵守。
+   */
   _saveRegistryConfig() {
     if (!this.registryFile) return;
     try {
       const dir = path.dirname(this.registryFile);
       if (dir && !fs.existsSync(dir)) { try { fs.mkdirSync(dir, { recursive: true }); } catch {} }
-      (() => { try { const f = this.registryFile; const tmp = f + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this.registryConfig, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmp, f); } catch (e) { /* 持久化失败不阻塞 */ } })()
+      (() => {
+        try {
+          const f = this.registryFile;
+          const tmp = f + '.tmp';
+          // 读回原文档（保留壳字段与任何未来新增字段）；读不到则从空对象起。
+          let doc = {};
+          try { const raw = fs.readFileSync(f, 'utf8'); const parsed = JSON.parse(raw); if (parsed && typeof parsed === 'object') doc = parsed; } catch { /* 首次写入：无原文件 */ }
+          // 只覆盖内核拥有的三键（其余原样保留）。
+          doc.mode = this.registryConfig.mode;
+          doc.origins = this.registryConfig.origins;
+          doc.manualOrigin = this.registryConfig.manualOrigin;
+          fs.writeFileSync(tmp, JSON.stringify(doc, null, 2) + '\n', { mode: 0o600 });
+          fs.renameSync(tmp, f);
+        } catch (e) { /* 持久化失败不阻塞 */ }
+      })()
     } catch (e) { this.logger.warn && this.logger.warn('dist: registry config save failed: ' + e.message); }
   }
 

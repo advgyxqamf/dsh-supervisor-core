@@ -249,6 +249,44 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     /detached: o\.detached !== false/.test(dist) && /process\.kill\(-child\.pid, 'SIGKILL'\)/.test(dist), '是');
 }
 
+// ── J-j：内核写 registry.json 时必须保留壳的 v2 字段（P2 双写）──
+//   该文件所有权在壳（registry-contract.js 声明），壳也会读回（core.rs:150）；
+//   内核若整份覆盖，会抹掉 catalog/probe/selected，削弱壳的镜像解析。
+{
+  const dmSrc = read('src/domains/dist/index.js');
+  const m = dmSrc.match(/_saveRegistryConfig\(\) \{[\s\S]*?\n  \}/);
+  const body = m ? m[0] : '';
+  check('J-j 定位到 _saveRegistryConfig', !!m, m ? 'ok' : '未找到');
+  check('J-j 写前读回原文档（保留未知字段）', /readFileSync\(f, 'utf8'\)/.test(body), '有');
+  check('J-j 只覆盖内核拥有的三键',
+    /doc\.mode = /.test(body) && /doc\.origins = /.test(body) && /doc\.manualOrigin = /.test(body), '有');
+  check('J-j 不再整份序列化 registryConfig',
+    !/JSON\.stringify\(this\.registryConfig, null, 2\)/.test(body), '已改');
+  // 行为级：壳字段必须存活，内核字段必须更新
+  const { DistributionManager } = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'regj-'));
+  const rf = path.join(tmpR, 'registry.json');
+  fs.writeFileSync(rf, JSON.stringify({
+    schema: 2, writtenBy: 'shell', catalog: ['https://a.example/', 'https://b.example/'],
+    probe: { kind: 'package-metadata', pathTemplate: 'x', timeoutMs: 6000 },
+    selected: { origin: 'https://a.example/', latencyMs: 12, checkedAt: 1 },
+    mode: 'auto', origins: ['https://a.example/'], manualOrigin: 'https://a.example/',
+  }, null, 2));
+  const dm = Object.create(DistributionManager.prototype);
+  dm.registryFile = rf;
+  dm.logger = { warn() {}, info() {}, debug() {} };
+  dm.registryConfig = { mode: 'manual', origins: ['https://c.example/'], manualOrigin: 'https://c.example/' };
+  dm._saveRegistryConfig();
+  const after = JSON.parse(fs.readFileSync(rf, 'utf8'));
+  check('J-j 行为：壳的 v2 字段全部保留',
+    after.schema === 2 && after.writtenBy === 'shell' && (after.catalog || []).length === 2 && !!after.probe && !!after.selected,
+    JSON.stringify({ schema: after.schema, writtenBy: after.writtenBy, catalog: (after.catalog || []).length, probe: !!after.probe, selected: !!after.selected }));
+  check('J-j 行为：内核三键已更新',
+    after.mode === 'manual' && after.origins[0] === 'https://c.example/' && after.manualOrigin === 'https://c.example/',
+    JSON.stringify({ mode: after.mode, origins: after.origins }));
+  fs.rmSync(tmpR, { recursive: true, force: true });
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);
