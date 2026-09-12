@@ -42,8 +42,11 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
   check('R-a markUsed **不再**清零 _unhealthyCount',
     !!m && !/_unhealthyCount\s*=/.test(m[0]), m ? '已移除' : '');
   check('R-a 存在 markRequestOk（成功后才清零）', /markRequestOk\(inst\)/.test(proxy), '有');
+  // ⚠ 断言「调用了 markRequestOk」而不绑定具体实参名 ——
+  //   P2 双事实源修复后实参已改为 instOf(...) 的结果（okInst），
+  //   写死 `acc.instance` 会让「纯重构」误报（我第一版就踩了这个）。
   check('R-a forward-core 在 2xx 成功路径调用 markRequestOk',
-    /markRequestOk\(acc\.instance\)/.test(fwd), '已接入');
+    /markRequestOk\(\w+\)/.test(fwd), '已接入');
 }
 
 // ── R-b：markNetFail 死调用 ──
@@ -69,7 +72,7 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
   check('R-c _restartPending 存在读取点（不再只写不读）', hasRead, '有');
   check('R-c 存在 flushRestartPending 消费方法', /flushRestartPending\(inst\)/.test(proxy), '有');
   check('R-c forward-core 在 inflight 归零时调用它',
-    /prov\.flushRestartPending\(acc\.instance\)/.test(fwd), '已接入');
+    /prov\.flushRestartPending\(\w+\)/.test(fwd), '已接入');
 }
 
 // ── R-d：退避置位时机 ──

@@ -10,13 +10,44 @@ const HOP_HEADERS = new Set(['connection','proxy-connection','keep-alive','proxy
 const { keyFingerprint, maskKey } = require('./providers/base');
 // M1（2026-09）：上游响应语义（credits/window/banned/transient/none）由 provider.classifyResponse 判定——
 // router 不再持有任何供应商词表/状态码特判（INV-4）；默认实现与覆盖点在 providers/base.js。
-/** 读上游响应体（有界）：限制判定 / 透传都需要。 */
-function readUpstreamBody(ur, maxBytes) {
+/** 读上游响应体（有界：**字节上限 + 时间上限**）：限制判定 / 透传都需要。
+ *
+ *  ⚠ P2 修复（2026-09-12）：原实现**只有字节上限、没有时间上限** ——
+ *    它只监听 `end`/`error`，若上游「先发响应头（4xx/5xx）、再挂住不结束」，
+ *    本 Promise **永不 settle**。
+ *
+ *    更要紧的是**调用时机**：`forwardOnce` 在收到响应头时就会 settle 并清掉
+ *    connectGuard/responseGuard，故这次读取发生在**所有超时守卫解除之后** ——
+ *    该请求的 handler 会永远 await（客户端连接悬挂、永不返回）。
+ *
+ *  修法：加 `timeoutMs`（默认 15s）。超时即**带已有内容 resolve**（而不是 reject）——
+ *    语义与原实现一致（上游出错时也返回已读到的部分），调用方照常做 classifyResponse。
+ *    并顺手 `destroy()`，避免半开的连接残留。
+ *
+ *  ⚠ 为什么是「带部分内容 resolve」而非「报错」：本函数服务于**错误响应的判定**
+ *    （`status >= 400` 分支），此时「读到多少算多少」正是调用方需要的；
+ *    若改成 reject，会把一次上游异常升级成 router 自身的异常路径。
+ */
+function readUpstreamBody(ur, maxBytes, timeoutMs) {
   return new Promise((resolve) => {
     let text = '';
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve(text);
+    };
+    const timer = setTimeout(() => {
+      // 时间上限：上游半开（发了头不结束）时保住调用方不悬挂。
+      try { ur.destroy(); } catch {}
+      finish();
+    }, timeoutMs || 15000);
+    if (timer.unref) timer.unref();
     ur.on('data', (c) => { if (text.length < (maxBytes || 65536)) text += c; });
-    ur.on('end', () => resolve(text));
-    ur.on('error', () => resolve(text));
+    ur.on('end', finish);
+    ur.on('error', finish);
+    ur.on('close', finish); // 连接被对端关闭但未触发 end/error 的兜底
   });
 }
 
@@ -83,12 +114,39 @@ function estimateCost(entry) {
   return (pt / 1e6) * input + (ct / 1e6) * output;
 }
 
+/** **实例的唯一解析入口**（P2 修复，2026-09-12）。
+ *
+ *  ⚠ 为什么需要它：仓内对「账号 → 实例」有**两个事实源**：
+ *    · `acc.instance`（账号对象上的内联引用）——
+ *      `proxy.js:755` 的注释明确写着「acc.instance 字段已废弃」；
+ *    · `prov.instanceOf(acc)`（按 keyId 映射到 instances 列表）。
+ *    而 `acc.instance` 曾散落在本文件 **12 处**被读取 ——
+ *    （2026-09-12 已全部迁入本函数；此处保留历史说明以便理解为何要有 instOf）。
+ *    「同一事实两处表达」正是本仓反复出现问题的形态。
+ *
+ *    危害（当下未爆发但是定时炸弹）：两条路径维护的是**不同对象**——
+ *      `proxy.js` 的停/查路径走 `instances`，而转发/选号路径走 `acc.instance`。
+ *      任一侧未来只清一边时，「转发的目标端口」与「对账/端口释放所见的实例」就会不一致
+ *      → 转发到已释放端口，或实例泄漏。
+ *
+ *  修法：本函数统一走 `instanceOf`（它内部 `find(keyId) || acc.instance`，
+ *    即**已是两者的安全超集**），故迁移不改变当下行为，只消除分叉风险。
+ */
+function instOf(prov, acc) {
+  if (!acc) return null;
+  if (prov && typeof prov.instanceOf === 'function') {
+    try { return prov.instanceOf(acc) || null; } catch { /* 回退到内联引用 */ }
+  }
+  return acc.instance || null;
+}
+
 /** 账号/实例目标：返回 { target, prov }（直连=baseUrl，反代=实例端口）。按指定供应商作用域（独立端点不跨池）。 */
 function resolveTarget(self, acc, prov) {
   if (!prov) return null;
   if (prov.kind === 'proxy') {
-    if (!acc.instance || !acc.instance.port) return null;
-    return { targetBase: 'http://127.0.0.1:' + acc.instance.port, prov };
+    const inst = instOf(prov, acc);
+    if (!inst || !inst.port) return null;
+    return { targetBase: 'http://127.0.0.1:' + inst.port, prov };
   }
   // 直连：baseUrl 已含 /v1（如 https://api.test.com/v1）；保持原样，joinUpstream 处理路径去重
   return { targetBase: (prov.baseUrl || '').replace(/\/+$/, ''), prov };
@@ -135,18 +193,19 @@ const forwardMethods = {
       // 关键：按需激活必须在 resolveTarget 之前——实例未启动时 port 为 null，
       // resolveTarget 会返回 null 导致 continue，激活逻辑永远不执行（自动切换死锁）
       const activeProv = prov0.prov;
-      if (activeProv && activeProv.kind === 'proxy' && acc.instance) {
-        activeProv.markUsed(acc.instance); // 标记使用（闲置回收窗口判断；并发去重由 startInstance 保证）
-        if (!acc.instance.pid) {
+      const curInst = instOf(activeProv, acc);
+      if (activeProv && activeProv.kind === 'proxy' && curInst) {
+        activeProv.markUsed(curInst); // 标记使用（闲置回收窗口判断；并发去重由 startInstance 保证）
+        if (!curInst.pid) {
           // 按需激活：启动失败/探活超时 → 仅记录并换下一个账号重试，不静默继续转发失败
-          const sr = await activeProv.startInstance(acc.instance).catch((e) => ({ ok: false, error: e && e.message }));
+          const sr = await activeProv.startInstance(curInst).catch((e) => ({ ok: false, error: e && e.message }));
           const ok = sr && sr.ok;
-          const healthy = ok ? await activeProv._waitHealthy(acc.instance).catch(() => false) : false;
+          const healthy = ok ? await activeProv._waitHealthy(curInst).catch(() => false) : false;
           if (!healthy) {
             this.log('INST-START-FAIL key=' + maskKey(acc.key) + ' err=' + ((sr && sr.error) || 'unhealthy'));
             // 启动失败不做任何账号级标记（三态模型）：仅记录，继续换下一个账号重试；
             // 同请求内由 triedKeys 防无限循环；残留进程停掉（资源清理，不算状态）
-            if (acc.instance && acc.instance.pid) { try { activeProv.stopInstance(acc.instance); } catch {} }
+            if (curInst && curInst.pid) { try { activeProv.stopInstance(curInst); } catch {} }
             continue;
           }
         }
@@ -165,7 +224,7 @@ const forwardMethods = {
       if (clientAborted) { this._endInflight(acc, activeProv); return; }
       if (out.phase === 'net-error') {
         this._endInflight(acc, activeProv);
-        const inst = acc && acc.instance;
+        const inst = instOf(rt.prov, acc);
         const isTimeout = typeof out.error === 'string' && /timeout/i.test(out.error);
         // P1-2：原为 `rt.prov.markNetFail`（方法不存在 → 恒 no-op）；改用真实方法名。
         if (rt.prov && typeof rt.prov.markInstanceNetFail === 'function') rt.prov.markInstanceNetFail(acc);
@@ -229,9 +288,10 @@ const forwardMethods = {
       // P1-1 修复（2026-09-12）：**请求确认成功**（2xx 走到这里）才清零失败计数。
       //   此前清零发生在循环头的 markUsed（请求发出**前**），使「连续 ≥2 次失败」
       //   在数学上不可达 —— 请求级熔断是死代码。
-      if (activeProv && activeProv.kind === 'proxy' && acc.instance
+      const okInst = instOf(activeProv, acc);
+      if (activeProv && activeProv.kind === 'proxy' && okInst
           && typeof activeProv.markRequestOk === 'function') {
-        try { activeProv.markRequestOk(acc.instance); } catch {}
+        try { activeProv.markRequestOk(okInst); } catch {}
       }
       return this.writeThrough(req, res, out, acc, rt.prov, { started, model, streamRequested, status });
     }
@@ -343,8 +403,9 @@ const forwardMethods = {
       // 在途归零 → 补做「被延后的实例重启」（P1-3 修复的消费点）。
       //   与上面的待停补刀同构：都是「在途期间不能动实例，故记下意图、空闲后执行」。
       //   旧实现只写 `_restartPending` 而**无任何读取点** → 「延后」实为「丢弃」。
-      if (acc.inflight === 0 && acc.instance && prov && typeof prov.flushRestartPending === 'function') {
-        prov.flushRestartPending(acc.instance);
+      const pendInst = instOf(prov, acc);
+      if (acc.inflight === 0 && pendInst && prov && typeof prov.flushRestartPending === 'function') {
+        prov.flushRestartPending(pendInst);
       }
     } catch {}
   },
