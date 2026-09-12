@@ -16,7 +16,15 @@
 //     守卫重启只重置自己的观测，不重置模块运行态。
 // ═══════════════════════════════════════════════════════════════════════════
 
-const PHASES = ['stopped', 'starting', 'running', 'draining', 'degraded'];
+// ⚠ phase 词表的**唯一源**是 guard/lifecycle/objects.js（控制平面 v3 canonical）。
+//
+// K3 修复（2026-09-11）：此处曾自建一份副本 ['stopped','starting','running','draining','degraded']，
+// 与 canonical **两个方向都不一致**：
+//   · 多了 `degraded` —— 全仓 0 处使用（死词）；
+//   · 少了 `installing` / `backoff` / `failed` / `restarting` ——
+//     而 `_setPhase` 对不在表内的值**静默丢弃**，故本对象永远表达不了这些真实状态。
+// 副本还会随 canonical 演进而静默漂移。现改为直接引用，消除第二个状态源。
+const { PHASES } = require('./objects');
 
 /** 统一生命周期状态对象（每个模块实例一个，注册到 LifecycleManager）。 */
 class ManagedLifecycle {
@@ -83,6 +91,10 @@ class ManagedLifecycle {
   }
 
   /* ── 内部状态迁移（由 LifecycleManager 驱动，模块不直接改 phase）── */
+  /** 状态迁移。**非白名单值静默丢弃**（不是 bug，是执法）：
+   *  phase 只能取 canonical 词表内的值，防止调用方写入手写字符串造成新的分叉。
+   *  ⚠ 代价：写错值时**没有报错**。故词表必须引用唯一源（见文件头 K3 说明），
+   *    否则合法值会被无声拒绝。 */
   _setPhase(p) {
     if (!PHASES.includes(p)) return;
     if (this.phase !== p) {
