@@ -224,8 +224,20 @@ class InstanceManager {
         //   为什么不按内容判归属：systemd 模板体里**不必**出现 `dsh-web@` 字样
         //     （单元名来自文件名，正文只写 ExecStart/Description），
         //     任何内容启发式都可能误判 —— 判错的代价是删掉用户文件。
-        const aside = this.systemdTemplatePath + '.disabled-by-dsh';
-        try { fs.rmSync(aside, { force: true }); } catch {}
+        // ⚠ 让位目标名**带时间戳**（2026-09-13，D-2 改进）：
+        //
+        //   旧实现：aside = 模板路径 + '.disabled-by-dsh'（**固定名**），且先
+        //     `rmSync(aside, { force: true })` 再 rename。
+        //   缺陷：若用户（或上一次让位）恰好已有一个**同名文件**，那行 rmSync 会把它
+        //     **静默删除**——为了给一个改名动作腾位置而丢失用户数据，与「绝不丢数据」的
+        //     设计目标直接冲突。概率极低，但**不可逆**。
+        //   修法：后缀带 epoch 时间戳 → 目标名天然唯一，**无需先删**，
+        //     那行 rmSync 彻底删除（不是加保护，而是让它不再必要）。
+        const stamp = Date.now();
+        let aside = this.systemdTemplatePath + '.disabled-by-dsh-' + stamp;
+        // 同一毫秒内重复让位（源文件已被移走时不会发生）→ 加序号，仍绝不覆盖已有文件。
+        let n = 1;
+        while (fs.existsSync(aside)) { aside = this.systemdTemplatePath + '.disabled-by-dsh-' + stamp + '-' + (n++); }
         fs.renameSync(this.systemdTemplatePath, aside);
         this.logger.info && this.logger.info('已将阻挡 systemd-run 的模板让位（改名保留，未删除）：' + aside);
         if (this.events) this.events.append('systemd_template_moved_aside', { from: this.systemdTemplatePath, to: aside });

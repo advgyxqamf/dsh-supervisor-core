@@ -89,6 +89,19 @@ check('L-e 保留显式测试方法', /_setSandboxSupportedForTest\(v\)/.test(co
   check('L-f 用 renameSync 让位（而非 unlink）', /renameSync\(this\.systemdTemplatePath, aside\)/.test(body), '有');
   check('L-f 不再无条件 unlinkSync 该路径', !/unlinkSync\(this\.systemdTemplatePath\)/.test(body), '已改');
   check('L-f 让位后记事件（可追溯）', /systemd_template_moved_aside/.test(body), '有');
+  // ── L-f′：让位目标名必须**带时间戳**，且**不得**先删同名文件（2026-09-13，D-2 改进）──
+  //
+  //   缺陷：旧实现 aside = 固定名 '.disabled-by-dsh'，且先 `rmSync(aside, {force:true})`
+  //     再 rename。用户（或上一次让位）若恰好有同名文件，会被**静默删除** ——
+  //     为一次改名动作丢失用户数据，概率极低但**不可逆**。
+  //   行为级验证见 test/instance-systemd-aside-test.js；此处只锁结构（快速失败）。
+  //   用**子串包含**而非正则：避免转义地狱（第一版正则要求目标里多出一个反斜杠 → 假红）。
+  check('L-f′ 让位目标名带时间戳（不再固定 .disabled-by-dsh）',
+    body.indexOf("'.disabled-by-dsh-' + stamp") >= 0, '有');
+  check('L-f′ 不再先 rmSync 让位目标（删除该行，而非加保护）',
+    !/rmSync\(aside/.test(body), '已删');
+  check('L-f′ 仍保留固定名文件（不覆盖已有文件）',
+    /while \(fs\.existsSync\(aside\)\)/.test(body), '有');
 }
 
 // ── L-g：新增实例前探测端口**真实占用**（P3）──
