@@ -79,7 +79,7 @@
 ## 4. 当前状态
 
 ```
-内核 plus：  HEAD b548d47（master），工作树干净，未推送 48
+内核 plus：  HEAD 2c5e5b4（master），工作树干净，未推送 51
 壳 launcher：HEAD 3448e75（main），  工作树干净，未推送 44
 ```
 
@@ -97,7 +97,7 @@
 ### 测试基线（全部 0 失败）
 
 ```
-内核  npm test      77 文件 / 1440 断言 / 0 失败   （任务起点 1098）
+内核  npm test      77 文件 / 1444 断言 / 0 失败   （任务起点 1098）
 壳    cargo test    100 项 / 0 失败                （任务起点 77）
 壳    cargo check   0 警告
 前端  npm run verify  tsc 0 / eslint 0 / vitest 15 / build 成功（任务起点：从未运行过）
@@ -112,6 +112,7 @@
 | 一~八 | 平台/进程/生命周期/分布式/插件/壳引导等 | 68 |
 | 九 | native 管理器 + 实例域 + 壳看护 + 插件市场 | 13 |
 | 十 | 壳仓深部（update/mirror/node/platform/main）+ 内核 lifecycle | 6 |
+| 十一 | **评估 D-1 取舍时发现并修复自己引入的市场回归** | 1 |
 
 ### 第十轮明细（最近，最有参考价值）
 
@@ -123,6 +124,13 @@
 | **P1** | 壳 `platform/unsupported.rs` | 11 个 `Platform` 方法写进了 `impl ServiceControl` → 该模块**从未被编译** |
 | **P1** | 内核 `guard/lifecycle/managed.js` | `restart()` 回退路径丢弃 stop/start 失败 → 报假成功 |
 | **P2** | 壳 `main.rs` | 关窗 `exit` 路径在 **UI 线程**跑 ~70s 退出握手 → 窗口假死被强杀 |
+
+### 第十一轮明细（D-1 取舍评估的副产物）
+
+| 级别 | 位置 | 缺陷 |
+|---|---|---|
+| **P2** | 内核 `pluginmarket.js` | **我加的构建预算引入的回归**：截断源（部分结果）会**替换掉**完整的旧缓存 ——
+既有保护判据是「本次**整源失败**」，而截断源**仍在结果里**，故不触发保护。已修（保护 A：截断源并集）。|
 
 ### 第九轮明细
 
@@ -237,11 +245,86 @@ UI 消费：installLog（OverviewPage）与 updateJob（InstancesPage）都真�
 既有引号/转义修复确在：schtasks /TR、cmd 双引号、systemd ExecStart、plist XML、架构白名单
 ```
 
-### D. 需**用户判断**的设计取舍（不要擅自改）
+### D. 设计取舍 —— **已给出建议方案**（动手前先与用户确认）
 
-1. 插件市场无整体 deadline 已修，但**批大小/预算取值**（8 并发 / 4 分钟）是性能取舍；
-2. `_prepareSystemd` 已改为「改名让位」，但**是否该彻底不再触碰用户 systemd 目录**需产品判断；
-3. `identity.json` 作为第二状态源 —— 是**回写**还是**让消费方改读 `update-guard.json`**，两条路都可，需定夺。
+#### D-1 插件市场：批大小 / 预算取值
+
+**实测参数**：单条 `safeFetchLatest` 超时 8s；社区候选约 2468 个；批次 8。
+
+```
+理想网络（~200ms/条）：2468/8 × 0.2s ≈ 62s      → 4 分钟预算绰绰有余
+最坏情况（每条都超时）：308 批 × 8s ≈ 41 分钟  → 4 分钟只够约 240 条（~10%）
+```
+
+**建议**：保留 8 并发 / 4 分钟，**但已补上截断源合并**（见下）。
+
+> ⚠ **重要**：加预算这件事本身引入了回归 —— 既有的「坏构建保护」判据是
+> 「本次**整源失败**」（`!freshSources.has(source)`），而被截断的源**仍在结果里**，
+> 于是它**不会**保留旧条目 → 只跑到 200/2400 的 community 会**替换掉**完整的旧列表。
+> **已修复**（新增「保护 A」：截断源与旧缓存取并集，不受 50% 比例约束），
+> 并有 M-f/M-g 正反向回归测试。
+
+**若想进一步优化**：可考虑按「已耗时比例」动态收窄批次、或对社区源做增量缓存
+（只重测上次未命中的名字）。但这属于性能优化，不是缺陷。
+
+#### D-2 `_prepareSystemd` 是否该彻底不再触碰用户 systemd 目录
+
+**先确认前提**：删除/让位是**有正当理由的** —— `service.js:57` 注释与实现表明
+实例用 `systemd-run --user --unit=dsh-web@<id>`（`service.js:70`），
+而 `~/.config/systemd/user/dsh-web@.service` 模板会与同名瞬态单元**冲突**，
+导致 `systemd-run` 拒绝重建。所以「不能放着不管」。
+
+**建议**：**保留「改名让位」**（当前实现），理由：
+  · 阻断效果与删除**完全相同**；
+  · 内容完整保留、可人工恢复；
+  · 记事件 `systemd_template_moved_aside` 可追溯。
+
+**可再改进一步（低风险）**：把让位目标名从固定 `.disabled-by-dsh`
+改为**带时间戳**（如 `.disabled-by-dsh-<epoch>`）——
+当前实现会先 `rmSync(aside)` 再 rename，若用户恰好有个同名文件会被静默删掉；
+时间戳后缀可彻底消除这个（极低概率但不可逆的）碰撞。
+
+**不建议**改成「不触碰 + 让 systemd-run 报错」：那会把一次可自愈的冲突
+变成用户看不懂的实例启动失败。
+
+#### D-3 `identity.json` 第二状态源（**最需要定夺的一项**）
+
+**现状**：
+
+```
+update.rs::init_identity()  → 把 attempt / pinned / pendingVersion **抄进** identity.json
+update-guard.json          → Guard 的真正存储（attempt/pendingVersion/pinned/lastAttemptAt）
+reset_guard() / mark_pending() → **只写 update-guard.json，不回写 identity.json**
+```
+
+消费方：
+```
+内核 domains/shell/index.js:119-121  用 id.attempt 作为「失败次数」权威来源（决定回滚）
+壳   commands/mod.rs:416            shell_identity 快照（引导页展示 attempt/pinned）
+```
+
+**根因**：identity.json 的**定位**是「壳此刻是什么状态」（version/pid/exe/phase），
+而更新护栏账本是**另一个关注点**、有**自己的文件**。把后者抄进前者
+= 制造第二真源 —— 且已被证明会陈旧（`reset_guard` 后 identity 仍显示旧 attempt）。
+
+**建议（分两步，先低风险后彻底）**：
+
+**第一步（低风险，建议现在就做）**：**单一写入路径**。
+把 identity.json 的所有写入收敛到一个 `write_identity(&Guard, runtime_fields)` helper，
+`init_identity` / `set_phase` / `reset_guard` / `mark_pending` **全部经它**。
+守卫字段永远是 Guard 的**投影**，不可能分叉。**不动任何消费方，无跨仓风险。**
+
+**第二步（彻底，需协调发布）**：从 identity.json **移除** `attempt`/`pinned`/`pendingVersion`，
+让两个消费方改读 `update-guard.json`（内核本就在读同目录的 identity.json，
+读另一个同目录文件不引入新依赖类别）。这样契约只剩**一个**真源。
+
+**为什么不建议「回写 identity.json」这条捷径**：那只是让两份拷贝保持同步，
+仍是两个真源 —— 下一个新增的 Guard 变更点会再次忘记回写，问题只是被推迟。
+
+**风险提示**：第二步是**跨仓契约变更**（壳与内核分别发版），
+必须两侧都改完才能上线，否则内核读不到 attempt 会把失败计数当 0 →
+**回滚判定失效**。若决定做，需要：新版内核**先**允许从 update-guard.json 读、
+在 identity.json 缺失该字段时降级，再在下一版壳里移除字段。
 
 ---
 
