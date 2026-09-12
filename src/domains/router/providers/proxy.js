@@ -13,6 +13,8 @@ const { getQuotaStrategy } = require('./quota-strategies');
 const { ProxyInstance } = require('../instances/proxy-instance');
 const ports = require('../../../guard/lifecycle/ports').shared;
 const pidlook = require('../../../platform/os/pidlookup');
+// P1-4：npx 的跨平台解析入口（Windows 上是 npx.cmd；裸 'npx' 会 ENOENT）。
+const { npxBin } = require('../../../platform/os/exec-path');
 
 // Command billing/订阅解析与策略注册见 ./quota-strategies.js（模式类不携带供应商解析词）。
 
@@ -119,7 +121,11 @@ class ProxyProvider extends ProviderBase {
       const ri = args.findIndex((a) => a === '--registry');
       if (ri >= 0) { args[ri + 1] = regOrigin; } else { args.unshift(regOrigin); args.unshift('--registry'); }
     }
-    return { ok: true, cmd: [cmd[0], ...args], registry: regOrigin };
+    // P1-4 修复（2026-09-12）：`cmd[0]` 来自 app.command（'npx'）——
+    //   必须经跨平台解析，否则 Windows 上 `npx` 恒 ENOENT（npm 的同一问题已有 npmBin）。
+    //   仅当它确实是逻辑名 'npx' 时才替换（保持模板可注入绝对路径的能力）。
+    const bin = (cmd[0] === 'npx') ? npxBin() : cmd[0];
+    return { ok: true, cmd: [bin, ...args], registry: regOrigin };
   }
 
   /** 定位已缓存的包 bin（~/.npm/_npx/<hash>/node_modules/<pkg>，取最新）。无则 null。 */
@@ -158,7 +164,8 @@ class ProxyProvider extends ProviderBase {
       await new Promise((resolve) => {
         const env = Object.assign({}, process.env);
         if (regOrigin) { env.npm_config_registry = regOrigin; env.NPM_CONFIG_REGISTRY = regOrigin; }
-        const child = execFile('npx', ['--yes', app.pkg, '--help'], { env, timeout: 120000 }, () => resolve());
+        // P1-4：经跨平台解析（Windows → npx.cmd）。原为裸 'npx' → ENOENT → 缓存永不填充。
+        const child = execFile(npxBin(), ['--yes', app.pkg, '--help'], { env, timeout: 120000 }, () => resolve());
         child.on('error', () => resolve());
       });
       return { ok: !!this._cachedPkgBin(app.pkg) };
@@ -305,13 +312,38 @@ class ProxyProvider extends ProviderBase {
     return { ok: true, port, pid: child.pid };
   }
 
-  /** 标记实例被请求使用（forward-core pick 后调用）：
-   *  - lastUsedAt 记录使用时间（诊断/审计 + reconcile 闲置宽限判断——启用后不被立刻回收）；
-   *  - _unhealthyCount 清零：请求成功 = 实例可用（须连续 net-fail≥2 才重启）。
+  /** 标记实例被请求使用（forward-core pick 后调用）：仅记录使用时间。
+   *
+   *  ⚠ P1-1 修复（2026-09-12）：本函数**不再清零** `_unhealthyCount`。
+   *
+   *  缺陷：它原先在**每次 pick 之后、请求发出之前**被调用（forward-core 的循环里），
+   *    并**无条件**清零失败计数；而重启阈值在 `markInstanceProblem` 里是「≥2」。
+   *    而失败发生在请求**结束**时才 +1 —— 于是「清零 → 失败+1 → 清零 → 失败+1 …」，
+   *    计数**数学上永远到不了 2**，请求级熔断（连续 ≥2 次失败即重启实例）是死代码。
+   *
+   *  注释原本写「请求成功 = 实例可用」，但实现执行在成功**之前** ——
+   *    这是「注释声称的语义」与「代码实际时机」分叉的典型。
+   *
+   *  现：清零改由 `markRequestOk`（**请求成功后**调用）负责；
+   *    `markUsed` 只管 lastUsedAt（诊断/闲置宽限判断）。
+   *
    *  注：prewarmed 标志已随「预热池目标态」废除——实例存留完全由 reconcile 期望集 + 闲置宽限期决定。 */
   markUsed(inst) {
     if (!inst) return;
     inst.lastUsedAt = Date.now();
+  }
+
+  /** **请求成功**后清零失败计数（P1-1 修复的配套）。
+   *
+   *  为什么必须独立成一个方法：清零的**时机**是这条缺陷的全部要害 ——
+   *    「请求发出前清零」使熔断不可达；只有「请求确认成功后清零」才既保留
+   *    「成功即健康」的语义，又让连续失败能真正累计。
+   *
+   *  ⚠ 健康监测的 `_monitorFails` 是**独立**计数器（见 healthInstance 的注释），
+   *    本方法不得触碰它（跨界耦合曾被显式修过）。
+   */
+  markRequestOk(inst) {
+    if (!inst) return;
     inst._unhealthyCount = 0;
   }
 
@@ -522,12 +554,27 @@ class ProxyProvider extends ProviderBase {
     if (!inst || this._stopping) return;
     if (!inst.pid && !inst.port) return;
     if (Date.now() < (inst._restartAt || 0)) return; // 退避中
-    inst._restartAt = Date.now() + 120000;
     const acc = this.accountOf(inst);
     if (acc && (acc.inflight || 0) > 0) {
-      inst._restartPending = reason; // 在途请求：标待重启，空闲后由下次报错/调用触发
+      // ⚠ P1-3 修复（2026-09-12）：两处缺陷合并修。
+      //
+      //  缺陷一（时序）：旧实现把 `_restartAt = now + 120s` 写在**本分支之前** ——
+      //    即在途请求触发的重启，**退避已置位**却什么都没做：随后 2 分钟内所有重启
+      //    尝试都被 `Date.now() < _restartAt` 拦下 → 坏实例至少卡死 2 分钟。
+      //    现改为：**只有真正执行重启时才置退避**。
+      //
+      //  缺陷二（死字段）：`_restartPending` 只写不读（全仓无消费点），
+      //    注释称「空闲后由下次报错/调用触发」并不成立 —— 下次报错要重新累积失败，
+      //    且会被已置位的退避拦下。
+      //    现改为**真正的延迟执行**：记下待重启原因，并在实例空闲（inflight 归 0）时
+      //    由 `_flushRestartPending` 补做。
+      inst._restartPending = reason || 'deferred';
+      if (this.logger && this.logger.info) {
+        this.logger.info('[proxy-instance] 在途请求中，重启延后 key=' + inst.maskedKey + ' reason=' + inst._restartPending);
+      }
       return;
     }
+    inst._restartAt = Date.now() + 120000; // 仅在**真正执行**时置退避
     inst._restartPending = null;
     if (this.logger && this.logger.warn) this.logger.warn('[proxy-instance] 实例重启 key=' + inst.maskedKey + ' port=' + inst.port + ' reason=' + reason);
     const hadPid = !!inst.pid;
@@ -578,6 +625,30 @@ class ProxyProvider extends ProviderBase {
 
   /** 兼容旧名（保持对外调用不破）。 */
   markInstanceNetFail(instOrAcc) { this.markInstanceProblem(instOrAcc, 'net-error'); }
+
+  /** 实例空闲后补做「被延后的重启」（P1-3 修复的配套消费点）。
+   *
+   *  为什么需要它：`restartInstance` 在**在途请求**期间不能 kill（会切断流），
+   *  故只能记 `_restartPending` 并返回。旧实现到此为止 —— 该字段**没有任何读取点**，
+   *  于是「延后」变成了「丢弃」，且当时退避已置位 → 坏实例至少卡死 2 分钟。
+   *
+   *  现由 `_endInflight` 在 inflight 归零时调用本方法：真正的延迟执行。
+   *  - 仍有在途（并发请求）→ 继续等，不清标记；
+   *  - 已空闲 → 清标记并执行重启（`restartInstance` 会重新判退避）。
+   */
+  flushRestartPending(inst) {
+    if (!inst || !inst._restartPending) return;
+    const acc = this.accountOf(inst);
+    if (acc && (acc.inflight || 0) > 0) return; // 仍有在途，继续延后
+    const why = inst._restartPending;
+    inst._restartPending = null;
+    if (this.logger && this.logger.info) {
+      this.logger.info('[proxy-instance] 实例已空闲，补做延后的重启 key=' + inst.maskedKey + ' reason=' + why);
+    }
+    try { this.restartInstance(inst, why); } catch (e) {
+      this.logger.warn && this.logger.warn('[proxy-instance] 补做重启异常: ' + (e && e.message));
+    }
+  }
 
   /** 模式级配额检测（模式类零供应商词，2026-09 用户定稿）：
    *  按 app.quota.type 查配额策略注册表（quota-strategies.js）执行取数与解析：

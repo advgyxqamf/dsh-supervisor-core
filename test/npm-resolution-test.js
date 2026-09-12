@@ -76,12 +76,29 @@ for (const f of files) {
   lines.forEach((l, i) => {
     const s = l.trim();
     if (s.startsWith('//')) return; // 注释里的说明不算
-    if (/(runOut|runDetail|run)\(\s*'npm'|spawn\(\s*'npm'|let bin = 'npm'|const bin = 'npm'/.test(l)) {
+    // ⚠ P1-4 修复（2026-09-12）：原正则只匹配 'npm' —— **对 'npx' 是盲区**，
+    //   于是反代路径的裸 `execFile('npx', ...)` 长期绕过本门禁，
+    //   而它的问题是**完全相同**的（Windows 上 npx 也是 .cmd）。
+    //   现同时覆盖两者。
+    if (/(runOut|runDetail|run|execFile|exec)\s*\(\s*'(npm|npx)'|spawn\s*\(\s*'(npm|npx)'|(let|const)\s+bin\s*=\s*'(npm|npx)'/.test(l)) {
       bare.push(rel + ':' + (i + 1) + '  ' + s.slice(0, 66));
     }
   });
 }
-check('C-c 源码无裸 npm 调用', bare.length === 0, bare.length ? bare.join(' | ') : '已全部经 npmBin()');
+check('C-c 源码无裸 npm/npx 调用', bare.length === 0, bare.length ? bare.join(' | ') : '已全部经 npmBin()/npxBin()');
+
+// ── C-e：npx 与 npm 同构（P1-4）──
+const { npxBin } = require(path.join(ROOT, 'src', 'platform', 'os', 'exec-path.js'));
+check('C-e npxBin 是函数', typeof npxBin === 'function', typeof npxBin);
+check("C-e 非 Windows 返回 'npx'", npxBin({ platform: 'linux' }) === 'npx', npxBin({ platform: 'linux' }));
+{
+  const wc2 = candidateNames('npx', 'win32').map((s) => s.toLowerCase());
+  check('C-e Windows 候选名含 npx.cmd', wc2.includes('npx.cmd'), JSON.stringify(candidateNames('npx', 'win32')));
+  check('C-e npx.cmd 排在裸 npx 之前',
+    wc2.indexOf('npx.cmd') < wc2.indexOf('npx'), 'cmd@' + wc2.indexOf('npx.cmd'));
+  const w2 = npxBin({ platform: 'win32' });
+  check('C-e Windows 结果非裸 npx', w2 !== 'npx', w2);
+}
 
 // ── C-d：模板路径也解析 ──
 {

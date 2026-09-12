@@ -167,7 +167,8 @@ const forwardMethods = {
         this._endInflight(acc, activeProv);
         const inst = acc && acc.instance;
         const isTimeout = typeof out.error === 'string' && /timeout/i.test(out.error);
-        if (rt.prov.markNetFail) rt.prov.markNetFail(acc);
+        // P1-2：原为 `rt.prov.markNetFail`（方法不存在 → 恒 no-op）；改用真实方法名。
+        if (rt.prov && typeof rt.prov.markInstanceNetFail === 'function') rt.prov.markInstanceNetFail(acc);
         this.log('ERR net fail key=' + maskKey(acc.key) + ' err=' + out.error);
         // 实例级处置【先于清 pid】（2026-09 复检根治：旧序先清 pid 再 markInstanceNetFail → 其内部
         //   `!inst.pid → return` 令请求级熔断成死代码；且上游超时从不重启实例 → 楔死实例每次请求撞上
@@ -224,6 +225,13 @@ const forwardMethods = {
         // passthrough（banned/none/unknown）：状态/头/体原样回（effect 已做账号处置）
         res.writeHead(act.status || status, act.headers || ur.headers);
         return res.end(act.body !== undefined ? act.body : text);
+      }
+      // P1-1 修复（2026-09-12）：**请求确认成功**（2xx 走到这里）才清零失败计数。
+      //   此前清零发生在循环头的 markUsed（请求发出**前**），使「连续 ≥2 次失败」
+      //   在数学上不可达 —— 请求级熔断是死代码。
+      if (activeProv && activeProv.kind === 'proxy' && acc.instance
+          && typeof activeProv.markRequestOk === 'function') {
+        try { activeProv.markRequestOk(acc.instance); } catch {}
       }
       return this.writeThrough(req, res, out, acc, rt.prov, { started, model, streamRequested, status });
     }
@@ -286,11 +294,16 @@ const forwardMethods = {
       decInflight();
       this.log('STREAM_ABORTED key=' + maskKey(acc.key) + ' bytes=' + bytes);
       // 2026-09 二次修正：上游流中断（aborted/error/close）做【实例级】自愈但【不】做账号级处置。
-      //   - markNetFail → markInstanceProblem 只累加 _unhealthyCount（健康即清零）→ 连续 ≥2 次断流
+      //   - markInstanceNetFail → markInstanceProblem 只累加 _unhealthyCount → 连续 ≥2 次断流
       //     才 restartInstance 重启该实例（清坏状态，2min 退避防风暴）——它【不冻结账号/不切走】；
       //   - 曾误删此调用（把"账号级不过度介入"误做成连实例自愈也去掉）→ 断流实例坏状态残留不重启
       //     （如 Kbobt7 health 200 但请求处理卡死，monitor 探活也抓不到）→ 反复 400 的根因之一。
-      if (prov && typeof prov.markNetFail === 'function') { try { prov.markNetFail(acc); } catch {} }
+      //
+      // ⚠ P1-2 修复（2026-09-12）：此处原调用 `prov.markNetFail(acc)` —— **该方法全仓不存在**，
+      //   `typeof ... === 'function'` 恒为 false，故这段自愈**从未执行过**。
+      //   与 P1-1 叠加后，断流路径的实例级熔断此前**完全失效**。
+      //   现改用真实存在的方法名（proxy.js 提供 markInstanceNetFail，其内部即 markInstanceProblem）。
+      if (prov && typeof prov.markInstanceNetFail === 'function') { try { prov.markInstanceNetFail(acc); } catch {} }
       if (this.events) this.events.append('router_stream_aborted', { key: maskKey(acc.key), model: meta.model, bytes });
       // 上游中断仍须通知客户端：res.destroy() 关闭客户端连接（读到截断→客户端自己决定重试，
       // 而不是让 socket 悬空等待（此前缺陷：长会话中断后客户端不提示、无限等待）。
@@ -326,6 +339,12 @@ const forwardMethods = {
       // 在途归零 → 若有待停标记则立即补刀（取代旧一次性 2.5s timer：命中在途即空放泄漏）
       if (acc.inflight === 0 && acc._stopPendingUntilIdle && prov && typeof prov._retryPendingStop === 'function') {
         prov._retryPendingStop(acc);
+      }
+      // 在途归零 → 补做「被延后的实例重启」（P1-3 修复的消费点）。
+      //   与上面的待停补刀同构：都是「在途期间不能动实例，故记下意图、空闲后执行」。
+      //   旧实现只写 `_restartPending` 而**无任何读取点** → 「延后」实为「丢弃」。
+      if (acc.inflight === 0 && acc.instance && prov && typeof prov.flushRestartPending === 'function') {
+        prov.flushRestartPending(acc.instance);
       }
     } catch {}
   },

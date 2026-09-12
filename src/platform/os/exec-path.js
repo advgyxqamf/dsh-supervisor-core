@@ -89,6 +89,32 @@ function resolveExecutable(base, opts) {
 }
 
 /**
+ * 解析 **npx** 的可执行路径（跨平台）。
+ *
+ * ⚠ 与 `npmBin()` **同一类缺陷**（P1-4，2026-09-12）：
+ *   Windows 上 npx 的实际可执行是 `npx.cmd`，而 Node 的 `spawn`/`execFile`
+ *   **不做 PATHEXT 解析** → 传裸 `'npx'` 一律 ENOENT。
+ *   本仓已有 `npmBin()` 解决 npm 的同一问题，但反代路径用的是 npx ——
+ *   而 `test/npm-resolution-test.js` 的门禁正则只匹配 `'npm'`，**对 npx 是盲区**，
+ *   于是「已全部经 npmBin()」的保证是假的。
+ *
+ * 修法：与 npmBin 完全同构（Windows 走 PATHEXT，优先 `.cmd`）；解析失败仍返回
+ *   `'npx.cmd'`，让失败留给定调用方的错误处理，而不是把 null 传进 spawn。
+ *
+ * @param {{platform?:string}} [opts] platform 可注入，便于纯函数测试
+ * @returns {string} 可执行的绝对路径，或回退名（'npx'）
+ */
+function npxBin(opts) {
+  const pl = (opts && opts.platform) || process.platform;
+  if (pl !== 'win32') return 'npx';
+  const resolved = resolveExecutable('npx', { extraDirs: [
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'npm') : null,
+  ].filter(Boolean) });
+  if (resolved) return resolved;
+  return 'npx.cmd';
+}
+
+/**
  * 解析 **npm** 的可执行路径（跨平台）。
  *
  * ⚠ 为什么必须存在（P1-C，2026-09-12）：
@@ -120,4 +146,4 @@ function npmBin(opts) {
   return 'npm.cmd';
 }
 
-module.exports = { resolveExecutable, candidateNames, standardDirs, firstExecutable, npmBin };
+module.exports = { resolveExecutable, candidateNames, standardDirs, firstExecutable, npmBin, npxBin };
