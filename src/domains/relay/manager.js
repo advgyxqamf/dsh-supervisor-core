@@ -24,6 +24,7 @@ class LanManager {
       events: this.events,
     });
     this.lanInstances = []; // 内存派生缓存：[{ id, name, dshPort, wanPort, token, dshToken, enabled, frpEnabled, frpRemotePort, localPort }]
+    this._reconcileInFlight = null; // 对账单飞（P2-8）：避免 2s 节拍叠加串行 TCP 探测
     this._lanServers = {};   // id -> http.Server（relay）
     // 令牌只读来源（DshTokenService 注入）：本模块不再持久化令牌副本，只在构建代理/列表时读取，
     // 令牌变化由守卫经 applyToken 通知（relay 热换 cookie）。dshToken 字段仅为展示缓存。
@@ -181,8 +182,32 @@ class LanManager {
    *   - 注册（lanInstances / wanPort）只与「开关」绑定：remoteEnabled=true 保留、false 移除；
    *   - relay 运行 = 目标存活：实例重启/端口短暂 down → 暂停 relay（保留注册与 wanPort）；
    *     实例恢复 → 自动重新 listen（同一 wanPort，无端口重建竞争，绝不出现「开关开着但代理未就绪」）；
-   *   - 孤儿注册（实例已删）→ 移除。 */
-  async reconcile() {
+   *   - 孤儿注册（实例已删）→ 移除。
+   *
+   *  ⚠ 2026-09-12（P2-8）：加**单飞（single-flight）** —— 对账内含逐实例串行
+   *    `await targetReachable`（每个最多 600ms TCP 超时），而它被多个 2 秒级节拍调用：
+   *      · 前端 UI 每 2s 轮询 `/lan/list` → `list()` 内部触发 reconcile；
+   *      · lan-daemon 自身每 2s tick（daemon.js:127）也调 reconcile。
+   *    N 个不可达实例时，多轮 reconcile 重叠会把串行等待堆到事件循环上，
+   *    拖慢 ctl/面板响应。
+   *
+   *    现：同一时刻只允许一轮 reconcile 在跑，后续调用**复用**在途 Promise。
+   *    语义安全：对账是幂等的「把状态收敛到期望」，少跑一轮不会漏收敛 ——
+   *    下一轮节拍会补上；而在途那一轮本就基于当轮快照。
+   */
+  // ⚠ 刻意**不加 async**：`async` 总会把返回值包一层新 Promise，
+  //   于是并发调用拿到的 Promise **不是同一个实例**（单飞的语义仍在，但身份丢了）。
+  //   非 async 直接返回在途 Promise，调用方 await 行为完全相同。
+  reconcile() {
+    if (this._reconcileInFlight) return this._reconcileInFlight;
+    this._reconcileInFlight = this._reconcileOnce()
+      .catch((e) => { this.logger.warn && this.logger.warn('[reconcile] ' + ((e && e.message) || e)); })
+      .finally(() => { this._reconcileInFlight = null; });
+    return this._reconcileInFlight;
+  }
+
+  /** 对账主体（由 `reconcile` 单飞包装调用；不直接外部调用）。 */
+  async _reconcileOnce() {
     try {
       const insts = this._allManaged();
       let removed = false;
