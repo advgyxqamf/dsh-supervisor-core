@@ -105,6 +105,63 @@ const { PluginMarket } = require(SRC);
       /finally \{ this\._deadline = 0; \}/.test(src), '有');
   }
 
+  // ── M-f：**预算截断的源必须与旧缓存并集**（P2-8 配套修复）──
+  //
+  // 缺陷：既有的「坏构建保护」判据是「本次**整源失败**」（`!freshSources.has(source)`），
+  //   而被截断的源**仍在结果里**（只是不完整）→ 该保护不保留它的旧条目
+  //   → 只跑到 200/2400 的 community 会**替换掉**完整的旧 community 列表。
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mkt-'));
+    const m = new PluginMarket({
+      cacheDir: dir,
+      stateFile: path.join(dir, 's.json'),
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    // 预置「完整」旧缓存：100 条 community + 5 条 npm
+    const oldCommunity = [];
+    for (let i = 0; i < 100; i++) oldCommunity.push({ name: 'old-c-' + i, source: 'community', stars: 1 });
+    const oldNpm = [];
+    for (let i = 0; i < 5; i++) oldNpm.push({ name: 'old-n-' + i, source: 'npm', stars: 1 });
+    m._cache = { indexedAt: Date.now(), sources: { npm: 5, github: 0, community: 100 }, total: 105, plugins: oldNpm.concat(oldCommunity) };
+    m._ts = Date.now();
+    // 桩：community 被预算截断（只返回 3 条并标记）
+    m.indexNpm = async () => oldNpm.map((x) => ({ name: x.name, source: 'npm', stars: 1 }));
+    m.indexGithub = async () => [];
+    m.indexCommunity = async function () {
+      this._truncatedSources.add('community');
+      return [
+        { name: 'new-c-1', source: 'community', stars: 1 },
+        { name: 'new-c-2', source: 'community', stars: 1 },
+        { name: 'new-c-3', source: 'community', stars: 1 },
+      ];
+    };
+    const cache = await m.buildIndex();
+    const names = new Set((cache.plugins || []).map((p) => p.name));
+    check('M-f 截断源：新条目保留', names.has('new-c-1') && names.has('new-c-3'), [...names].filter((n) => n.startsWith('new-')).join(','));
+    check('M-f 截断源：旧条目被合并回来（不被替换）',
+      names.has('old-c-0') && names.has('old-c-99'), '社区总数=' + (cache.plugins || []).filter((p) => p.source === 'community').length);
+    check('M-f 截断源合并后总数为 3+100（社区）',
+      (cache.plugins || []).filter((p) => p.source === 'community').length === 103,
+      String((cache.plugins || []).filter((p) => p.source === 'community').length));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── M-g（反向）：**未**截断的源不得合并旧条目（否则陈旧条目永不淘汰）──
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mkt-'));
+    const m = new PluginMarket({ cacheDir: dir, stateFile: path.join(dir, 's.json'), logger: { info() {}, warn() {}, error() {} } });
+    m._cache = { indexedAt: Date.now(), sources: {}, total: 1, plugins: [{ name: 'stale', source: 'community', stars: 1 }] };
+    m._ts = Date.now();
+    m.indexNpm = async () => [];
+    m.indexGithub = async () => [];
+    m.indexCommunity = async () => [{ name: 'fresh-only', source: 'community', stars: 1 }];
+    const cache = await m.buildIndex();
+    const names = (cache.plugins || []).map((p) => p.name);
+    check('M-g 未截断的源不合并旧条目（陈旧条目正常淘汰）',
+      names.length === 1 && names[0] === 'fresh-only', names.join(','));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   const failed = results.filter((r) => !r);
   console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
   process.exit(failed.length ? 1 : 0);

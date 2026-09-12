@@ -100,6 +100,8 @@ class PluginMarket {
     //     与既有的「坏构建保护」天然配合（部分结果不会冲掉旧缓存）。
     this.buildBudgetMs = opts.buildBudgetMs || 240000; // 默认 4 分钟
     this._deadline = 0;
+    // P2-8 配套：本次构建被**预算截断**的源（部分结果不得替换完整缓存，见 _buildIndexInner）。
+    this._truncatedSources = new Set();
     this.loadFromDisk();
   }
 
@@ -141,6 +143,7 @@ class PluginMarket {
     const start = Date.now();
     // P2-8：整次构建的总预算（到点停止发起新批次，返回已采集的部分）。
     this._deadline = Date.now() + this.buildBudgetMs;
+    this._truncatedSources = new Set();
     try { return await this._buildIndexInner(start); }
     finally { this._deadline = 0; }
   }
@@ -173,9 +176,31 @@ class PluginMarket {
     }
     plugins.sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
-    // 坏构建保护（2026-09 修复）：本次结果比上次缓存显著缩水（<50%）→ 某源大面积失败（网络/限流），
-    // 合并：保留本次成功的源 + 旧缓存中本次缺失的源（按 source 维度），绝不因一次坏构建丢掉好缓存。
     const prev = this._cache;
+
+    // ── 保护 A：**预算截断的源**必须与旧缓存取并集（P2-8 配套修复，2026-09-12）──
+    //
+    //   为什么必须单独处理：下面的保护 B 判据是 `!freshSources.has(source)`
+    //   ——「本次**整个源失败**」。而被预算截断的源**仍然出现在结果里**（只是不完整），
+    //   于是保护 B **不会**保留它的旧条目：只跑到 200/2400 的 community 源
+    //   会**替换掉**缓存的完整 community 列表，市场瞬间缩水且只留一条 warn。
+    //   （这是我加整体预算时引入的回归：「截断」与「整源失败」语义不同，不能共用判据。）
+    //
+    //   截断源的并集**不受 50% 比例约束** ——「不完整」本身就是需要合并的充分理由。
+    const truncated = this._truncatedSources || new Set();
+    if (prev && prev.plugins && prev.plugins.length > 0 && truncated.size > 0) {
+      const freshNames = new Set(plugins.map((pp) => pp.name));
+      const kept = prev.plugins.filter((pp) => truncated.has(pp.source) && !freshNames.has(pp.name));
+      for (const kp of kept) { if (!seen.has(kp.name)) { seen.add(kp.name); plugins.push(kp); } }
+      if (kept.length) {
+        this.logger.warn && this.logger.warn(
+          'market: 源 ' + [...truncated].join('/') + ' 因预算截断，已与旧缓存合并（补回 ' + kept.length + ' 条）'
+        );
+      }
+    }
+
+    // ── 保护 B（既有，2026-09）：本次结果比上次缓存显著缩水（<50%）→ 某源大面积失败（网络/限流），
+    //    沿用旧缓存中本次**完全缺失**的源；绝不因一次坏构建丢掉好缓存。
     if (prev && prev.plugins && prev.plugins.length > 0 && plugins.length < prev.plugins.length * 0.5) {
       const freshSources = new Set(plugins.map((pp) => pp.source));
       const prevByKey = new Map(prev.plugins.map((pp) => [pp.name, pp]));
@@ -183,6 +208,9 @@ class PluginMarket {
       for (const kp of keepPrev) { if (!seen.has(kp.name)) { seen.add(kp.name); plugins.push(kp); } }
       this.logger.warn && this.logger.warn('market index partial build: ' + plugins.length + ' (prev ' + prev.plugins.length + ') — 失败源已沿用旧缓存');
     }
+
+    // 合并进来的旧条目未参与上面的排序 → 重排一次，保持 stars 降序（前端依赖该序）。
+    plugins.sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
     this._cache = { indexedAt: Date.now(), sources: { npm: npm.length, github: gh.length, community: community.length }, total: plugins.length, plugins };
     this._ts = Date.now();
@@ -216,7 +244,7 @@ class PluginMarket {
     const batch = 8;
     for (let i = 0; i < names.length; i += batch) {
       // P2-8：预算耗尽即停止发起新批次（已采集的部分照常返回）。
-      if (this._budgetExhausted()) { this.logger.warn && this.logger.warn("market: npm 源预算耗尽，已处理 " + i + "/" + names.length + " 个候选"); break; }
+      if (this._budgetExhausted()) { this._truncatedSources.add("npm"); this.logger.warn && this.logger.warn("market: npm 源预算耗尽，已处理 " + i + "/" + names.length + " 个候选"); break; }
       const slice = names.slice(i, i + batch);
       await Promise.all(slice.map(async (name) => {
         const meta = await this.safeFetchLatest(name);
@@ -314,7 +342,7 @@ class PluginMarket {
       const seenName = new Set();
       for (let i = 0; i < links.length; i += 8) {
         // P2-8：预算耗尽即停止（社区源候选最多，是最容易超时的一段）。
-        if (this._budgetExhausted()) { this.logger.warn && this.logger.warn("market: community 源预算耗尽，已处理 " + i + "/" + links.length + " 个候选"); break; }
+        if (this._budgetExhausted()) { this._truncatedSources.add("community"); this.logger.warn && this.logger.warn("market: community 源预算耗尽，已处理 " + i + "/" + links.length + " 个候选"); break; }
         const slice = links.slice(i, i + 8);
         await Promise.all(slice.map(async ({ npmName, ghName, label }) => {
           try {
