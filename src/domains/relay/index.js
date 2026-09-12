@@ -21,6 +21,34 @@
 const http = require('node:http');
 const net = require('node:net');
 const crypto = require('node:crypto');
+// P1 修复（2026-09-12）：来源必须落在**回环或 RFC1918 私有网段**。
+//   复用 api/identity.js 的同一份判定 —— 绝不在本文件重写第二份（那正是本仓反复出问题的形态）。
+const { isLoopbackAddress, isPrivateIpv4 } = require('../../api/identity');
+
+/** 来源地址是否可信（回环 ∪ RFC1918）。`config.js` 长期声称「LAN 受 RFC1918 白名单约束」，
+ *  但**实现里从不存在**该判定 —— 本函数即补齐之。
+ *
+ *  为什么必须有它：relay 监听 `0.0.0.0`（局域网可见），且会把 `Origin`/`Referer`
+ *  改写成回环权威（「回环呈现」，用于让 DSH 的信任围栏放行特权方法面）。
+ *  于是「谁连得上」就等于「谁拿到 DSH 特权面」。
+ *  若只依赖 lanToken：**未设 token 时 tokenGate 恒放行**（`token === ''` → return true），
+ *  则同一网段内任何设备（含访客 Wi-Fi、被入侵的 IoT）都能零认证驱动 DSH。
+ *  加上来源闸后，「连得上」被收窄到回环与私有网段（公网源要到 relay 必须先进内网）。
+ *
+ *  ⚠ 注意这不等于鉴权：私网内仍是共享信任域（同 lanToken 的定位），
+ *    但它**堵住了「暴露到公网」这一档** —— 与 FRP 侧「强制 remoteToken」形成两层。
+ */
+function isTrustedSource(req, sock) {
+  const addr = (req && req.socket && req.socket.remoteAddress)
+    || (sock && sock.remoteAddress)
+    || '';
+  if (!addr) return false;
+  // Node 对 IPv4-mapped IPv6 呈现 ::ffff:a.b.c.d —— 归一到 IPv4 字面量后再判定。
+  const norm = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(addr)
+    ? addr.replace(/^::ffff:/i, '')
+    : addr.toLowerCase();
+  return isLoopbackAddress(norm) || isPrivateIpv4(norm);
+}
 
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a)).digest();
@@ -259,6 +287,11 @@ function createRelay(targetHost, targetPort, opts) {
   }
 
   const server = http.createServer((req, res) => {
+    // 来源闸（P1）：公网来源一律拒绝 —— 与 config.js 长期声称的「RFC1918 白名单」一致。
+    if (!isTrustedSource(req)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('仅允许局域网（RFC1918）或本机访问');
+    }
     if (!tokenGate(req, res, token)) return;
     mergedCookieHeaders(req.headers).then((cookie) => {
       const headers = { ...req.headers };
@@ -364,6 +397,15 @@ function createRelay(targetHost, targetPort, opts) {
 
   // WebSocket / 任意 Upgrade：重建原始请求头（含回环呈现 + DSH cookie）后建立双向 TCP 隧道
   server.on('upgrade', (req, socket, head) => {
+    // 来源闸（P1）：WS 升级同样必须限定回环/私网 —— 否则未设 token 时
+    //   公网可直接经 WS 拿到 DSH 特权通道（HTTP 闸只挡 HTTP 路径）。
+    if (!isTrustedSource(req, socket)) {
+      try {
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      } catch {}
+      try { socket.destroy(); } catch {}
+      return;
+    }
     // 升级握手无法做 302 种 Cookie：凭 ?token= 或既有 Cookie 放行，否则原始 401
     if (!hasValidToken(req, token)) {
       try {
