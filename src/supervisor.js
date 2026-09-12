@@ -493,7 +493,10 @@ class Supervisor {
       const rt = this._ensureRouterRuntime(true);
       if (rt.mode === 'daemon') {
         // 状态文件写权归 daemon（防双写覆盖：守卫只读，providers.json 由 daemon 独占持久化）
-        if (this.router && typeof this.router.setPersistEnabled === 'function') { try { this.router.setPersistEnabled(false); } catch {} }
+        // ⚠ 2026-09-12：改用 `_disableRouterPersist()` —— 该纪律已在 `_ensureRouterRuntime`
+        //   内部对**全部三条** daemon 路径统一处置（此前只有本处执行 → 另两条路径会双写）。
+        //   本行保留为幂等兜底（明确表达「进入 daemon 即关写权」的意图）。
+        this._disableRouterPersist();
         if (rt.spawned) {
           // 刚拉起：等待 daemon 就绪（短轮询 43011）
           setTimeout(() => {

@@ -188,8 +188,17 @@ class SuperviseView {
     try {
       const daemonActive = this._routerDaemonActive();
       const managed = this._daemonManaged();
+      // ⚠ 2026-09-12（P2）：**把「daemon 模式下守卫不得写状态文件」收敛到本函数**。
+      //
+      //   缺陷：该纪律此前只在 supervisor.js 的一处 daemon 分支里执行
+      //     （`setPersistEnabled(false)`），而本函数**还有另外两个**会返回
+      //     `mode:'daemon'` 的路径（下面的「已在跑」与本段）—— 经它们进入 daemon 模式时
+      //     _persistEnabled 仍为 true，守卫会与 daemon **双写 providers.json**，
+      //     后写者覆盖前者（正是该纪律要防的事）。
+      //   现统一在此处置：任何返回 daemon 模式的路径都已关闭写权。
       if (desiredRunning !== false && daemonActive && managed) {
         // daemon 已在跑且为本守卫管理：监督模式（守卫不再内嵌启动）
+        this._disableRouterPersist();
         return { active: true, mode: 'daemon' };
       }
       if (desiredRunning !== false && daemonActive && !managed) {
@@ -217,9 +226,24 @@ class SuperviseView {
       // ══ 统一进程生命周期（2026-09 架构定稿，与 lan 对称）：见 DaemonLifecycle ══
       const lc = this._daemonLifecycle('router');
       if (!lc) return { active: false, mode: 'embedded' };
-      return this._daemonEnsureResult(lc, () => this._writeRouterDaemonLock());
+      const res = this._daemonEnsureResult(lc, () => this._writeRouterDaemonLock());
+      // 本路径也可能返回 daemon 模式（拉起/接管成功）→ 同样关闭守卫写权（见函数顶部说明）。
+      if (res && res.mode === 'daemon') this._disableRouterPersist();
+      return res;
     } catch (e) {
       return { active: false, mode: 'error', error: e.message };
+    }
+  }
+
+  /** daemon 模式下关闭守卫对 providers.json 的写权（防双写覆盖）。
+   *
+   *  为什么抽成方法：`_ensureRouterRuntime` 有**三条**会返回 daemon 模式的路径，
+   *  该纪律必须在**每条**上执行 —— 集中一处，避免将来新增路径时再漏（本缺陷即由此产生）。
+   *  幂等：重复调用无副作用。
+   */
+  _disableRouterPersist() {
+    if (this.router && typeof this.router.setPersistEnabled === 'function') {
+      try { this.router.setPersistEnabled(false); } catch {}
     }
   }
 

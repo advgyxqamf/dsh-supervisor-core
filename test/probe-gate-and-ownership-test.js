@@ -120,6 +120,31 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
 check('E-e 源码调用 tasks.step 登记步骤', /this\.tasks\.step\(task\.id/.test(ops), '有');
 check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(task\.id/.test(ops), '有');
 
+// ── E-h：daemon 模式下守卫**不得**写 providers.json（三条路径全覆盖）──
+//   缺陷：`setPersistEnabled(false)` 此前只在 supervisor.js 的一处 daemon 分支执行，
+//         而 `_ensureRouterRuntime` 还有另两条返回 daemon 的路径 → 双写覆盖。
+{
+  const sv = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'supervisor', 'supervise-view.js'), 'utf8');
+  const sup = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
+  check('E-h 抽出 _disableRouterPersist 集中处置', /_disableRouterPersist\(\) \{/.test(sv), '有');
+  // 三条 daemon 路径：① 已在跑 ② 拉起/接管成功 ③ supervisor.js 的兜底
+  const n = (sv.match(/_disableRouterPersist\(\);/g) || []).length;
+  check('E-h supervise-view 内至少两处调用（覆盖两条 daemon 路径）', n >= 2, n + ' 处');
+  check('E-h 拉起/接管路径按返回值判定',
+    /res\.mode === 'daemon'\).*_disableRouterPersist|_disableRouterPersist.*res\.mode/.test(sv)
+      || /if \(res && res\.mode === 'daemon'\) this\._disableRouterPersist\(\);/.test(sv), '有');
+  check('E-h supervisor.js 兜底改用同一方法（不再内联）',
+    /this\._disableRouterPersist\(\);/.test(sup), '有');
+  // 反向：确认不再有内联的 setPersistEnabled(false) **代码**（方法本体保留一处）。
+  //   ⚠ 必须剥离注释行 —— 说明文字里会引用该写法（我第一版就踩了这个假阳性）。
+  const stripComments = (s) => s.split(String.fromCharCode(10))
+    .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
+    .join(String.fromCharCode(10));
+  const inlineAll = (stripComments(sv) + stripComments(sup)).match(/setPersistEnabled\(false\)/g) || [];
+  check('E-h 不再有散落的内联 setPersistEnabled(false)（仅方法本体保留）',
+    inlineAll.length === 1, inlineAll.length + ' 处');
+}
+
 // ── E-g：`setProviderKeys(add)` 的 added 必须反映真实结果（P2-5）──
 //   行为级用不到（需真供应商），故做源码级不变量 + 契约字段检查。
 {
