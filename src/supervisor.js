@@ -41,7 +41,6 @@ const { NativeManager } = require('./guard/native/manager');
 const { LifecycleManager } = require('./guard/lifecycle/index');
 const { ManagedRegistry } = require('./guard/lifecycle/objects');
 const { IntentLedger } = require('./guard/intent');
-const deploy = require('./platform/deploy');
 const { registerAll } = require('./guard/lifecycle/adapters');
 const ports = require('./guard/lifecycle/ports').shared;
 
@@ -456,13 +455,49 @@ class Supervisor {
     // 唯一心跳（v3 R3 C3-2/C3-3b G3）：daemon 监督(router/lan-daemon, 节流≈30s) +
     // main 收敛(on 模式) 都收进 ManagedRegistry.heartbeat。
     // _heartbeatBusy 防慢拍重叠（probe 超时/长 I/O 时心跳不并发，防 daemon 双监督/main 双收敛）。
+    // ⚠ P1 修复（2026-09-13）：_heartbeatBusy 必须有**兜底释放**，否则一次卡死 = 心跳永停。
+    //
+    //   缺陷：`if (this._heartbeatBusy) return;` 是**丢拍**语义（注释只写「防慢拍重叠」，
+    //     未声明丢拍）。更严重的是 _heartbeatBusy 只在 .finally 里释放 ——
+    //     若 heartbeat 返回的 promise 永不 settle（且 ManagedRegistry.heartbeat 内的
+    //     逐对象超时也覆盖不到的那类：例如 heartbeat 本身在进入循环前就卡住），
+    //     .finally 永不执行 → **_heartbeatBusy 永久 true → 心跳永停**。
+    //   为什么致命：managedObjects 存在时**不创建 tick 定时器**（见上），故心跳是
+    //     main 收敛/沙箱监督/daemon 监督的**唯一**周期驱动。停摆后
+    //     main 即使 desired=running 也永不 spawn/adopt、沙箱挂了永不退避重试、
+    //     router/lan daemon 失联永不被拉起，而 /status 仍显示最后一次写入的 phase
+    //     —— 用户看到「面板开着、服务全死、无任何事件」。
+    //   修法：① 保留丢拍语义（并发重入仍不可能），但用**独立兜底定时器**在
+    //     一个「远大于任何正常拍」的阈值后强制释放 busy（并记 warn），使心跳必定恢复；
+    //     ② 暴露 _lastHeartbeatAt / _heartbeatStalls，使「心跳停摆」可观测而非隐形。
+    this._lastHeartbeatAt = Date.now();
+    this._heartbeatStalls = 0;
+    // ⚠ 拍宽必须在 setInterval **之前**求值：它同时用作间隔与超时阈值。
+    //   （我第一版把它写在回调内部，却在 `}, iv)` 处引用 → ReferenceError，
+    //     心跳定时器根本没建起来 → smoke S1 永不进入 RUNNING。已改正。）
+    const heartbeatIv = this.config.probeIntervalMs || 5000;
     this._heartbeatTimer = setInterval(() => {
       if (this._heartbeatBusy) return;
       this._heartbeatBusy = true;
-      Promise.resolve(this.managedObjects ? this.managedObjects.heartbeat(this.config.probeIntervalMs || 5000) : null)
+      const iv = heartbeatIv;
+      this._lastHeartbeatAt = Date.now();
+      // 兜底释放（阈值 = 拍宽 × 12：远大于任何正常拍，又保证必定恢复）。
+      // unref：不拖住进程退出。
+      const stallMs = Math.max(30000, iv * 12);
+      const guard = setTimeout(() => {
+        if (this._heartbeatBusy) {
+          this._heartbeatBusy = false;
+          this._heartbeatStalls++;
+          if (this.logger && this.logger.warn) {
+            this.logger.warn('[heartbeat] 单拍超过 ' + stallMs + 'ms 未结算，强制释放防停摆（第 ' + this._heartbeatStalls + ' 次）');
+          }
+        }
+      }, stallMs);
+      if (guard && typeof guard.unref === 'function') guard.unref();
+      Promise.resolve(this.managedObjects ? this.managedObjects.heartbeat(iv) : null)
         .catch(() => {})
-        .finally(() => { this._heartbeatBusy = false; });
-    }, this.config.probeIntervalMs || 5000);
+        .finally(() => { clearTimeout(guard); this._heartbeatBusy = false; });
+    }, heartbeatIv);
     // 远程控制：为已开启远程控制的实例补建代理（幂等）
     // L3b：relay/frpc 由独立 lan-daemon 承载——守卫只写状态并拉起/监督 daemon，不在本地建 relay
     if (this.lanDaemonEnabled()) {

@@ -137,6 +137,34 @@ const fakePorts = {
   dp.registerAdapter('router-daemon', { supervise: () => ({ ok: false }), derivePhase: true });
   await dp.heartbeat(1000);
   check('derivePhase: 失联 → phase stopped', dp.get('rd').phase === 'stopped');
+  // 10. heartbeat 逐对象超时（2026-09-13 P1）：单个 adapter 卡死不得停摆整条心跳
+  //   缺陷：`await fn(e)` 无超时 → 任一 adapter 的 promise 永不 settle 即让心跳永停，
+  //     而心跳是 main 收敛/沙箱监督/daemon 监督的**唯一周期驱动**（managedObjects 存在时
+  //     不创建 tick 定时器）→「面板开着、服务全死、无任何事件」。
+  {
+    const toFile = path.join(TMP, 'hb-timeout.json');
+    const to = new ManagedRegistry({ file: toFile, logger: null });
+    to.register({ kind: 'sandbox-instance', id: 'hung' });
+    to.register({ kind: 'sandbox-instance', id: 'healthy' });
+    to.registerAdapter('sandbox-instance', {
+      supervise: (e) => (e.id === 'hung' ? new Promise(() => {}) : { ok: true }),
+    });
+    // 保活：超时定时器 unref 了，无其它句柄时进程会提前退出 → 断言跑不到
+    const keepAlive = setInterval(() => {}, 100);
+    const t0 = Date.now();
+    const r = await to.heartbeat(50); // 上限 = 50 × 6 = 300ms
+    clearInterval(keepAlive);
+    const elapsed = Date.now() - t0;
+    check('heartbeat 卡死对象有超时（不会永不返回）', elapsed < 5000, elapsed + 'ms');
+    check('heartbeat 超时对象被记入 errors（可观测）',
+      r.errors.some((x) => x.indexOf('hung') >= 0), JSON.stringify(r.errors));
+    check('heartbeat 卡死对象仍被记为不在线（ok:false）',
+      to.get('hung').lastObserved && to.get('hung').lastObserved.ok === false, 'ok:false');
+    check('heartbeat 后续健康对象**仍被观测**（不因前一个卡死而跳过）',
+      r.observed.indexOf('healthy') >= 0 && to.get('healthy').lastObserved.ok === true,
+      JSON.stringify(r.observed));
+  }
+
   console.log('');
   // 真实计数（见文件头说明）：passed + failed 必须**恒等于**实际执行数。
   console.log('结果: ' + (checks - failures) + ' passed, ' + failures + ' failed');

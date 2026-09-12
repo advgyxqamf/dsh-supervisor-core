@@ -6,7 +6,6 @@
 // 依赖由拆分脚本按块内实际使用自动携带（遗漏会导致运行期 ReferenceError）。
 const fs = require('node:fs');
 const path = require('node:path');
-const http = require('node:http');
 const { spawn } = require('node:child_process');
 const pidlook = require('../../platform/os/pidlookup');
 const { DaemonLifecycle } = require('../../guard/proc/daemon-lifecycle');

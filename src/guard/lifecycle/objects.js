@@ -22,6 +22,9 @@ const path = require('node:path');
 /** 进程生命周期唯一词表（控制平面 v3）。操作态（安装/升级/卸载）在 TaskRegistry，不在 phase。 */
 const PHASES = ['stopped', 'installing', 'starting', 'running', 'draining', 'backoff', 'failed', 'restarting'];
 
+/** 单对象监督的超时上限（拍宽的倍数）。见 ManagedRegistry._withTimeout。 */
+const ADAPTER_TIMEOUT_TICKS = 6;
+
 /** desired 唯一取值：用户意图（running=应保持运行 / stopped=应停止）。与 guardian（自动拉起策略）正交。 */
 const DESIRED = ['running', 'stopped'];
 
@@ -295,6 +298,29 @@ class ManagedRegistry {
    * @param {number} [intervalMs] 心跳拍宽（默认 5000）
    * @returns {{ observed: string[], errors: string[] }}
    */
+  /** 单对象 supervise/observe 的**超时上限**（拍宽的倍数）。
+   *  6 倍拍宽 ≈ 30s（默认拍宽 5s）：远大于任何正常监督耗时，又保证有界 ——
+   *  任一 adapter 卡死时心跳在 ~30s 内恢复推进，而不是永久停摆。 */
+  _adapterTimeoutMs(iv) { return Math.max(1000, (iv || 5000) * ADAPTER_TIMEOUT_TICKS); }
+
+  /** 给单对象的监督 promise 加超时（超时即按失败处理，绝不无限等待）。 */
+  _withTimeout(p, ms, id) {
+    let t = null;
+    const timeout = new Promise((resolve) => {
+      t = setTimeout(() => resolve({ __timedOut: true, ok: false, error: '监督超时(' + ms + 'ms)' }), ms);
+      // 不拖住进程退出（守卫优雅停机不被这些计时器拦）
+      if (t && typeof t.unref === 'function') t.unref();
+    });
+    return Promise.race([Promise.resolve(p).finally(() => { if (t) clearTimeout(t); }), timeout])
+      .catch((e) => ({ ok: false, error: (e && e.message) || String(e) }))
+      .then((res) => {
+        if (res && res.__timedOut) {
+          this._log('warn', 'heartbeat 监督超时(' + id + ')：已跳过本拍（防心跳停摆）');
+        }
+        return res;
+      });
+  }
+
   async heartbeat(intervalMs) {
     const iv = intervalMs || 5000;
     const now = Date.now();
@@ -312,7 +338,20 @@ class ManagedRegistry {
         e._nextTickAt = now + tickEvery * iv;
       }
       try {
-        const res = await fn(e);
+        // ⚠ P1 修复（2026-09-13）：**单个 adapter 不得拖死整条心跳**。
+        //
+        //   缺陷：此处 `await fn(e)` 没有任何超时。心跳是 main 收敛 / 沙箱监督 /
+        //     daemon 监督的**唯一周期驱动**（supervisor.js:452-455 在 managedObjects 存在时
+        //     不创建 tick 定时器）。只要任一 adapter 的 promise 永不 settle（ctl 卡死、
+        //     子进程无响应、await 了一个不会 resolve 的 I/O），本循环就永久停在这一拍；
+        //     而 supervisor 侧以 _heartbeatBusy 防重叠 → **心跳永停**，
+        //     表现为「面板开着、服务全死、却没有任何事件」。
+        //   修法：每对象加超时（上限 = 拍宽 × ADAPTER_TIMEOUT_TICKS）。超时按**异常**处理
+        //     （记 errors + warn，并落一条 {ok:false} 观测），使循环继续推进到下一个对象。
+        //     超时值取「拍宽的 6 倍」：远大于正常监督耗时，又保证有界。
+        const res = await this._withTimeout(fn(e), iv * ADAPTER_TIMEOUT_TICKS, e.id);
+        // 超时必须进 errors 汇总（否则调用方只看 errors/observed 会以为一切正常）
+        if (res && res.__timedOut) errors.push(e.id + ':' + (res.error || '监督超时'));
         if (res && typeof res.ok === 'boolean') {
           this.applyObservation(e.id, res);
           // derivePhase（daemon 类）：phase 由 应然×观测 收敛——desired running∧在线→running；
