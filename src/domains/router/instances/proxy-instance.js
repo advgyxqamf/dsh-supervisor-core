@@ -27,6 +27,11 @@ class ProxyInstance {
     this.lastUsedAt = null;      // 最近被请求使用的时刻（闲置回收窗口判断）
     this._unhealthyCount = 0;  // 连续不健康次数（运行时，不落盘——健康监护用：≥N 次自动重启）
     this._restartAt = 0;       // 自动重启退避时刻（防风暴）
+    // 以下三个运行时字段原先**只在 proxy.js 里动态挂载**、未在构造器声明 ——
+    // 本仓教训：未声明的字段易被误判为「不存在」，且不利于读者建立状态全貌。
+    this._monitorFails = 0;    // 健康监测连续失败次数（与 _unhealthyCount **独立**，见 proxy.js 说明）
+    this._lastProblem = null;  // 最近一次实例级问题原因（诊断）
+    this._restartPending = null; // 在途请求期间被延后的重启原因（由 flushRestartPending 消费）
   }
 
   toJSON() {
