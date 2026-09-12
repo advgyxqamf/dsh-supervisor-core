@@ -101,8 +101,28 @@ class InstanceManager {
    */
   _setSandboxSupportedForTest(v) { this._sandboxSupportedOverride = (v === null ? null : v === true); }
 
-  /** 测试/嵌入方可显式覆写沙箱能力（见 `sandboxSupported` 说明）。传 null 恢复实时探测。 */
-  set sandboxSupported(v) { this._sandboxSupportedOverride = (v === null ? null : v === true); }
+  // ⚠ P2 修复（2026-09-12）：**删除 `set sandboxSupported(v)`**。
+  //
+  //   上一轮把 `sandboxSupported` 从「构造期冻结字段」改为实时 getter 时，
+  //   为让既有测试（直接赋值）继续通过，我同时保留了 setter ——
+  //   而**上面的文档注释明确写着「为什么用方法而非 setter」**（setter 会让普通赋值
+  //   静默绕过平台能力门）。两套入口并存 = 注释与实现自相矛盾，
+  //   且真正生效的是那条「不该存在」的 setter（`mgr.sandboxSupported = true` 仍可用）。
+  //   现只保留 `_setSandboxSupportedForTest()` 这一个显式方法入口（测试已改用它）。
+
+  /** 升级作业收尾清理（P1-4 修复，2026-09-12）：
+   *  · `_updJobs[id]` —— 完成后保留 60s 供前端轮询收尾，随后删除；
+   *  · `_updCache[id]` —— **此前只写不删**（全仓无 delete），长寿命守卫下内存单调增长；
+   *    一并清理（它只是「最新版本」缓存，删掉不影响正确性，下次查询重新填）；
+   *  · 定时器 **unref**（60s 延迟不应拖住进程退出；对照 relay/frpmgr.js 的正确写法）。
+   */
+  _scheduleJobCleanup(id) {
+    const t = setTimeout(() => {
+      try { if (this._updJobs[id] && this._updJobs[id].state !== 'running') delete this._updJobs[id]; } catch {}
+      try { delete this._updCache[id]; } catch {}
+    }, 60000);
+    if (t.unref) t.unref();
+  }
 
   /* ── 实例持久化 ── */
   load() {
@@ -378,17 +398,39 @@ class InstanceManager {
     // 端口释放：删除实例必须释放其端口登记（inst:<id> 的 user 端口），否则同端口重建提示「已被占用」
     if (inst) {
       try { ports.unregister('inst:' + id); } catch {}
-      try { ports.release(inst.port); } catch {} // 双保险：owner 释放 + 端口号释放
+      // ⚠ P1-3 修复（2026-09-12）：**删掉不带 ownerId 的 release**。
+      //   缺陷：`ports.release(port)`（无第二参）在 `ports.js` 的语义是
+      //     「**无条件**按端口号删除记录」—— 它会删掉**别人 owner** 的登记。
+      //   可达路径：`load()` 增补时若该端口已被他人登记则 skip（inst:<id> 记录本就不存在），
+      //     删除实例时这次 release 便误删了那条他人记录 → 端口登记丢失、可被重复分配。
+      //   上面 `unregister('inst:' + id)` 已按 owner 精确释放，本行是**冗余且有害**的。
     }
-    service.stopUnit('dsh-web@' + id);
-    // 沙箱实例：异步清理其独立根目录（install 依赖 + data 数据），避免磁盘残留。
-    // 删除是破坏性操作，仅对 sandbox 域生效（main/native 永不删除）；失败只警告不阻塞。
-    if (inst && inst.domain === 'sandbox' && inst.id !== 'main') {
+    // ⚠ P1-2 修复（2026-09-12）：**删数据目录前必须确认单元真的停了**。
+    //
+    //   缺陷：原实现丢弃 `stopUnit` 的返回值，随后 `setImmediate(fs.rmSync(root, {recursive:true}))`
+    //     递归删除实例根目录（含 data/ 会话数据）。而 `stopUnit` 失败时**只 return false**
+    //     （不抛，见 platform/os/service.js:38-42），故对「仍在运行的实例」删 HOME →
+    //     **不可逆的数据丢失** + 孤儿进程继续往已删目录写。
+    //     `service.js:41` 的注释已明确提示「可经 isUnitActive 复核」，但实例域**从未调用**。
+    //
+    //   修法：停止后复核 `isUnitActive`；仍活跃 → **不删目录**，如实上报并把实例留档（不静默）。
+    const unit = 'dsh-web@' + id;
+    service.stopUnit(unit); // 尽力停（失败只 return false，不抛）
+    // 复核：以平台层判定为准（无单元/不支持平台 → false，与 service.js:90 的语义一致）。
+    let stillActive = false;
+    try { stillActive = service.isUnitActive(unit) === true; } catch { stillActive = true; }
+    // 沙箱实例：独立根目录（install 依赖 + data 数据）。删除是破坏性操作，仅对 sandbox 域生效
+    // （main/native 永不删除）；失败只警告不阻塞。
+    if (inst && inst.domain === 'sandbox' && inst.id !== 'main' && !stillActive) {
       const root = this.sandboxRoot(inst);
       setImmediate(() => {
         try { fs.rmSync(root, { recursive: true, force: true }); }
         catch (e) { this.logger.warn && this.logger.warn('清理沙箱目录失败 ' + root + ': ' + e.message); }
       });
+    } else if (stillActive) {
+      // 数据目录受保护：如实上报（调用方据此提示用户「实例未停止，数据已保留」）。
+      this.logger.warn && this.logger.warn('[' + id + '] 单元 ' + unit + ' 仍在运行，已保留实例数据目录（防不可逆丢失）');
+      if (this.events) this.events.append('inst_remove_data_preserved', { id, reason: 'unit-still-active' });
     }
     if (this.onRemove) this.onRemove(id, this.instances);
     if (this.onDestroy) { try { this.onDestroy(id); } catch (e) { this.logger.warn && this.logger.warn('onDestroy(' + id + '): ' + (e && e.message)); } }
@@ -529,7 +571,35 @@ class InstanceManager {
           if (!res.ok) { nj.errors++; nj.error = res.error || 'npm install 失败'; if (task) this.tasks.log(task.id, res.error || 'npm install 失败'); }
         }
       }
-      if (nj.errors) { nj.state = 'failed'; }
+      // ⚠ P1-1 修复（2026-09-12）：**安装失败必须回滚**（原实现只置 failed）。
+      //
+      //   缺陷：回滚逻辑只写在下方「重启后起不来」的分支里；而这里（npm 安装失败）
+      //     与 `if (!sr.ok)`（重启失败）两条路径都**直接置 failed 就结束** ——
+      //     此时实例已被停（:525），磁盘版本可能是半装的：
+      //     **一次失败升级 = 实例停机 + 版本不确定**，且 `supervise` 的 STOPPED 分支明示不动作
+      //     （guardian=true 也不自愈）→ 只能人工处理。
+      //   `oldVersion` 在更早已捕获，本就够用。
+      const rollback = async (why) => {
+        if (!oldVersion) { if (task) this.tasks.log(task.id, '无旧版本可回滚，保持失败态'); return false; }
+        if (task) { this.tasks.log(task.id, '自动回滚到 ' + oldVersion + '…'); }
+        let rbOk = false;
+        if (this.dist) {
+          try {
+            const rbRes = await this.dist.runNpmInstall({
+              pkg: '@deepseek-ai/dsh', version: oldVersion, prefix: installDir, registry: reg,
+              onLine: (l) => { if (task) this.tasks.log(task.id, l); },
+            });
+            rbOk = rbRes.ok;
+          } catch { rbOk = false; }
+        }
+        inst.state.version = this._readInstalledVersion(inst);
+        if (!rbOk) { nj.error = (nj.error || why) + '；自动回滚失败（npm install 退出非 0），请手动处理'; return false; }
+        const rbStart = await this.startInstance(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
+        if (!rbStart || !rbStart.ok) { nj.error = (nj.error || why) + '；回滚后重启也失败'; if (task) this.tasks.log(task.id, '回滚后重启失败：' + ((rbStart && rbStart.error) || '')); return false; }
+        if (task) this.tasks.log(task.id, '回滚完成，版本 ' + (this._readInstalledVersion(inst) || '') + '，实例已重启');
+        return true;
+      };
+      if (nj.errors) { nj.state = 'failed'; await rollback(nj.error); }
       else {
         nj.step = 'restarting';
         // 3) 读新版本 → 拉回实例并验证可启动（防止"显示成功但实例起不来"）。
@@ -539,7 +609,7 @@ class InstanceManager {
         {
           if (task) { const s = this.tasks.step(task.id, '重启实例并验证'); this.tasks.stepState(task.id, this.tasks.get(task.id).steps.indexOf(s), 'running'); }
           const sr = await this.startInstance(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
-          if (!sr || !sr.ok) { nj.errors++; nj.error = '升级后重启失败: ' + ((sr && sr.error) || ''); nj.state = 'failed'; }
+          if (!sr || !sr.ok) { nj.errors++; nj.error = '升级后重启失败: ' + ((sr && sr.error) || ''); nj.state = 'failed'; await rollback(nj.error); }
           else {
             // 等待端口就绪并确认单元存活（统一走 dist.waitPortHealthy）。
             // 注意：DSH 进程可能先监听端口、随后因插件兼容崩溃（如 dsh-mos 引用的 API 被新版移除）——
@@ -565,33 +635,10 @@ class InstanceManager {
               nj.state = 'failed';
               if (task) this.tasks.log(task.id, '实例启动失败：端口 ' + inst.port + ' 未就绪（详见 dsh.log / systemd 单元状态）');
               // ── 自动回滚：装回升级前版本并重启，保证实例永远可用 ──
-              if (oldVersion) {
-                if (task) { this.tasks.log(task.id, '自动回滚到 ' + oldVersion + '…'); const s = this.tasks.step(task.id, '自动回滚到 ' + oldVersion); this.tasks.stepState(task.id, this.tasks.get(task.id).steps.indexOf(s), 'running'); }
-                // 统一走 dist 安装执行器（回滚 = 装回旧版本，同 --prefix 独立安装）
-                let rbOk = false;
-                if (this.dist) {
-                  const rbRes = await this.dist.runNpmInstall({
-                    pkg: '@deepseek-ai/dsh',
-                    version: oldVersion,
-                    prefix: installDir,
-                    registry: reg,
-                    onLine: (l) => { if (task) this.tasks.log(task.id, l); },
-                  });
-                  rbOk = rbRes.ok;
-                }
-                inst.state.version = this._readInstalledVersion(inst);
-                if (rbOk) {
-                  const rbStart = await this.startInstance(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
-                  if (task) this.tasks.log(task.id, '回滚完成，版本 ' + (this._readInstalledVersion(inst) || '') + '，实例已重启');
-                  if (!rbStart || !rbStart.ok) {
-                    nj.error += '；回滚后重启也失败';
-                    if (task) this.tasks.log(task.id, '回滚后重启失败：' + ((rbStart && rbStart.error) || ''));
-                  }
-                } else {
-                  nj.error += '；自动回滚失败（npm install 退出非 0），请手动处理';
-                  if (task) this.tasks.log(task.id, '自动回滚失败，请手动处理');
-                }
-              }
+              // P1-1 修复：改为调用**共用的** rollback() —— 此前这里有一份内联实现，
+              //   而另外两条失败路径（npm 安装失败 / 重启失败）根本没有回滚。
+              //   三处收敛到一个实现，语义与文案统一（含「回滚也失败」的如实上报）。
+              await rollback(nj.error);
             }
           }
           }
@@ -608,7 +655,8 @@ class InstanceManager {
       }
       this.save();
       // 完成后保留 60s 供前端轮询收尾，随后清理（防表无限增长）
-      setTimeout(() => { if (this._updJobs[id] && this._updJobs[id].state !== 'running') delete this._updJobs[id]; }, 60000);
+      // P1-4：定时器 unref（60s 清理不应拖住进程退出）+ 同时清理 _updCache 条目。
+      this._scheduleJobCleanup(id);
     })().catch((e) => {
       // RC4 执行契约兜底：作业体任何 reject（npm 异常/网络栈错误等）必达终态——
       // 任务落 failed、_updJobs 释放，绝不永久 running 锁死实例（审计 P2-2 根治）。
@@ -620,7 +668,7 @@ class InstanceManager {
       }
       try { if (task) this.tasks.fail(task.id, nj.error || ('升级作业异常: ' + ((e && e.message) || e))); } catch {}
       try { this.save(); } catch {}
-      try { setTimeout(() => { if (this._updJobs[id] && this._updJobs[id].state !== 'running') delete this._updJobs[id]; }, 60000); } catch {}
+      try { this._scheduleJobCleanup(id); } catch {}
     });
     return { ok: true, jobId: id };
   }
