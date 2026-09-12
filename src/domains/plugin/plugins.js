@@ -177,15 +177,32 @@ class PluginManager {
   }
 
   /** 解析插件在目标 loader 树中的补丁目标 entry id：
-   *  - native：优先运行时 inventory（moduleName 含插件名）的 entryId；不可达时回落包名；
+   *  - native：优先运行时 inventory 的 entryId；不可达时回落包名；
    *  - sandbox：包名（bundle 插件 loader entry id = 包名，已由 __DSH_BOOT__ 清单证明）；
-   *  insert/include 型（非 bundle）条目的自定义 id 需 inventory 支撑（P3），未达时按包名处理并记录。 */
+   *  insert/include 型（非 bundle）条目的自定义 id 需 inventory 支撑（P3），未达时按包名处理并记录。
+   *
+   *  ⚠ P1-5 修复（2026-09-12）：匹配从**子串**改为**版本感知的包名边界匹配**。
+   *
+   *    缺陷：原为 `moduleName.includes(name)` —— 于是停用 `@scope/dsh-tool` 时，
+   *      `@scope/dsh-tool-extra` 的 entryId 也被收进 ids → 下游 `ids.includes(e.id)`
+   *      把它一并置 `disabled`（**误伤无关插件**）。
+   *      典型反例：`dsh-tool` 是 `dsh-tool-extra` 的子串。
+   *
+   *    修法：按「包名后紧跟 / 或字符串结束」判定边界，即 `name` 或 `name/...`
+   *      （覆盖 `@scope/pkg` 与其子路径导入），但**不接受** `name-extra` 这类前缀延长。
+   *      同时保留精确相等的情形（moduleName 恰为包名）。
+   */
   async _patchEntryIdsForPlugin(target, name) {
     const ids = new Set([name]); // 包名兜底（bundle 插件的 loader entry id）
     if (target.kind === 'native') {
       try {
         const entries = ((await this.inventory()) || {}).entries || [];
-        for (const e of entries) if (String(e.moduleName || '').includes(name)) ids.add(e.entryId);
+        for (const e of entries) {
+          const mn = String(e.moduleName || '');
+          // 包名边界匹配：相等，或以 `<name>/` 开头（子路径），或以 `<name>@` 开头（带版本后缀）。
+          // 明确**排除** `-`/`.` 等可延长包名的字符（否则 dsh-tool 会吞掉 dsh-tool-extra）。
+          if (mn === name || mn.startsWith(name + '/') || mn.startsWith(name + '@')) ids.add(e.entryId);
+        }
       } catch {}
     }
     return [...ids];

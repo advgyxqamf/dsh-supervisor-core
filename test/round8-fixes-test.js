@@ -173,6 +173,24 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   // 反向：确认旧的「无条件注入」写法已消失（那正是缺陷本体）
   check('J-g 旧的 Object.assign(..., { npm_config_registry: reg }) 已消失',
     !/npm_config_registry: reg, NPM_CONFIG_REGISTRY: reg \}\);/.test(pg), '已改');
+
+  // P1-5：停用插件的 entryId 匹配不得用子串（会误伤 dsh-tool-extra）
+  const m = pg.match(/async _patchEntryIdsForPlugin\(target, name\) \{[\s\S]*?\n  \}/);
+  const fbody = m ? m[0] : '';
+  check('J-g 定位到 _patchEntryIdsForPlugin', !!m, m ? 'ok' : '未找到');
+  check('J-g 不再用 moduleName.includes(name) 子串匹配',
+    !/\.includes\(name\)/.test(fbody), '已改');
+  check('J-g 改为包名边界匹配（相等 / 子路径 / 带版本）',
+    /mn === name/.test(fbody) && /mn\.startsWith\(name \+ '\/'\)/.test(fbody) && /mn\.startsWith\(name \+ '@'\)/.test(fbody),
+    '有');
+  // 行为级：复现边界判定
+  {
+    const name = '@scope/dsh-tool';
+    const hit = (mn) => mn === name || mn.startsWith(name + '/') || mn.startsWith(name + '@');
+    check('J-g 行为：dsh-tool-extra **不**被匹配（误伤修复）', hit('@scope/dsh-tool-extra') === false, 'false');
+    check('J-g 行为：dsh-tool 自身被匹配', hit('@scope/dsh-tool') === true, 'true');
+    check('J-g 行为：子路径被匹配', hit('@scope/dsh-tool/lib/x.js') === true, 'true');
+  }
 }
 
 const failed = results.filter((r) => !r);
