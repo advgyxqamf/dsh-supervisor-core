@@ -317,8 +317,20 @@ class PluginManager {
       let settled = false;
       let timer = null; // 提升到 executor 顶层：settle 必须能访问（此前 const 定义在 .then 内，settle 引用越界 → ReferenceError → resolve 不执行 → job 永久 running）
       const settle = (v) => { if (!settled) { settled = true; if (timer) clearTimeout(timer); resolve(v); } };
-      this._registryOriginAsync().then((reg) => {
-        const env = Object.assign({}, process.env, target.env, { npm_config_registry: reg, NPM_CONFIG_REGISTRY: reg });
+      this._registryOriginAsync().then((regRaw) => {
+        // ⚠ P1-6 修复（2026-09-12）：registry 为 null 时**不得写进 env**。
+        //
+        //   缺陷：`selectRegistry` 在全镜像不可达时**返回 null**（dist/index.js:283 的分支），
+        //     而 Node 的 spawn 会把 env 值强转字符串 —— `{X: null}` 变成 `'null'`（已实测）。
+        //     于是 pnpm 收到 `npm_config_registry='null'` → 报错内容与真实原因（无可用镜像）无关，
+        //     把排查引向错误方向。
+        //
+        //   修法：null/空 → **不注入该键**（让 pnpm 用自身默认），并把无可用镜像如实记日志。
+        const reg = regRaw || null;
+        const envBase = Object.assign({}, process.env, target.env);
+        if (reg) { envBase.npm_config_registry = reg; envBase.NPM_CONFIG_REGISTRY = reg; }
+        else if (this.logger && this.logger.warn) this.logger.warn('plugin CLI: 无可用的 registry 镜像，回退 pnpm 默认（npmjs.org）');
+        const env = envBase;
         let child;
         try {
           // 沙箱 target：固定 pnpm store（--store-dir 传给 dsh plugin → pnpm），

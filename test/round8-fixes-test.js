@@ -158,6 +158,23 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     !/dep\.form === 'sea-binary'/.test(codeOnly), '已清理');
 }
 
+// ── J-g：插件域的两个 P1 ──
+{
+  const pm = read('src/domains/plugin/pluginmarket.js');
+  const pg = read('src/domains/plugin/plugins.js');
+  // P1-3：重定向目标必须校验协议（file:// 会让 http.get 同步抛 → uncaughtException）
+  const guards = (pm.match(/重定向到不支持的协议/g) || []).length;
+  check('J-g getJson/getText 均校验重定向协议', guards >= 2, guards + ' 处');
+  check('J-g 保留跳数上限（防重定向环）', /redirectsLeft <= 0/.test(pm), '有');
+  // P1-6：registry 为 null 时不得写进 env（Node 会把 null 转成 'null'）
+  check('J-g 仅在 reg 非空时注入 npm_config_registry',
+    /if \(reg\) \{ envBase\.npm_config_registry = reg;/.test(pg), '已改');
+  check('J-g 无可用镜像时如实记日志', /无可用的 registry 镜像/.test(pg), '有');
+  // 反向：确认旧的「无条件注入」写法已消失（那正是缺陷本体）
+  check('J-g 旧的 Object.assign(..., { npm_config_registry: reg }) 已消失',
+    !/npm_config_registry: reg, NPM_CONFIG_REGISTRY: reg \}\);/.test(pg), '已改');
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

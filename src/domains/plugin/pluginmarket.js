@@ -49,7 +49,15 @@ function getJson(url, timeoutMs = 10000, redirectsLeft = 5) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (redirectsLeft <= 0) return reject(new Error('too many redirects from ' + url));
-        return getJson(res.headers.location, timeoutMs, redirectsLeft - 1).then(resolve, reject);
+        // ⚠ P1-3 修复（2026-09-12）：重定向目标**必须校验协议**。
+        //   缺陷：直接把 `res.headers.location` 递归传回；若它是 `file://…`，
+        //     `mod.get()`（http/https 模块）会**同步抛 ERR_INVALID_PROTOCOL**，
+        //     而此处位于响应回调内 → 逃逸为进程级 uncaughtException。
+        //   触发面：registry 可配任意 https（仅校验 ^https?://），或其 302 可达第三方镜像。
+        const next = String(res.headers.location);
+        if (!/^https?:\/\//i.test(next)) return reject(new Error('重定向到不支持的协议: ' + next.slice(0, 64)));
+
+        return getJson(next, timeoutMs, redirectsLeft - 1).then(resolve, reject);
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
@@ -335,7 +343,10 @@ function getText(url, timeoutMs = 8000, redirectsLeft = 5) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (redirectsLeft <= 0) return reject(new Error('too many redirects from ' + url));
-        return getText(res.headers.location, timeoutMs, redirectsLeft - 1).then(resolve, reject);
+        // P1-3：同上 —— 重定向目标必须校验协议（file:// 会让 http.get 同步抛）。
+        const next = String(res.headers.location);
+        if (!/^https?:\/\//i.test(next)) return reject(new Error('重定向到不支持的协议: ' + next.slice(0, 64)));
+        return getText(next, timeoutMs, redirectsLeft - 1).then(resolve, reject);
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
