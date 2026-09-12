@@ -243,6 +243,14 @@ const auxMethods = {
     } catch (e) {
       if (this._ccLogin && this._ccLogin.server) { const s = this._ccLogin.state; try { this._ccLogin.server.close(); } catch {} if (s) { try { ports.unregister('oauth:' + s); } catch {} } this._ccLogin = null; }
       this._ccLoginPromise = null;
+      // ⚠ P2-6 修复（2026-09-12）：超时/异常分支也必须清理 resolve/reject ——
+      //   成功分支清了两者，本分支此前**只清 promise**，`_ccLoginReject` 残留。
+      //   而浏览器退出回调读的是**当前** `this._ccLoginReject`（不绑定是哪一轮）：
+      //     上一轮超时 → 残留旧 reject → 用户再次发起登录（装入新 reject）→
+      //     上一轮的浏览器进程此时退出 → 旧回调取到**新** login 的 reject
+      //     → 「浏览器已关闭，登录已取消」**误杀新登录**。
+      //   清掉后，旧轮次的退出回调找不到 reject，自然 no-op。
+      this._ccLoginResolve = this._ccLoginReject = null;
       return { ok: false, error: e.message };
     } finally {
       // 登录结束（成功/失败/超时）：60s 后清理本次登录的临时 profile（浏览器可能仍开着，延迟清理）
@@ -315,6 +323,17 @@ const auxMethods = {
       task = this.tasks.begin('proxy-app', 'update', { id: appId, name: a.name }, { to: a.registry, createdBy: 'user' });
       this.tasks.start(task.id);
       this.tasks.log(task.id, '更新 ' + a.name + '（' + a.registry + '）');
+      // ⚠ P2-1 修复（2026-09-12）：**把逐实例步骤登记进 task**。
+      //
+      //   缺陷：此前只维护 `job.steps`，**从未调用 `tasks.step()`** ——
+      //     而 `proxyUpdateStatus` 优先读 task 分支（只要 tasks 已注入就必然命中），
+      //     于是返回的 steps 恒为空数组、restarted（= task.steps 中 done 的个数）恒 0。
+      //     前端「逐实例进度」名为实现、实为死数据；只有 `this.tasks` 未注入时才走 job 分支 ——
+      //     同一事实两处实现且已分叉。
+      //
+      //   现：每个实例在 task 里登记一个 step，进度按 index 同步推进；
+      //     仍保留 `job.steps`（job 分支与既有测试依赖），但两者由同一处更新，不再分叉。
+      for (const { inst } of insts) this.tasks.step(task.id, inst.maskedKey);
       job.taskId = task.id;
     }
     (async () => {
@@ -335,26 +354,31 @@ const auxMethods = {
         }
         // 同步清 ProxyProvider 的缓存定位（其 _cachedPkgBin 读磁盘，删除后自然失效）
       } catch {}
+      // 步骤状态同步辅助（P2-1）：job.steps（供 job 分支/测试）与 task.steps（供前端）同源更新。
+      const setStep = (i, state) => {
+        job.steps[i].state = state; job.steps[i].ts = Date.now();
+        if (task) { try { this.tasks.stepState(task.id, i, state); } catch {} }
+      };
       // 1) 停止全部实例
       for (let i = 0; i < insts.length; i++) {
         const { provider, inst } = insts[i];
-        job.steps[i].state = 'stopping'; job.steps[i].ts = Date.now();
-        try { provider.stopInstance(inst); } catch (e) { job.errors++; job.steps[i].state = 'failed'; }
+        setStep(i, 'stopping');
+        try { provider.stopInstance(inst); } catch (e) { job.errors++; setStep(i, 'failed'); }
       }
       await new Promise((r) => setTimeout(r, 600));
       // 2) 逐个启动
       for (let i = 0; i < insts.length; i++) {
         const { provider, inst } = insts[i];
-        if (!inst.key) { job.errors++; job.steps[i].state = 'failed'; continue; }
-        job.steps[i].state = 'starting'; job.steps[i].ts = Date.now();
+        if (!inst.key) { job.errors++; setStep(i, 'failed'); continue; }
+        setStep(i, 'starting');
         const r = await provider.startInstance(inst);
         if (r.ok) {
           job.restarted++;
           // 探活拿新版本（刷新 version，避免前端显示旧版本误报「需更新」）
           await provider._waitHealthy(inst).catch(() => false);
-          job.steps[i].state = 'done';
+          setStep(i, 'done');
         }
-        else { job.errors++; job.steps[i].state = 'failed'; }
+        else { job.errors++; setStep(i, 'failed'); }
       }
       for (const provider of targets) provider.proxyRunning = true;
       this._save();

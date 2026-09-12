@@ -96,6 +96,41 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
   check('E-d 收尾限定于 proxy 类（direct 无实例/端口）', /p\.kind === 'proxy'/.test(body), '有');
 }
 
+// ── E-e：applyProxyUpdate 的进度必须写进 task（P2-1）──
+//   行为级：task 的 steps 能被子实例登记并推进 —— 这是前端读到的那个事实源。
+{
+  const { TaskRegistry } = require(path.join(ROOT, 'src', 'platform', 'tasks.js'));
+  const os = require('node:os');
+  const tmpT = path.join(os.tmpdir(), 'p21-task-' + process.pid + '.json');
+  const reg = new TaskRegistry({ file: tmpT });
+  const task = reg.begin('proxy-app', 'update', { id: 'cc', name: 'CC' }, { to: 'x', createdBy: 'user' });
+  reg.start(task.id);
+  reg.step(task.id, 'key-a'); reg.step(task.id, 'key-b');
+  reg.stepState(task.id, 0, 'done'); reg.stepState(task.id, 1, 'failed');
+  const v = reg.list('proxy-app').find((x) => x.target.id === 'cc');
+  check('E-e task 能登记逐实例步骤', v.steps.length === 2, v.steps.length + ' 个');
+  check('E-e 步骤状态可推进（前端读到的即此）',
+    v.steps[0].state === 'done' && v.steps[1].state === 'failed',
+    JSON.stringify(v.steps.map((s) => s.state)));
+  check('E-e restarted 语义（done 计数）可算出非 0',
+    v.steps.filter((s) => s.state === 'done').length === 1, '1');
+  try { fs.rmSync(tmpT, { force: true }); } catch {}
+}
+// 源码级：确认 update 流程真的调了 tasks.step / tasks.stepState（而非只维护 job.steps）
+check('E-e 源码调用 tasks.step 登记步骤', /this\.tasks\.step\(task\.id/.test(ops), '有');
+check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(task\.id/.test(ops), '有');
+
+// ── E-f：OAuth 登录的**两条退出路径**必须对称清理（P2-6）──
+//   成功与超时/异常分支都必须清 `_ccLoginResolve`/`_ccLoginReject`；
+//   否则残留的 reject 会被上一轮浏览器的退出回调取到，误杀**下一次**登录。
+{
+  const n = (ops.match(/_ccLoginResolve = this\._ccLoginReject = null/g) || []).length;
+  check('E-f 成功与失败分支都清理 resolve/reject（两处）', n === 2, n + ' 处');
+  // 反向：确认 "只清 promise" 的不对称写法已不存在（该写法恰是缺陷本体）
+  const bad = /this\._ccLoginPromise = null;\s*\n\s*return \{ ok: false/.test(ops);
+  check('E-f 失败分支不再只清 promise 就返回', !bad, '已对称');
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);
