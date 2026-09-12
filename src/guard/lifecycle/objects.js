@@ -259,9 +259,18 @@ class ManagedRegistry {
     return { ok: true };
   }
 
+  /** 释放本对象持有的端口（按 owner）。
+   *
+   *  ⚠ 2026-09-12（P2-2 配套）：`PortRegistry.release()` 现已**真正支持** `ownerId` 校验
+   *    （此前第二参被静默忽略，故这里曾有 `catch { release(port) }` 的回退）。
+   *    回退现已删除 —— 保留它会绕过 owner 判定，正是 P2-2 要堵的「误删他人端口登记」。
+   *    记录返回值仅用于日志（不匹配即 no-op 是期望行为，不是错误）。
+   */
   _releasePort(port, ownerId) {
     if (!this.ports || typeof this.ports.release !== 'function') return;
-    try { this.ports.release(port, ownerId); } catch { try { this.ports.release(port); } catch {} }
+    try { this.ports.release(port, ownerId); } catch (err) {
+      this._log('warn', 'releasePort(' + port + '/' + ownerId + '): ' + (err && err.message));
+    }
   }
   _syncPortsOwner(e, ensure) {
     if (!this.ports || typeof this.ports.allocateMark !== 'function') return;

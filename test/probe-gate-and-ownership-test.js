@@ -145,6 +145,20 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
     inlineAll.length === 1, inlineAll.length + ' 处');
 }
 
+// ── E-i：objects.js 的端口释放必须**带 owner**（P2-2 配套）──
+//   缺陷：`release(port, ownerId)` 此前忽略第二参，故 objects.js 有个
+//         `catch { release(port) }` 回退 —— 那会绕过 owner 判定（误删他人登记）。
+//   现已真正支持 owner 校验，回退必须删除。
+{
+  const objSrc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'objects.js'), 'utf8');
+  const body = objSrc.match(/_releasePort\(port, ownerId\) \{[\s\S]*?\n  \}/);
+  check('E-i 定位到 _releasePort', !!body, body ? 'ok' : '未找到');
+  const code = body ? body[0] : '';
+  check('E-i 按 owner 释放', /release\(port, ownerId\)/.test(code), '有');
+  // 反向：不得再有无 owner 的回退（那正是绕过 owner 判定的路径）
+  check('E-i 无 owner 的回退已删除', !/release\(port\)/.test(code), '已删');
+}
+
 // ── E-g：`setProviderKeys(add)` 的 added 必须反映真实结果（P2-5）──
 //   行为级用不到（需真供应商），故做源码级不变量 + 契约字段检查。
 {
