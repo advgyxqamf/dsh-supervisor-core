@@ -88,4 +88,36 @@ function resolveExecutable(base, opts) {
   return null;
 }
 
-module.exports = { resolveExecutable, candidateNames, standardDirs, firstExecutable };
+/**
+ * 解析 **npm** 的可执行路径（跨平台）。
+ *
+ * ⚠ 为什么必须存在（P1-C，2026-09-12）：
+ *   Windows 上 npm 的实际可执行是 `npm.cmd`，而 Node 的 `spawn`/`execFileSync`
+ *   **不做 PATHEXT 解析**（`.cmd`/`.bat` 必须由 cmd.exe 承载；自 CVE-2024-27980 起
+ *   Node 也不再隐式代跑 `.cmd`）→ 传裸 `'npm'` 一律 `ENOENT`。
+ *
+ *   旧实现在**三处**各自硬编码 `'npm'`（`domains/dist`、`guard/native`、`platform/config`），
+ *   于是 Windows 用户的「升级内核 / 安装 / 卸载 DSH」全部失败，且错误只是含糊的 ENOENT。
+ *   壳仓早已正确实现同一事实（`core.rs` 的 `npm_exe()` → `npm.cmd`），两仓答案不一致。
+ *
+ *   修法：**唯一解析入口**。Windows 走 PATHEXT 解析（优先 `.cmd`），其余平台直接用 `npm`。
+ *   解析失败时返回**可执行名**而非 null —— 让调用方沿用既有错误路径（报「npm 不可用」），
+ *   而不是把 null 传进 spawn 变成更难懂的 TypeError。
+ *
+ * @param {{platform?:string}} [opts] platform 可注入，便于纯函数测试
+ * @returns {string} 可执行的绝对路径，或回退名（'npm'）
+ */
+function npmBin(opts) {
+  const pl = (opts && opts.platform) || process.platform;
+  if (pl !== 'win32') return 'npm';
+  // Windows：先按逻辑名解析（候选名含 npm.cmd / npm.bat / npm.exe，PATHEXT 展开）。
+  const resolved = resolveExecutable('npm', { extraDirs: [
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'npm') : null,
+  ].filter(Boolean) });
+  if (resolved) return resolved;
+  // 解析不到时**仍返回 npm.cmd**：Windows 上 `npm` 无扩展名可执行的概率为零，
+  // 而 `npm.cmd` 至少能在 PATH 生效时被 cmd.exe 找到（把失败留给定调用方的错误处理）。
+  return 'npm.cmd';
+}
+
+module.exports = { resolveExecutable, candidateNames, standardDirs, firstExecutable, npmBin };

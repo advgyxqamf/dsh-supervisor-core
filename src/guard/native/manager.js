@@ -14,6 +14,12 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
 const ex = require('../../platform/exec');
+// P1-C：npm 的统一解析入口（Windows 上是 npm.cmd）。
+//   ⚠ 经**模块对象**调用而非解构：解构是值绑定，无法被测试替换 ——
+//     曾因此让行为测试意外执行了真实 npm（见构造函数 `_npmBin` 的说明）。
+const execPath = require('../../platform/os/exec-path');
+// npm 可执行：优先用注入值（测试），否则经跨平台解析。
+function npmExe(self) { return (self && self._npmBin) || execPath.npmBin(); }
 const { semverCompare, VERSION_RE } = require('../../domains/dist/index');
 
 class NativeManager {
@@ -26,6 +32,16 @@ class NativeManager {
     this.manifestFile = path.join(this.stateDir, 'native-manifest.json');
     this.dshHome = path.join(os.homedir(), '.dsh'); // DSH 数据目录（守卫数据在 ~/.dsh/supervisor，分开）
     this.npmRoot = opts.npmRoot || null;    // npm 全局根（测试可注入隔离目录）
+    // npm 可执行的解析入口（**依赖注入**，默认经跨平台解析）。
+    //   ⚠ 为什么必须可注入（2026-09-12 事故）：
+    //     我写 P1-F 行为测试时用「patch 模块导出」的方式替换 npmBin，
+    //     但 `const { npmBin } = require(...)` 是**值绑定**，patch 无效 ——
+    //     于是测试里那次「伪造的卸载挂起」实际执行了**真实 npm**。
+    //     该次恰好是 no-op（目标 prefix 无此包），但这是**侥幸**：
+    //     若目标 prefix 真装了包，测试就会删掉用户环境。
+    //     故：把 npm 可执行做成构造期可注入依赖，测试才能在**结构上**
+    //     保证不触碰真实 npm（而不是依赖环境巧合）。
+    this._npmBin = opts.npmBin || null;
     this.hooks = opts.hooks || {};          // 守卫生命周期钩子（supervisor 注入）：升级需停/起 DSH 时回调
     this.tasks = opts.tasks || null;        // 统一安装/更新任务注册表（持久化历史 + 统一 API）
     // 升级状态机字段（idle | installing | restarting | verifying | rolling_back | done | failed）
@@ -167,10 +183,10 @@ class NativeManager {
     //   npm/node 在 PATH 指向网络盘、或 npm 因缓存锁挂起时会无限阻塞守卫事件循环。
     const nv = ex.runOut('node', ['--version']);
     if (!nv || !nv.trim()) errors.push('node 未安装或不可执行');
-    const npmv = ex.runOut('npm', ['--version']);
+    const npmv = ex.runOut(npmExe(this), ['--version']);
     if (!npmv || !npmv.trim()) errors.push('npm 未安装或不可执行');
     let npmRoot = this.npmRoot;
-    if (!npmRoot) { const r = ex.runOut('npm', ['root', '-g']); if (r) npmRoot = r.trim(); }
+    if (!npmRoot) { const r = ex.runOut(npmExe(this), ['root', '-g']); if (r) npmRoot = r.trim(); }
     return { ok: errors.length === 0, errors, npmRoot };
   }
 
@@ -204,7 +220,7 @@ class NativeManager {
     let npmRoot = this.npmRoot;
     let pkgDir = null;
     try {
-      if (!npmRoot) { const r = ex.runOut('npm', ['root', '-g']); if (r) npmRoot = r.trim(); }
+      if (!npmRoot) { const r = ex.runOut(npmExe(this), ['root', '-g']); if (r) npmRoot = r.trim(); }
       pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh');
     } catch {}
     this._saveManifest({
@@ -643,19 +659,52 @@ class NativeManager {
     }
     this.uninstalling = true;
     if (this.events) this.events.append('native_uninstall_started', {});
+    try {
     // npm uninstall 异步执行：同步 execFileSync 会冻结整个守卫（tick/API 全挂），必须避免
     // 关键：注入 --prefix（与 install/_recordManifest 一致）——否则测试/自定义环境会真实卸载宿主全局 DSH
     const uninstallArgs = ['uninstall', '-g'];
     if (this.npmRoot) uninstallArgs.push('--prefix', this.npmRoot);
     uninstallArgs.push(this.config.packageName || '@deepseek-ai/dsh');
+    // ⚠ P1-F 修复（2026-09-12）：**必须有超时看门狗**。
+    //   旧实现只监听 error/exit，且 `this.uninstalling` 只在本函数末尾复位 ——
+    //   npm 一旦挂起（registry 不可达、凭证助手弹窗等待、网络盘卡住），
+    //   Promise **永不 settle** → `uninstalling` 永为真 → 之后 install/uninstall **全部被拒**，
+    //   任务永久 running，用户只能重启守卫。
+    //   对照：同仓安装路径（domains/dist.runNpmInstall）本就有 timeout + killTree，唯独卸载漏了。
+    //   现：超时 → 杀进程树 → 以明确的「超时」结论收尾（而非无限等待）。
+    // 超时**可注入**（测试用）：默认与 Rust 侧 npm 上限（15min）同量级。
+    //   ⚠ 为什么必须可注入：真实 15 分钟无法在测试里等待，于是「超时是否真的会触发」
+    //     就只能靠静态断言（看代码形状）—— 而静态断言**无法证明行为**。
+    //     可注入之后才能做行为级验证（见 test/uninstall-timeout-behavior-test.js）。
+    const UNINSTALL_TIMEOUT_MS = (typeof this.config.uninstallTimeoutMs === 'number' && this.config.uninstallTimeoutMs > 0)
+      ? this.config.uninstallTimeoutMs
+      : 15 * 60 * 1000;
+    let uninstallTimedOut = false;
     const exitCode = await new Promise((resolve) => {
       let child;
       try {
-        child = spawn('npm', uninstallArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(npmExe(this), uninstallArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
       } catch (e) { return resolve(-1); }
       child.stdout.resume(); child.stderr.resume();
-      child.on('error', () => resolve(-1));
-      child.on('exit', (code) => resolve(code));
+      let done = false;
+      const finish = (code) => { if (done) return; done = true; clearTimeout(timer); resolve(code); };
+      const timer = setTimeout(() => {
+        uninstallTimedOut = true;
+        this.logger.warn && this.logger.warn(
+          'npm uninstall 超时（' + Math.round(UNINSTALL_TIMEOUT_MS / 1000) + 's），终止进程树'
+        );
+        // 尽力杀进程树：Windows 上只 kill 父进程会留下 npm.cmd 下的 node 子进程。
+        try {
+          const { killTree } = require('../../platform/os/process');
+          killTree(child.pid, 'SIGKILL', () => finish(-1));
+        } catch (e) {
+          try { child.kill('SIGKILL'); } catch (e2) {}
+          finish(-1);
+        }
+      }, UNINSTALL_TIMEOUT_MS);
+      if (timer.unref) timer.unref(); // 不因看门狗阻止进程退出
+      child.on('error', () => finish(-1));
+      child.on('exit', (code) => finish(code == null ? -1 : code));
     });
     if (exitCode === 0 && m) {
       if (m.packageDir) rm(m.packageDir);
@@ -675,15 +724,27 @@ class NativeManager {
         'npm uninstall exit ' + exitCode + '，保留 manifest 以便重试（数据路径未删）'
       );
     }
-    this.uninstalling = null;
-    this.lastUninstall = { ok: exitCode === 0, removed, error: exitCode === 0 ? null : ('npm uninstall 退出码 ' + exitCode), at: new Date().toISOString() };
+    // 锁的释放统一由外层 `finally` 负责（含异常路径）——此处不再重复复位。
+    const uninstallError = exitCode === 0
+      ? null
+      : (uninstallTimedOut
+        ? ('npm uninstall 超时（' + Math.round(UNINSTALL_TIMEOUT_MS / 1000) + 's）已终止，包可能仍在，可重试')
+        : ('npm uninstall 退出码 ' + exitCode));
+    this.lastUninstall = { ok: exitCode === 0, removed, error: uninstallError, timedOut: uninstallTimedOut, at: new Date().toISOString() };
     if (this.events) this.events.append('native_uninstalled', { removed });
     this.logger.info && this.logger.info('native uninstalled, removed ' + removed.length + ' paths');
     if (task) {
       if (exitCode === 0) { this.tasks.log(task.id, '卸载完成，清理 ' + removed.length + ' 个路径'); this.tasks.succeed(task.id); }
       else this.tasks.fail(task.id, 'npm uninstall 退出码 ' + exitCode);
     }
-    return { ok: exitCode === 0, removed };
+    // `timedOut` 必须出现在**返回值**里（不只 lastUninstall）：
+    //   调用方（面板/任务）据此把「超时」与「普通失败」区分开 —— 前者应提示可重试。
+    return { ok: exitCode === 0, removed, timedOut: uninstallTimedOut, error: uninstallError };
+    } finally {
+      // 结构性保证：本函数任何路径（含抛出）都必须释放卸载锁 ——
+      //   旧实现只在正常路径末尾复位，任何异常都会让 `uninstalling` 永久为真。
+      this.uninstalling = null;
+    }
   }
 }
 
