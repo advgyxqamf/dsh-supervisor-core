@@ -16,9 +16,42 @@ on:
   push:
     tags:
       - 'v*'
+    # P1-B（2026-09-12）：日常推送也要跑回归 —— 见下方 `test` job 的说明。
+    branches:
+      - master
+  pull_request:
   workflow_dispatch: {}
 
 jobs:
+  # ══════════════════════════════════════════════════════════════════════════
+  # test：内核回归测试（P1-B 接线，2026-09-12）
+  #
+  # ⚠ 为什么必须单独加这个 job：
+  #   此前 `npm test` **没有 Linux 执行点** —— 构建矩阵只有 win/mac（Linux 由本地生产），
+  #   而 `ci-core.sh`（内含 npm test）只在 tag + need_build 时、在 win/mac runner 上跑。
+  #   于是「平台能力矩阵由可执行断言支撑」这条不变量在产线上不成立：
+  #   改坏 platform/os/ 或版本映射，CI 依然全绿。
+  #
+  #   本 job 只做测试，**不构建、不发布** —— 纯 JS 项目，ubuntu-latest 约 1 分钟（1x 计费），
+  #   不触碰「Linux 不在 CI 生产」的既有额度决策（那条针对的是**发布**）。
+  # ══════════════════════════════════════════════════════════════════════════
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 内核回归测试（npm test）
+        shell: bash
+        run: |
+          # 不截断：门禁失败时断言文案就是排障依据。
+          set -o pipefail
+          npm test 2>&1 | tail -60
+
   # ── precheck：该 tag 版本是否已在 npm 全部发布？ ──
   # 为什么需要：全平台本地发布后，tag 仍会触发本 workflow。若无此判断，
   #   每次发布都会白烧一轮 mac/win 矩阵（macOS 按 10x 计费，约 110 分钟/次）。

@@ -275,6 +275,14 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 > `test/api-contract-test.js`（含 `POST /native/uninstall` 契约断言）、`test/plugin-change-restart-test.js`（含插件卸载场景）
 > 已从 `npm test` 排除，仅允许作为独立脚本显式单独调用（`node test/<file>` 或
 > `npm run test:native-uninstall` / `test:plugin-change-restart` / `test:api-contract`）。除非用户明确指令，不得擅自运行。
+>
+> ⚠ **补充（2026-09-12，P1-F 事故后定规）**：需要验证卸载逻辑的行为时，
+> **必须经构造期依赖注入**（`new NativeManager({ npmBin: <假可执行> })`），
+> **绝不**用「patch 模块导出」的方式替换 npm —— 那对 `const { npmBin } = require(...)`
+> 这类值绑定无效，会让测试**真的执行 `npm uninstall -g`**（已真实发生；
+> 那次因目标 prefix 无此包而侥幸为 no-op，但这是运气不是设计）。
+> 参考实现：`test/uninstall-timeout-behavior-test.js`（注入会挂起的假 npm，
+> 验证超时收尾与锁释放，全程不触碰真实 npm）。
 
 
 ## 桌面产品：环境引导 + 守卫自更新（Phase 1/2）
