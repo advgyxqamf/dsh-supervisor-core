@@ -38,6 +38,9 @@ const DEFAULTS = {
   updateGraceMs: 300000,    // 壳正处于更新/重启预期态时的宽限（5 分钟）
   maxRestarts: 5,           // 窗口内拉起次数上限
   windowMs: 1800000,        // 30 分钟窗口
+  // P2 修复：identity.phase 的**时效上限**——超过这个时长未更新，视为陈旧（壳已崩），
+  //  不再当作「预期缺席」，让看护按正常宽限期介入。取值需 > 正常更新耗时（含下载+校验+重启）。
+  phaseMaxAgeMs: 600000,    // 10 分钟
   procPattern: 'dsh-supervisor-gui',
 };
 
@@ -112,6 +115,10 @@ function createShellWatchdog(deps) {
   let busy = false;
   let lastSkipReason = null;
   let everSawAlive = false;
+  // P2：相位时效跟踪（由 tick 维护，见 updatePhaseTracking）
+  let expectedSince = null;
+  let phaseStale = false;
+  let phaseStaleWarned = false;
 
   const log = (m) => { try { logger.info && logger.info('[shell-watchdog] ' + m); } catch {} };
   const warn = (m) => { try { logger.warn && logger.warn('[shell-watchdog] ' + m); } catch {} };
@@ -122,11 +129,58 @@ function createShellWatchdog(deps) {
     return procs.filter(isShellProcess);
   }
 
-  /** 壳是否处于「预期缺席」：自更新/重启中，或有未确认的更新账本。 */
+  /** 相位跟踪（P2 修复，2026-09-12）：给「更新中」相位加**时效上限**，避免陈旧 phase 永久拖住看护。
+   *
+   *  缺陷：phase 只由壳写入，唯一复位点是壳**成功启动**时的 init_identity。
+   *    壳在更新中途崩溃且再也起不来时，phase 会**永久停在** `shell-update-*`／`restarting`，
+   *    于是 `expectedAbsence()` 恒真、宽限永远走 5min（而非 90s），自愈被拖慢且无任何提示。
+   *
+   *  实现：由 `tick()` 每拍调用（**不放在 expectedAbsence 里** —— 那是只读快照，
+   *    `status()` 也会调它，不应有副作用）。
+   *
+   *  ⚠ 为什么用「看护自己的时钟」而非 identity 文件的 mtime：
+   *    本模块的设计是**依赖注入 + 纯决策**（`decide()` 可脱离进程/时钟/文件系统单测），
+   *    `shell.identity()` 在测试里是注入的桩、未必对应真实文件；
+   *    跨仓核对还发现壳的 `set_phase()` 只写 phase、**不写 `lastSeenAt`** ——
+   *    任何依赖 identity 内字段或文件 mtime 的判定都不可靠/不可测。
+   *
+   *  语义：进入「更新中」相位即开始计时；超过 `phaseMaxAgeMs`（默认 10 分钟）仍在该相位
+   *    → 视为**陈旧**，不再当作「预期缺席」，让看护按正常宽限期介入。
+   *    一旦离开该相位（壳成功启动会写 phase=ready/其它）即复位。
+   */
+  function updatePhaseTracking(t) {
+    let phase = "";
+    try { const id = shell.identity(); phase = String((id && id.phase) || ""); } catch {}
+    const inUpdate = (phase === "restarting" || phase.indexOf("shell-update") === 0);
+    if (!inUpdate) { expectedSince = null; phaseStale = false; return; }
+    if (expectedSince === null) expectedSince = t;
+    const maxAge = config.shellWatchdogPhaseMaxAgeMs || DEFAULTS.phaseMaxAgeMs;
+    phaseStale = (t - expectedSince) >= maxAge;
+    if (phaseStale && !phaseStaleWarned) {
+      phaseStaleWarned = true;
+      warn("identity.phase 停留过久（" + Math.round((t - expectedSince) / 1000) + "s > " + Math.round(maxAge / 1000) + "s），判定为陈旧；不再延长宽限");
+    }
+  }
+
+  /** 壳是否处于「预期缺席」：自更新/重启中，或有未确认的更新账本。
+   *
+   *  ⚠ 2026-09-12（P2 修复）：**给 phase 的时效设上限**。
+   *
+   *    缺陷：phase 只由壳写入，而唯一的复位点是壳**成功启动**时的 init_identity。
+   *     若壳在更新中途崩溃且再也起不来，`identity.phase` 会**永久停在**
+   *     `shell-update-*`／`restarting` —— 于是本函数恒返回 true，
+   *     看护的宽限期永远走 5min（updateGraceMs）而不是 90s（graceMs），
+   *     自愈被拖慢 3 倍以上，且**没有任何信号提示这是陈旧状态**。
+   *
+   *    修法：phase 的判定附加「最后写入时刻」上限（默认 10 分钟，远大于正常更新耗时），
+   *     超时即视为陈旧 → 不再当「预期缺席」，让看护按正常宽限期介入。
+   *     `lastSeenAt` 是 identity 里既有的字段（内核 health() 与壳都会写）。
+   */
   function expectedAbsence() {
     let phase = '';
     try { const id = shell.identity(); phase = String((id && id.phase) || ''); } catch {}
-    if (phase === 'restarting' || phase.indexOf('shell-update') === 0) return true;
+    const inUpdate = (phase === "restarting" || phase.indexOf("shell-update") === 0);
+    if (inUpdate && !phaseStale) return true;
     try {
       const j = shell.readJournal && shell.readJournal();
       if (j && j.to && !j.confirmed && !j.rolledBack) return true;
@@ -149,6 +203,10 @@ function createShellWatchdog(deps) {
       const alive = procs.length;
       if (alive > 0 && !everSawAlive) { everSawAlive = true; log('已观测到桌面壳在运行（pid=' + procs[0].pid + '）'); }
       const absentForMs = alive > 0 ? null : (missingSince === null ? null : (t - missingSince));
+      // P2：**每拍都跟踪相位**（不只缺失时）——
+      //   否则「首次观测到缺失」那一拍才刚开始计时，陈旧判定要再多等一整轮；
+      //   且壳存活期间的相位变化也无法复位计时。
+      updatePhaseTracking(t);
       const expected = absentForMs === null ? false : expectedAbsence();
       const exe = exePath();
       restarts = restarts.filter((x) => t - x < (config.shellWatchdogWindowMs || DEFAULTS.windowMs));
@@ -216,7 +274,7 @@ function createShellWatchdog(deps) {
   }
 
   /** 仅供测试：重置内部状态。 */
-  function _reset() { missingSince = null; restarts = []; busy = false; lastSkipReason = null; everSawAlive = false; }
+  function _reset() { missingSince = null; restarts = []; busy = false; lastSkipReason = null; everSawAlive = false; expectedSince = null; phaseStale = false; phaseStaleWarned = false; }
 
   return { tick, status, _reset, intervalMs: config.shellWatchdogIntervalMs || DEFAULTS.intervalMs };
 }

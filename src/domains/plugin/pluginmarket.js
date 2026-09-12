@@ -93,6 +93,13 @@ class PluginMarket {
     this._cache = null;
     this._ts = 0;
     this._inFlight = null;
+    // P2-8 修复（2026-09-12）：**整体构建预算**（防一次刷新挂住请求数十分钟）。
+    //   背景：社区源候选约 2468 个，按 8 并发分批、每批各带超时 —— 最坏情况可达数十分钟，
+    //     而 `GET /plugins/market` 会**阻塞到构建完成**（前端 15s 就放弃了，服务端却还在跑）。
+    //   现给整次构建一个上限：到点则**停止发起新批次**，用已采集的部分构建索引；
+    //     与既有的「坏构建保护」天然配合（部分结果不会冲掉旧缓存）。
+    this.buildBudgetMs = opts.buildBudgetMs || 240000; // 默认 4 分钟
+    this._deadline = 0;
     this.loadFromDisk();
   }
 
@@ -132,6 +139,16 @@ class PluginMarket {
 
   async buildIndex() {
     const start = Date.now();
+    // P2-8：整次构建的总预算（到点停止发起新批次，返回已采集的部分）。
+    this._deadline = Date.now() + this.buildBudgetMs;
+    try { return await this._buildIndexInner(start); }
+    finally { this._deadline = 0; }
+  }
+
+  /** 预算是否已耗尽（供各源的批次循环调用）。 */
+  _budgetExhausted() { return this._deadline > 0 && Date.now() >= this._deadline; }
+
+  async _buildIndexInner(start) {
     const plugins = [];
     const seen = new Set();
     const add = (p) => {
@@ -198,6 +215,8 @@ class PluginMarket {
     // 并行验证 dsh.bundle
     const batch = 8;
     for (let i = 0; i < names.length; i += batch) {
+      // P2-8：预算耗尽即停止发起新批次（已采集的部分照常返回）。
+      if (this._budgetExhausted()) { this.logger.warn && this.logger.warn("market: npm 源预算耗尽，已处理 " + i + "/" + names.length + " 个候选"); break; }
       const slice = names.slice(i, i + batch);
       await Promise.all(slice.map(async (name) => {
         const meta = await this.safeFetchLatest(name);
@@ -294,6 +313,8 @@ class PluginMarket {
       // 2026-09 提速：候选（~2468）串行逐个打 npm 太慢/易整体超时 → 并发批次（8），单条失败安全跳过
       const seenName = new Set();
       for (let i = 0; i < links.length; i += 8) {
+        // P2-8：预算耗尽即停止（社区源候选最多，是最容易超时的一段）。
+        if (this._budgetExhausted()) { this.logger.warn && this.logger.warn("market: community 源预算耗尽，已处理 " + i + "/" + links.length + " 个候选"); break; }
         const slice = links.slice(i, i + 8);
         await Promise.all(slice.map(async ({ npmName, ghName, label }) => {
           try {

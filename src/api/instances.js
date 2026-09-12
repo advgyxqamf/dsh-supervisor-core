@@ -54,8 +54,11 @@ function handle(ctx) {
         try {
           const j = body ? JSON.parse(body) : {};
           if (act === 'add') {
-            const r = sup.instances.addInstance(j);
-            return send(r.ok ? 200 : 400, r);
+            // P3 配套：addInstance 现为 async（新增端口占用探测）——必须等结果再作答，
+            //   否则 send 收到的是 Promise（`r.ok` 恒 undefined → 恒 400，且响应体不可序列化）。
+            return Promise.resolve(sup.instances.addInstance(j))
+              .then((r) => send(r && r.ok ? 200 : 400, r))
+              .catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
           }
           // ── 沙箱/原生清分护栏：main（原生主干）的生命周期/更新不属沙箱实例 API ──
           // 原生主干唯一操作渠道：启停 /lifecycle/dsh/*、安装/升级/卸载/版本 /native/*。

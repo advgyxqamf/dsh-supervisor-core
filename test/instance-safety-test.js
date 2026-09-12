@@ -91,6 +91,31 @@ check('L-e 保留显式测试方法', /_setSandboxSupportedForTest\(v\)/.test(co
   check('L-f 让位后记事件（可追溯）', /systemd_template_moved_aside/.test(body), '有');
 }
 
+// ── L-g：新增实例前探测端口**真实占用**（P3）──
+//   缺陷：原实现只查「是否与本进程实例重名」+「注册表是否已登记」，
+//     从不探测本机是否已有进程在监听 → 建到被占端口后实例启动 bind 失败，
+//     BACKOFF 反复重试至多 20 次；用户看到「实例一直起不来」而非「端口被占」。
+{
+  check('L-g addInstance 为 async（需 await 探测）', /async addInstance\(payload\) \{/.test(code), '有');
+  check('L-g 用 ports.isTaken 探测（既有唯一实现：登记 ∪ 监听）',
+    /await ports\.isTaken\(port\)/.test(code), '有');
+  // ⚠ 必须在 **addInstance 函数体**内比较 —— 文件前面还有别的 registerUser 调用点
+  //   （load/_syncInstancePorts），用全局 indexOf 会命中它们（我第一版踩了这个）。
+  const aiBody = (code.match(/async addInstance\(payload\) \{[\s\S]*?\n  \}/) || [''])[0];
+  const iT = aiBody.indexOf('await ports.isTaken(port)');
+  const iR = aiBody.indexOf("ports.registerUser(port, 'inst:' + id)");
+  check('L-g 探测在 registerUser 之前（先给清晰错误再登记）',
+    iT > 0 && iR > 0 && iT < iR, 'isTaken@' + iT + ' registerUser@' + iR);
+  check('L-g 探测失败不阻断创建（保留既有降级行为）',
+    /探测失败不阻断创建/.test(code), '有');
+  // 配套：API 调用点必须等 Promise（否则 r.ok 恒 undefined → 恒 400 且响应不可序列化）
+  const apiSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'instances.js'), 'utf8');
+  check('L-g API 调用点用 Promise.resolve 包装（适配 async）',
+    /Promise\.resolve\(sup\.instances\.addInstance\(j\)\)/.test(apiSrc), '已改');
+  check('L-g API 不再把返回值当同步对象用（r.ok 直接读已消失）',
+    !/const r = sup\.instances\.addInstance\(j\);/.test(apiSrc), '已改');
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

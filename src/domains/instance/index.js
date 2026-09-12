@@ -377,11 +377,24 @@ class InstanceManager {
 
   /* ── 实例 CRUD ── */
   /** 新增实例：生成独立 unit 名 + 独立配置。sandbox 默认标准隔离。 */
-  addInstance(payload) {
+  async addInstance(payload) {
     const port = parseInt(payload.port, 10);
     if (!Number.isInteger(port) || port <= 0 || port > 65535) return { ok: false, error: '无效端口' };
     if (this.instances.some((i) => i.port === port)) return { ok: false, error: '端口 ' + port + ' 已被实例占用' };
     const id = 'inst-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    // ⚠ P3 修复（2026-09-12）：**新增时探测端口是否真的被占用**（注册表 ∪ 本机实际监听）。
+    //
+    //   缺陷：原实现只查「是否与本进程的实例重名」（上一行）与「注册表是否已登记」
+    //     （下方 registerUser），**从不探测本机是否已有进程在监听该端口**。
+    //     于是用户填了一个已被其它程序占用的端口时，创建**成功**，随后实例启动
+    //     bind 失败 → 进入 BACKOFF 反复重试（至多 20 次）—— 用户看到的是「实例一直起不来」，
+    //     而不是「这个端口被占了」（本可当场说清）。
+    //   探测用 `ports.isTaken`（既有唯一实现：登记 ∪ 监听探测，300ms 上限）。
+    try {
+      if (await ports.isTaken(port)) {
+        return { ok: false, error: '端口 ' + port + ' 已被占用（本机已有进程在监听，或已被系统服务登记）' };
+      }
+    } catch { /* 探测失败不阻断创建（既有行为：交给启动期如实报错） */ }
     // 端口登记入口严格校验（同步）：实例端口必须避开全部系统端口（固定/relay 40000+/反代实例 41000+/oauth 42000+）
     // 与 registry 已登记端口冲突 → 返错（新增是唯一允许拒绝的入口；登记即完成，后续由 _syncInstancePorts 幂等维持）
     try { ports.registerUser(port, 'inst:' + id); } catch (e) { return { ok: false, error: '端口 ' + port + ' 与系统服务端口冲突（' + (e.message || e) + '）' }; }

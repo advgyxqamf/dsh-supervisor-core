@@ -55,6 +55,15 @@ class SettingsView {
       // 前端据此做能力感知呈现与降级提示（如 Windows/mac 不支持沙箱实例）——
       // 此前注释已承诺该字段，但实现未暴露，导致 UI 只能在后端报错后才知道。
       capabilities: (() => { try { return require('../../platform/os/index').capabilities(); } catch { return null; } })(),
+      // ⚠ 2026-09-12（P2）：**接线桌面壳看护的观测快照**。
+      //   `watchdog.status()` 的注释一直写着「供 /env/status 或诊断」，但**零生产消费**
+      //   （全仓只有 e2e 测试读它）—— 于是「壳反复拉起失败」在面板上**不可见**。
+      //   现如实暴露：enabled/intervalMs/graceMs/absentForMs/restartsInWindow/
+      //   everSawAlive/lastSkipReason/expectedAbsence —— 排障时能直接看到看护在做什么。
+      shellWatchdog: (() => {
+        try { return this.shellWatchdog && typeof this.shellWatchdog.status === 'function' ? this.shellWatchdog.status() : null; }
+        catch { return null; }
+      })(),
     };
   }
 

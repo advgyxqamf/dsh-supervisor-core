@@ -482,6 +482,19 @@ export interface EnvStatus {
   ok?: boolean;
   catalog?: { ready?: boolean; items?: Record<string, { label: string; required?: boolean; state: string; detail?: string }> };
   capabilities?: PlatformCapabilities | null;
+  /** 桌面壳看护的观测快照（P2 接线 2026-09-12）：壳反复拉起失败时面板可见。 */
+  shellWatchdog?: {
+    enabled?: boolean;
+    intervalMs?: number;
+    graceMs?: number;
+    updateGraceMs?: number;
+    maxRestarts?: number;
+    absentForMs?: number | null;
+    restartsInWindow?: number;
+    everSawAlive?: boolean;
+    lastSkipReason?: string | null;
+    expectedAbsence?: boolean;
+  } | null;
 }
 /** Node.js 环境检测：当前版本 vs 官方最新 LTS（GET /env/node-lts） */
 export interface NodeLtsStatus {
