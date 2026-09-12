@@ -203,5 +203,12 @@ jobs:
 
   # 前端门禁（typecheck/lint/test/build）**已移出 CI**（2026-09 定案，额度优化）：
   #   原 ui-verify 作业常驻 ubuntu-latest，是矩阵去 ubuntu 后唯一的 Linux 消耗。
-  #   现由本地发布前置（release-core.sh 的 [3/7] UI 门禁）承担——本地免费且与 Linux 生产同机，
-  #   **每次 release:core* 都会执行**（含 build-ui 镜像构建），不会漏跑。
+  #
+  # ⚠ 2026-09-12 校正：此处原写「现由本地发布前置（release-core.sh 的 [3/7] UI 门禁）承担」——
+  #   但 (a) `release-core.sh` 只有 **[1/5]–[3/5]**，**不存在 [3/7]**；
+  #       (b) 其 [3/5] 委托的 `ci-core.sh` 只调 `build-ui.sh`，而后者**只构建、不测试**。
+  #   即：`ui/package.json` 里的 `typecheck`/`lint`/`vitest` 与 3 个 .test.ts
+  #   **在任何自动化路径上都不会被执行** —— 声称的「UI 门禁」实际不存在。
+  #
+  #   现由 `ci-core.sh` 的 [1/5] 显式执行 `ui` 的 `verify`（typecheck + lint + test + build），
+  #   故本地发布与 CI 两条路径都真正跑到了前端门禁。

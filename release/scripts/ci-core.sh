@@ -38,7 +38,20 @@ if [ "$ALL_PLATFORMS" = 1 ]; then PLAT_ARGS=(--all-platforms); fi
 echo "=== [0/5] 版本自洽校验（内核 package.json 单源；壳版本互锁已随壳仓剥离） ==="
 npm run verify:versions
 
-echo "=== [1/5] 构建前端 UI 产物（build-ui.sh → ui-react/；npm test 面板响应头断言与 launcher 携带均依赖） ==="
+echo "=== [1/5] 前端门禁（typecheck + lint + vitest）+ 构建 UI 产物 ==="
+# ⚠ 2026-09-12 修复：前端门禁此前**从未在任何路径上执行** ——
+#   `ui/package.json` 有 typecheck/lint/test 与 3 个 .test.ts（15 个用例），
+#   但 `build-ui.sh` **只构建不测试**，而 CI 注释声称的「release-core.sh 的 [3/7] UI 门禁」
+#   并不存在（release-core 只有 [1/5]–[3/5]）。
+#   现由此处在**构建之前**跑完整 verify：语法/类型/测试不过就不该产出镜像。
+#
+# 顺序理由：`npm run verify` 内部已含 build（typecheck → lint → test → build），
+#   故它成功即等价于原 build-ui 的效果；但 build-ui 还负责 `ui-react/` 镜像镜像化，
+#   故 verify 之后仍调用 build-ui（其内部在已装依赖时跳过 npm ci，开销很小）。
+if [ -f ui/package.json ]; then
+  echo "[ui] 前端门禁（verify = typecheck + lint + test + build）..."
+  (cd ui && npm run verify) || { echo "[ui] ERROR: 前端门禁未通过（typecheck/lint/test/build）"; exit 1; }
+fi
 bash release/scripts/build-ui.sh
 
 echo "=== [2/5] 内核回归测试（npm test） ==="
