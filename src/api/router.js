@@ -30,10 +30,10 @@ function handle(ctx) {
       const action = pathname.slice('/router/'.length);
       req.resume();
       if (action === 'start') {
-        return sup.setRouterRunning(true).then((r) => send(200, r));
+        return Promise.resolve(sup.setRouterRunning(true)).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
       }
       if (action === 'stop') {
-        return sup.setRouterRunning(false).then((r) => send(200, r));
+        return Promise.resolve(sup.setRouterRunning(false)).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
       }
     }
 
@@ -48,7 +48,7 @@ function handle(ctx) {
         let j = {};
         try { j = body ? JSON.parse(body) : {}; } catch {}
         if (j.kind === 'proxy') {
-          Promise.resolve(sup.routerApi().addProxyProvider({ name: j.name, appId: j.appId, keys: j.keys || [] })).then((r) => send(r.ok ? 200 : 400, r));
+          Promise.resolve(sup.routerApi().addProxyProvider({ name: j.name, appId: j.appId, keys: j.keys || [] })).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
           return;
         }
         return Promise.resolve(sup.routerApi().addDirectProvider({ name: j.name, presetId: j.presetId, keys: j.keys || [] })).then((r) => send(r && r.ok === false ? 400 : 200, r)).catch((e) => send(500, { ok: false, error: e.message }));
@@ -57,7 +57,7 @@ function handle(ctx) {
     }
     if (req.method === 'POST' && pathname === '/router/proxy/login/start') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      Promise.resolve(sup.routerApi().commandcodeLoginStart()).then((r) => send(r.ok ? 200 : 400, r));
+      Promise.resolve(sup.routerApi().commandcodeLoginStart()).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
       return;
     }
     if (req.method === 'POST' && pathname === '/router/proxy/login/wait') {
@@ -73,7 +73,7 @@ function handle(ctx) {
     }
     if (req.method === 'POST' && pathname === '/router/proxy/update/apply') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 4096, (body) => { try { const j = body ? JSON.parse(body) : {}; Promise.resolve(sup.routerApi().applyProxyUpdate(j.appId, j)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 4096, (body) => { try { const j = body ? JSON.parse(body) : {}; Promise.resolve(sup.routerApi().applyProxyUpdate(j.appId, j)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     // 反代更新进度查询（job 模型，前端轮询消除黑盒）
@@ -83,17 +83,17 @@ function handle(ctx) {
     }
     if (req.method === 'POST' && pathname === '/router/providers/proxy/key') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 65536, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().addProxyKey(j.id, j.key)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 65536, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().addProxyKey(j.id, j.key)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     if (req.method === 'POST' && pathname === '/router/providers/proxy/select') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().setSelectedProxyKey(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().setSelectedProxyKey(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     if (req.method === 'POST' && pathname === '/router/providers/proxy/key/remove') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().removeProxyKey(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().removeProxyKey(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     if (req.method === 'POST' && pathname === '/router/providers/keys/set') {
@@ -131,17 +131,17 @@ function handle(ctx) {
     }
     if (req.method === 'POST' && pathname === '/router/providers/account/confirm') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().confirmAccount(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().confirmAccount(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     if (req.method === 'POST' && pathname === '/router/providers/account/discard') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().discardAccount(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 4096, (body) => { try { const j = JSON.parse(body); Promise.resolve(sup.routerApi().discardAccount(j.id, j.keyId)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     if (req.method === 'POST' && pathname === '/router/providers/refresh') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      collectBody(req, res, 4096, (body) => { try { const j = body ? JSON.parse(body) : {}; if (!j.id) return send(400, { ok: false }); Promise.resolve(sup.routerApi().refreshProviderQuota(j.id)).then((r) => send(r.ok ? 200 : 400, r)); } catch { return send(400, { ok: false }); } });
+      collectBody(req, res, 4096, (body) => { try { const j = body ? JSON.parse(body) : {}; if (!j.id) return send(400, { ok: false }); Promise.resolve(sup.routerApi().refreshProviderQuota(j.id)).then((r) => send(r.ok ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) })); } catch { return send(400, { ok: false }); } });
       return;
     }
     // 激活/停用供应商：激活=启动该供应商独立 API 端点（未激活不提供服务）；

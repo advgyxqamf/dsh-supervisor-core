@@ -96,7 +96,20 @@ function sanityCheck(versionDir) {
   if (fs.existsSync(bin)) {
     // 有界（2026-09-11，门禁 G9）：自更新解包出的脚本若异常（巨型文件/挂起），
     //   同步 execFileSync 无超时会冻结整个守卫。经统一执行器（默认 15s + SIGKILL）。
-    exec.run(process.execPath, ['--check', bin], { stdio: 'pipe' }); // 零依赖：语法自检即冒烟
+    //
+    // ⚠ P1 修复（2026-09-13，失效模式 a+h+e）：**返回值必须检查**，否则本检查恒通过。
+    //
+    //   缺陷：exec.run 的契约是「失败/超时返回 null」，而本行**丢弃返回值**、也不抛错 ——
+    //     于是 sanityCheck 对任何语法损坏的 bin 都静默通过（注释却写「语法自检即冒烟」）。
+    //   后果：apply() 随后 symlink+rename 把 current **翻转到语法错误的版本**，
+    //     并 prune 掉旧版本 → 守卫再也起不来，且**无回滚**（current 已翻转）。
+    //   为什么长期未被发现：self-update 的生产调用点为零（门禁走 npm 通道），
+    //     只有 test/guard-update-test.js 覆盖，而它**从未断言过 sanityCheck 的失败路径**
+    //     —— 典型的「测试全绿掩盖检查从未生效」。
+    //   修法：失败即抛（由 apply 的调用方按「任何一步失败：不动 current」处理）。
+    if (exec.run(process.execPath, ['--check', bin], { stdio: 'pipe' }) === null) {
+      throw new Error('sanityCheck 失败：bin/dsh-supervisor 未通过语法自检（包可能已损坏）');
+    }
   }
   const pkg = path.join(versionDir, 'package.json');
   if (fs.existsSync(pkg)) JSON.parse(fs.readFileSync(pkg, 'utf8')); // 结构自检
