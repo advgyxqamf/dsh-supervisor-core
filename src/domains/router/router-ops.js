@@ -118,7 +118,10 @@ function openInBrowser(url, onExit) {
     const r = platform.browser.launchIsolated(url, { profileDir: tmpProfile, antiArgs, antiEnv, sysEnv, onExit });
     if (!r || !r.ok) return null;
     if (r.isolated) {
-      setTimeout(() => { try { fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 30 * 60 * 1000);
+      // ⚠ 2026-09-12：加 `unref()` —— 该清理定时器最长 30 分钟，
+      //   若无 unref，嵌入进程（测试 / 被 require 的宿主）会因此多活半小时。
+      const t30 = setTimeout(() => { try { fs.rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 30 * 60 * 1000);
+      if (t30.unref) t30.unref();
     }
     return tmpProfile;
   } catch { return null; }
@@ -255,7 +258,9 @@ const auxMethods = {
     } finally {
       // 登录结束（成功/失败/超时）：60s 后清理本次登录的临时 profile（浏览器可能仍开着，延迟清理）
       if (tmpProfile) {
-        setTimeout(() => { try { require('node:fs').rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 60 * 1000);
+        // ⚠ 2026-09-12：同样加 unref（60s 清理不应拖住进程退出）。
+        const t60 = setTimeout(() => { try { require('node:fs').rmSync(tmpProfile, { recursive: true, force: true }); } catch {} }, 60 * 1000);
+        if (t60.unref) t60.unref();
       }
     }
   },

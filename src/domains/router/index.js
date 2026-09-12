@@ -65,7 +65,10 @@ class RouterService {
     this.switcher = new SwitchEngine({
       logger: this.logger,
       events: this.events,
-      getProviders: () => this.providers,
+      // ⚠ 2026-09-12：原 `getProviders: () => this.providers` 已删除 ——
+      //   `SwitchEngine` 构造函数接收它但**从不读取**（switch.js 内零引用），
+      //   属「声明了能力但零消费」。删除以免读者以为 switch 会回查 provider 列表
+      //   （它实际只经 pickFor 的回调拿数据，不持有该引用）。
       onPersist: () => this._save(),
       onEvidence: this.evidence ? (rec) => { if (!this.evidence.append(rec) && this.logger && this.logger.debug) this.logger.debug('[evidence] append failed'); } : null,
     });

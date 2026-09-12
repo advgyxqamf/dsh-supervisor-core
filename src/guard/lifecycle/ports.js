@@ -377,12 +377,10 @@ class PortRegistry {
     return null;
   }
 
-  /** 池内最小空闲分配（公开：自持锁）。 */
-  async _allocFree(rangeKey, range, owner, o) {
-    await this._acquireAlloc();
-    try { return await this._allocFreeCore(rangeKey, range, owner, o); }
-    finally { this._allocLock = false; }
-  }
+  // ── 注：此处原有 `_allocFree()`（自持锁的池内最小空闲分配包装）已删除（2026-09-12）──
+  //   全仓无任何调用点（`claimSlot` 用的是 `_allocFreeCore`），是死代码。
+  //   保留它反而危险：一个「看起来可公开调用」的入口会诱使后来者绕过 claimSlot 的
+  //   owner 判定与 mode 语义，直接拿到端口。
 
   /* ═══════ 动态分配 ═══════ */
   /** bind 探测：尝试在本机 127.0.0.1 绑定端口。能绑定 → 可分配；任何 bind 错误（典型
