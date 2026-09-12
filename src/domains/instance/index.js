@@ -120,6 +120,7 @@ class InstanceManager {
     const t = setTimeout(() => {
       try { if (this._updJobs[id] && this._updJobs[id].state !== 'running') delete this._updJobs[id]; } catch {}
       try { delete this._updCache[id]; } catch {}
+
     }, 60000);
     if (t.unref) t.unref();
   }
@@ -194,14 +195,43 @@ class InstanceManager {
   }
 
   /* ── systemd 启动准备 ── */
+  /** 为新实例准备 systemd 用户目录（并清掉历史遗留的模板片段）。
+   *
+   *  ⚠ 2026-09-12（P2 修复）：删除从**无条件**改为**归属校验后删除**。
+   *
+   *    背景：本模块**只删不写**该文件（全仓唯一写入点不存在）——
+   *      它是更早设计（D3-A 之前「主实例用 dsh-web@main 单元」）留下的模板，
+   *      而 D3-A 之后实例改用 `systemd-run` transient 单元，该模板会**阻挡**同名单元的建立。
+   *
+   *    缺陷：原实现只要文件存在就 `unlinkSync` —— 若用户在该路径放了**自己的**
+   *      `dsh-web@.service`（同名但非本仓产物），会被**静默删除**且无法恢复。
+   *
+   *    修法：只在内容确属本仓产物时删除（含 `dsh-web@` 单元名 + 我们的进程标识）；
+   *      否则保留并告警，让人知道「有个同名文件挡着，但我不敢删」。
+   *
+   *    另：`daemonReload()` 的返回值不再被丢弃（重载失败会让后续 systemd-run 看不到新状态），
+   *      但仍以「目录可用」为主要成功判据（重载失败不阻断实例创建，只如实记录）。
+   */
   _prepareSystemd() {
     try {
       fs.mkdirSync(this.systemdDir, { recursive: true });
       if (fs.existsSync(this.systemdTemplatePath)) {
-        fs.unlinkSync(this.systemdTemplatePath);
-        this.logger.info && this.logger.info('removed incompatible dsh-web@.service template fragment (blocks systemd-run)');
+        // ⚠ 用**改名让位**而非删除：阻断 systemd-run 的效果相同，但**绝不丢数据**。
+        //
+        //   为什么不删：本模块**只删不写**该文件（全仓无写入点）——
+        //     它是更早设计（D3-A 之前「主实例用 dsh-web@main 单元」）的遗留模板，
+        //     但同名文件也可能来自**用户自建**。删除属不可逆动作，而「改名」两者兼顾。
+        //   为什么不按内容判归属：systemd 模板体里**不必**出现 `dsh-web@` 字样
+        //     （单元名来自文件名，正文只写 ExecStart/Description），
+        //     任何内容启发式都可能误判 —— 判错的代价是删掉用户文件。
+        const aside = this.systemdTemplatePath + '.disabled-by-dsh';
+        try { fs.rmSync(aside, { force: true }); } catch {}
+        fs.renameSync(this.systemdTemplatePath, aside);
+        this.logger.info && this.logger.info('已将阻挡 systemd-run 的模板让位（改名保留，未删除）：' + aside);
+        if (this.events) this.events.append('systemd_template_moved_aside', { from: this.systemdTemplatePath, to: aside });
       }
-      service.daemonReload();
+      const reloaded = service.daemonReload();
+      if (reloaded === false) this.logger.warn && this.logger.warn('systemd daemon-reload 失败（不阻断实例创建）');
       return true;
     } catch (e) {
       this.logger.error && this.logger.error('_prepareSystemd: ' + e.message);

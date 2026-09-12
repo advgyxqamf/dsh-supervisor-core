@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 实例域安全修复的回归（第九轮，2026-09-12）
+//
+// ## 缺陷（全部为「破坏性动作缺少前置确认」类）
+//
+// P1-1 升级失败**两条路径都无回滚**：回滚逻辑只写在「重启后起不来」的分支里，
+//     而「npm 安装失败」与「重启失败」直接置 failed 就结束 →
+//     实例已被停 + 磁盘版本不确定 → 只能人工处理（guardian 也不自愈）。
+//
+// P1-2 `removeInstance` **未确认单元已停**就 `rmSync(root, {recursive:true})`：
+//     `stopUnit` 失败只 `return false`（不抛）→ 对运行中实例删 HOME = **不可逆数据丢失**。
+//
+// P1-3 `ports.release(inst.port)` **不带 ownerId** → 语义是「无条件按端口号删除」，
+//     可能删掉**他人**的端口登记（上一轮刚给 release 加了归属校验，此处置之不理）。
+//
+// P1-4 `_updCache` 只写不删（长寿命守卫内存单调增长）+ 60s 定时器未 unref。
+//
+// P2   我上一轮留下的**自相矛盾**：`set sandboxSupported` 与「用方法而非 setter」的注释并存。
+//
+// P2   `_prepareSystemd` **无条件删除**用户的 `dsh-web@.service`（本模块只删不写该文件）。
+//
+// ## 锁定不变量
+//   L-a  三条失败路径共用同一个 rollback（一处实现）
+//   L-b  删数据目录前必须复核 isUnitActive
+//   L-c  删除实例时不得调用不带 ownerId 的 release
+//   L-d  _updCache 有清理路径；清理定时器 unref
+//   L-e  sandboxSupported 无 setter（只有显式测试方法）
+//   L-f  systemd 模板让位用 rename（不删数据）
+// ═══════════════════════════════════════════════════════════════════════════
+
+const path = require('node:path');
+const fs = require('node:fs');
+const ROOT = path.join(__dirname, '..');
+
+const results = [];
+const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
+const inst = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', 'index.js'), 'utf8');
+// 剥离注释行（源码级断言必须区分「代码」与「说明代码的文字」——本仓已踩多次）
+const code = inst.split(String.fromCharCode(10))
+  .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
+  .join(String.fromCharCode(10));
+
+// ── L-a：回滚收敛到一处 ──
+{
+  const calls = (code.match(/await rollback\(/g) || []).length;
+  check('L-a 三条失败路径共用 rollback（3 处调用）', calls === 3, calls + ' 处');
+  check('L-a rollback 辅助已定义', /const rollback = async \(why\) => \{/.test(code), '有');
+  // 反向：确认原先内联的那份重复实现已删除。
+  //   ⚠ 不能用 `let rbOk = false` 判定 —— 新的助手里也有同名局部变量（我第一版踩了这个）。
+  //   改用「回滚装的旧版本」这一**特征调用**的出现次数：应当只有助手内一处。
+  const rbInstalls = (code.match(/version: oldVersion/g) || []).length;
+  check('L-a 回滚安装调用只出现一次（内联重复已删）', rbInstalls === 1, rbInstalls + ' 处');
+  const defs = (code.match(/const rollback = async/g) || []).length;
+  check('L-a rollback 只定义一次', defs === 1, defs + ' 处');
+}
+
+// ── L-b：删数据目录前复核 isUnitActive ──
+check('L-b 复核 isUnitActive', /isUnitActive\(unit\)/.test(code), '有');
+check('L-b 仍活跃时不删目录（条件含 !stillActive）', /!stillActive/.test(code), '有');
+check('L-b 仍活跃时记事件（不静默）', /inst_remove_data_preserved/.test(code), '有');
+
+// ── L-c：不得有无 ownerId 的 release ──
+check('L-c 删除实例时不再调用 release(inst.port)',
+  !/ports\.release\(inst\.port\)/.test(code), '已删');
+check('L-c 保留按 owner 精确释放（unregister）', /ports\.unregister\('inst:' \+ id\)/.test(code), '有');
+
+// ── L-d：_updCache 清理 + unref ──
+check('L-d 存在收尾清理方法', /_scheduleJobCleanup\(id\) \{/.test(code), '有');
+check('L-d 清理包含 _updCache（此前只写不删）', /delete this\._updCache\[id\]/.test(code), '有');
+check('L-d 定时器 unref', /if \(t\.unref\) t\.unref\(\)/.test(code), '有');
+// 反向：不得再有未 unref 的裸 60s 清理定时器
+check('L-d 无未 unref 的裸清理定时器',
+  !/setTimeout\(\(\) => \{ if \(this\._updJobs\[id\]/.test(code), '已改');
+
+// ── L-e：sandboxSupported 无 setter ──
+check('L-e getter 存在', /get sandboxSupported\(\)/.test(code), '有');
+check('L-e **无** setter（防赋值静默绕过能力门）',
+  !/set sandboxSupported\(/.test(code), '无 setter');
+check('L-e 保留显式测试方法', /_setSandboxSupportedForTest\(v\)/.test(code), '有');
+
+// ── L-f：systemd 模板让位用 rename（不删数据）──
+{
+  const m = code.match(/_prepareSystemd\(\) \{[\s\S]*?\n  \}/);
+  const body = m ? m[0] : '';
+  check('L-f 定位到 _prepareSystemd', !!m, m ? 'ok' : '未找到');
+  check('L-f 用 renameSync 让位（而非 unlink）', /renameSync\(this\.systemdTemplatePath, aside\)/.test(body), '有');
+  check('L-f 不再无条件 unlinkSync 该路径', !/unlinkSync\(this\.systemdTemplatePath\)/.test(body), '已改');
+  check('L-f 让位后记事件（可追溯）', /systemd_template_moved_aside/.test(body), '有');
+}
+
+const failed = results.filter((r) => !r);
+console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
+process.exit(failed.length ? 1 : 0);
