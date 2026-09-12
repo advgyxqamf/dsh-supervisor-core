@@ -76,7 +76,8 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 // 安全信任根（P0-1 结构性修复）：访问者身份 = socket 层事实（req.socket.remoteAddress），
 // 唯一判定实现见 ./identity.js。请求头（Host/Origin）只做浏览器语义的深化校验，
 // 绝不参与身份/鉴权判定——详见 identity.js 头注与 DESIGN.md 安全边界契约。
-const { identify } = require('./identity');
+// P1-E：`isPrivateIpv4` 与 identity 同一份 RFC1918 判定（Host/Origin 闸复用，不重写）。
+const { identify, isPrivateIpv4 } = require('./identity');
 
 /**
  * 本地 HTTP API（默认 127.0.0.1:3100；面板「局域网访问」开关可改为 0.0.0.0）。
@@ -123,18 +124,53 @@ function collectBody(req, res, maxBytes, onDone) {
 //   同时 identity.js:7-8 明确声称「Host 头：仅用于防 DNS-rebinding 的深化校验」，
 //   但**实现里从未读取过 req.headers.host** —— 又一处「注释声称、代码没有」。
 //
-// 现按声称补齐双闸：
-//   ① Host 头（若有）必须是回环名 —— 防 DNS-rebinding
-//      （攻击者把 evil.com 解析到 127.0.0.1，浏览器会带 `Host: evil.com`）；
+// 现按声称补齐双闸（P1-E 修复后，信任集合 = 回环 ∪ RFC1918 私有网段）：
+//   ① Host 头（若有）必须是**本机或局域网**名 —— 防 DNS-rebinding
+//      （攻击者把 evil.com 解析到 127.0.0.1，浏览器会带 `Host: evil.com` → 被拒）；
 //   ② Origin（只影响带 Origin 的请求）：
 //      · 壳内 webview（tauri://localhost）→ 合法（面板就在壳里）；
-//      · 其余必须是回环名 + 本服务端口。
+//      · 其余必须是**本机/局域网**名 + 本服务端口。
+//
+// ⚠ 2026-09-12（P1-E）：此处曾只查回环，与上方的「只允许本机与 RFC1918」声明白相矛盾 ——
+//   开启局域网访问后面板能开、写操作全 403。详见 isLocalOrLanHost 的说明。
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /** 是否为本机回环主机名（含 IPv6 方括号形态）。 */
 function isLoopbackHost(h) {
   if (!h) return false;
   return LOOPBACK_HOSTS.has(String(h).toLowerCase());
+}
+
+/**
+ * 是否为「本机或局域网」主机名 —— Host/Origin 闸的**信任集合**（P1-E 修复，2026-09-12）。
+ *
+ * ⚠ 为什么必须有它：本文件头部（与本函数上方注释）**明文声称**
+ *   「只允许本机(回环)与 **RFC1918 私有 IP** 的 Host/Origin」，
+ *   而闸①②此前只查 `LOOPBACK_HOSTS` —— 于是开启「局域网访问」（apiHost=0.0.0.0）后，
+ *   局域网浏览器带的 `Host: 192.168.x.x:36360` 一律被拒：
+ *     · 面板 GET 能打开（静态资源不走 originAllowed）；
+ *     · 但**所有写操作静默 403** —— 与注释承诺的行为**完全相反**。
+ *
+ *   实测（直调 originAllowed）：LAN Host + LAN Origin = DENY；LAN 无 Origin = DENY。
+ *
+ * 修法：复用 identity.js 的 **RFC1918 判定**（那里已有 `isPrivateIpv4`），
+ *   而不是在此重写一遍 —— 「同一事实两处实现」正是本仓反复出现的失效模式
+ *   （`identity.socketIsTrusted` 早已实现同一语义，只是 Host 闸从未消费它）。
+ *
+ * 安全影响：这不放宽对**公网**的拒绝 —— 私有网段之外的 Host（如 evil.com）仍被拒；
+ *   DNS-rebinding 防护依赖的是「Host 不是本机/局域网名」，语义不变。
+ *   局域网来源仍须通过第三层（apiAccessKey，非回环请求强制）；
+ *   且写请求仍须 Origin 同源（闸②）。
+ */
+function isLocalOrLanHost(h) {
+  if (!h) return false;
+  const s = String(h).toLowerCase();
+  if (LOOPBACK_HOSTS.has(s)) return true;
+  // IPv6 方括号形态 → 去掉括号再判
+  const bare = s.startsWith('[') && s.endsWith(']') ? s.slice(1, -1) : s;
+  if (bare === '::1') return true;
+  // RFC1918 私有 IPv4（与 identity.socketIsTrusted 同一份判定）
+  return isPrivateIpv4(bare);
 }
 
 /** 壳（Tauri webview）的来源：唯一被接受的非 HTTP 来源。 */
@@ -152,7 +188,8 @@ function originAllowed(req, apiPort) {
     // Host 形如 `127.0.0.1:36360` / `[::1]:36360` / `evil.com`
     const m = /^(\[[^\]]+\]|[^:]+)(?::\d+)?$/.exec(String(host).trim());
     const hostname = m ? m[1] : String(host).trim();
-    if (!isLoopbackHost(hostname)) return false;
+    // P1-E：接受「本机或 RFC1918 私有网段」—— 与文件头声明的信任集合一致。
+    if (!isLocalOrLanHost(hostname)) return false;
   }
 
   // ── 闸 ②：Origin（哪些页面能驱动本 API）──
@@ -161,7 +198,8 @@ function originAllowed(req, apiPort) {
   try {
     const u = new URL(o);
     if (isShellOrigin(u.protocol, u.hostname)) return true;
-    if (!isLoopbackHost(u.hostname)) return false;
+    // P1-E：Origin 同样接受私有网段（局域网设备的浏览器就是合法面板来源）。
+    if (!isLocalOrLanHost(u.hostname)) return false;
     const port = u.port === '' ? (u.protocol === 'https:' ? '443' : '80') : u.port;
     return port === String(apiPort);
   } catch {

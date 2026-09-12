@@ -57,4 +57,13 @@ function identify(req) {
   };
 }
 
-module.exports = { identify, socketIsLoopback, socketIsTrusted, normalizeRemoteAddress };
+module.exports = {
+  identify,
+  socketIsLoopback,
+  socketIsTrusted,
+  normalizeRemoteAddress,
+  // P1-E：`isPrivateIpv4` 一并导出 —— `originAllowed` 的 Host/Origin 闸需要**同一份**
+  //   RFC1918 判定，不得在 api/index.js 里再写一遍（那正是「同一事实两处实现」的复发）。
+  isPrivateIpv4,
+  isLoopbackAddress,
+};
