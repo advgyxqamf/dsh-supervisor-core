@@ -117,7 +117,12 @@ const SURFACE = [
   { path: '/shell/update-pending', methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工建立更新账本（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：建立更新账本（待重启确认），供排障手工驱动内核侧安全网' },
   { path: '/shell/check-update',   methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['UI(关于卡)'], note: '壳版本检测（与内核自更新同源：npm registry + 镜像回退）' },
   { path: '/shell/restart',        methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['UI(关于卡)'], note: '重启桌面壳以应用更新（壳门 0 在新进程内完成安装）' },
-  { path: '/shell/rollback',       methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['排障/运维'], note: '诊断/运维：手动回退，把待确认版本拉黑（拉黑后壳门 0 不再尝试）' },
+  // ⚠ 2026-09-13（P3 跨仓契约）：本条 note 原写「拉黑后壳门 0 不再尝试」——**与事实不符**。
+  //   壳仓（Tauri）grep `update-journal`/`pinnedVersions` **零命中**（只有注释与文档），
+  //   即内核写的 pinnedVersions **没有任何接收方**；壳用的是自己的 update-guard.json。
+  //   且**不应**贸然接线：内核 pinnedVersions 无过期，而壳 should_check 的 pinned 分支不查冷却 ——
+  //   一旦接线，会重新引入第十轮刚修掉的「永久拉黑」。故如实标注为「无接收方」。
+  { path: '/shell/rollback',       methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['排障/运维'], note: '诊断/运维：手动回退，把待确认版本记入内核账本 pinnedVersions（⚠ 壳不消费该字段；壳用自己的 update-guard.json，见 domains/shell/index.js 说明）' },
 
 ];
 

@@ -137,9 +137,21 @@ function evaluate() {
 
 /** 回退：把坏版本拉黑，并记录回退意图。
  *  ⚠ 内核**不直接替换壳二进制**（那是壳/平台安装器的职责），而是：
- *    1) 把坏版本加入 pinnedVersions（壳门 0 读取后不会再用它）；
+ *    1) 把坏版本加入 pinnedVersions；
  *    2) 清空待确认账本，避免反复判定；
  *    3) 写事件供审计与面板展示。
+ *
+ *  ⚠ 2026-09-13（P3 跨仓契约，**修正一处与事实不符的声明**）：
+ *    原文写「pinnedVersions（**壳门 0 读取**后不会再用它）」—— 该声明**无接收方**。
+ *    实测壳仓（Tauri）grep update-journal / pinnedVersions **零命中**（仅注释与文档），
+ *    壳自更新用的是**自己的** ~/.dsh/shell/update-guard.json（门 0 = tauri-plugin-updater）。
+ *    故本字段目前**只写不读**（失效模式 f + i）。
+ *
+ *  ⛔ **不得为了让声明成真而贸然接线**：内核 pinnedVersions **没有过期机制**，
+ *    而壳 should_check() 的 pinned 分支**不查冷却** ——
+ *    一旦壳真去读它，就会重新引入第十轮刚修掉的「永久拉黑、收不到任何更新（含安全修复）」。
+ *    真要接线，必须**同时**给内核 pinnedVersions 加时间戳 + 让壳侧查冷却；
+ *    这是跨仓契约变更，需两侧协调发版。
  */
 function rollback(reason) {
   const j = readJournal();
