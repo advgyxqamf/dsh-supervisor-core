@@ -97,7 +97,11 @@ function capabilityProfile(platform, arch) {
     return Object.assign(base, {
       multiInstance: false, // 沙箱 systemd-run 不可用（Phase 3 迁移计划任务/NSSM 后置 true）
       pidAdoption: true,    // netstat
-      processTreeKill: true, // 期望 taskkill（实测覆写）
+      // P1-G 修复（2026-09-12）：该声明此前**没有实现产物** —— `killTree` 虽已导出，
+      //   但停止路径只用 `signalProcess`（Windows 上仅单进程）。
+      //   现已接入 `_killTree`（supervisor 的 SIGKILL 升级路径 + 接管实例路径），
+      //   声明与实现一致。回归：test/process-tree-kill-test.js。
+      processTreeKill: true, // taskkill /PID /T（由 hasTool 覆写；使用点见 main-process._killTree）
       desktopNotify: true,   // 期望 powershell（实测覆写）
       autostart: true,       // 期望 schtasks（实测覆写）
       frpExpose: true,
