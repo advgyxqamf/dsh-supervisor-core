@@ -75,6 +75,21 @@ check('G-e SIGTERM/SIGINT 均走 gracefulExit',
   /process\.on\('SIGTERM', \(\) => \{ gracefulExit\(0\); \}\)/.test(bin)
   && /process\.on\('SIGINT', \(\) => \{ gracefulExit\(0\); \}\)/.test(bin), '有');
 
+// ── G-f：relay-daemon 必须等 frpc 退出（同类缺陷的第二处）──
+//   `frpmgr.stop()` 是同步的：只发 SIGTERM，SIGKILL 兜底在 3s 后的 250ms 轮询里。
+//   daemon 若紧接 process.exit 会终止该定时器 → 忽略 SIGTERM 的 frpc 成孤儿。
+{
+  const rd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'daemon.js'), 'utf8');
+  check('G-f relay-daemon 存在等待 frpc 退出的辅助', /waitFrpcExit/.test(rd), '有');
+  check('G-f shutdown 不再同步 process.exit（改为 then 后退出）',
+    !/try \{ lan\.shutdown\(\); \} catch \{\}\s*\n\s*try \{ events\.append\('lan_daemon_stopped'/.test(rd), '已改');
+  check('G-f shutdown 内有强退兜底（防永不退出）',
+    /setTimeout\(resolve, 4000\)/.test(rd), '有');
+  // 对照：router-daemon 早已是 async 等待式（证明这是同仓已有人做对的模式）
+  const rod = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'daemon.js'), 'utf8');
+  check('对照：router-daemon 的 shutdown 是 async 等待式', /const shutdown = async \(\) =>/.test(rod), '是');
+}
+
 // ── 行为级：shutdown 的幂等与可 await ──
 //   用最小 harness：只验「返回 Promise 且重复调用同一实例」，不触真实模块。
 {
