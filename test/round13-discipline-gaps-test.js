@@ -152,13 +152,21 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     check('③ 定位到 DshTokenService._persistTokenFile', !!cls, cls && cls.name);
     const svc = new cls({ logger: { warn() {}, info() {} } });
     const fp = path.join(TMP, 'token.log');
+    // ⚠ 2026-09-13：**POSIX 权限位在 Windows 上不存在**。
+    //   Node 的 fs.chmodSync 在 Windows 只能切换**只读位**，statSync().mode 恒为 0666/0444 ——
+    //   故「收口到 0600」这类断言在 Windows 上既不可能成立、也无意义
+    //   （Windows 用 ACL 而非 mode 表达「世界可读」）。
+    //   这是**测试夹具的平台限制**，不是产品缺陷（产品侧 chmodSync(fp,0o600) 在 POSIX 上
+    //   仍正确且必要）。故 POSIX 做完整权限断言，Windows 只验功能并**显式说明**（不静默变绿）。
+    const POSIX = process.platform !== 'win32';
+    if (!POSIX) console.log('SKIP ③ 权限位断言（Windows 无 POSIX mode；chmodSync 仅切换只读位）');
 
     // 场景 A：既有文件为 0644 → 写入后必须收口到 0600
     fs.writeFileSync(fp, 'old-line\n');
-    fs.chmodSync(fp, 0o644);
-    check('③ 前提：预置文件为 0644', (fs.statSync(fp).mode & 0o777) === 0o644, (fs.statSync(fp).mode & 0o777).toString(8));
+    if (POSIX) fs.chmodSync(fp, 0o644);
+    if (POSIX) check('③ 前提：预置文件为 0644', (fs.statSync(fp).mode & 0o777) === 0o644, (fs.statSync(fp).mode & 0o777).toString(8));
     svc._persistTokenFile('main', fp, 'http://127.0.0.1:3080/?token=ABC');
-    check('③ 写入既有 0644 文件后 mode 收口为 0600（旧实现仍 644，世界可读）',
+    if (POSIX) check('③ 写入既有 0644 文件后 mode 收口为 0600（旧实现仍 644，世界可读）',
       (fs.statSync(fp).mode & 0o777) === 0o600, (fs.statSync(fp).mode & 0o777).toString(8));
     check('③ 令牌行确实追加（功能未受影响）',
       /token=ABC/.test(fs.readFileSync(fp, 'utf8')), 'ok');
@@ -166,14 +174,22 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     // 场景 B：新建文件也必须 0600
     const fp2 = path.join(TMP, 'token-new.log');
     svc._persistTokenFile('main', fp2, 'http://127.0.0.1:3080/?token=NEW');
-    check('③ 新建文件为 0600', (fs.statSync(fp2).mode & 0o777) === 0o600, (fs.statSync(fp2).mode & 0o777).toString(8));
+    if (POSIX) check('③ 新建文件为 0600', (fs.statSync(fp2).mode & 0o777) === 0o600, (fs.statSync(fp2).mode & 0o777).toString(8));
+    check('③ 新建文件也写入成功（跨平台功能）', /token=NEW/.test(fs.readFileSync(fp2, 'utf8')), 'ok');
 
     // 场景 C：较宽权限（0666）也必须收口
     const fp3 = path.join(TMP, 'token-wide.log');
     fs.writeFileSync(fp3, 'x\n');
-    fs.chmodSync(fp3, 0o666);
+    if (POSIX) fs.chmodSync(fp3, 0o666);
     svc._persistTokenFile('main', fp3, 'http://127.0.0.1:3080/?token=W');
-    check('③ 0666 也收口为 0600', (fs.statSync(fp3).mode & 0o777) === 0o600, (fs.statSync(fp3).mode & 0o777).toString(8));
+    if (POSIX) check('③ 0666 也收口为 0600', (fs.statSync(fp3).mode & 0o777) === 0o600, (fs.statSync(fp3).mode & 0o777).toString(8));
+    // ③-b：**chmod 确实被调用**（平台无关的结构断言）——
+    //   弥补 Windows 上无法做权限断言的缺口：只要「写后显式收口」这一纪律还在，
+    //   POSIX 平台就会真正收口；Linux/macOS 的行为断言同时保证它没退化。
+    // ⚠ 本文件没有 read() 助手（其余门禁文件才有）——直接用 fs 读，避免 ReferenceError。
+    const tokenSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'token.js'), 'utf8');
+    check('③-b 持久化后显式 chmodSync 收口（mode 选项只对新建生效）',
+      /appendFileSync\([\s\S]{0,500}?chmodSync\(fp,\s*0o600\)/.test(tokenSrc), '有');
   }
 
   fs.rmSync(TMP, { recursive: true, force: true });
