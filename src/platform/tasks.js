@@ -70,8 +70,43 @@ class TaskRegistry {
     if (!this.file) return;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      const tmp = this.file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify({ tasks: this.tasks }, null, 2), { mode: 0o600 });
+      // ⚠ P2 修复（2026-09-13，失效模式 i+b）：**跨进程写者必须合并，不能整份覆盖**。
+      //
+      //   缺陷：本文件有**两个进程**各持一个 TaskRegistry 实例写同一个 tasks.json ——
+      //     守卫（supervisor.js:203）与 router-daemon（daemon.js:55），同一 stateDir。
+      //     而 _load() 只在构造器跑一次，_save() 是「整份覆盖」→ **丢失更新**：
+      //     实测：守卫 begin native/install → daemon begin proxy-app/update →
+      //       磁盘上只剩 proxy-app/update，守卫那条任务**从磁盘消失**
+      //       （反向亦然；两个进程同时跑时 /tasks 每 2s 轮询结果随机翻转）。
+      //   修法：落盘前**重读磁盘并按 id 合并**（同 id 以本方为准，其余磁盘条目保留），
+      //     再按创建时间倒序 + MAX_TASKS 截断。这样两个进程的条目都能留存。
+      //     注：这是「多写者下不丢数据」的最小改动；长期应把 TaskRegistry 收敛为单进程持有。
+      let merged = this.tasks;
+      try {
+        if (fs.existsSync(this.file)) {
+          const disk = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+          if (disk && Array.isArray(disk.tasks)) {
+            const mine = new Map(this.tasks.map((t) => [t.id, t]));
+            // 磁盘条目里，本方没有的（= 另一进程写的）保留
+            for (const t of disk.tasks) {
+              if (t && t.id && !mine.has(t.id)) mine.set(t.id, t);
+            }
+            merged = Array.from(mine.values());
+            // 按创建时间倒序（最新在前），与 _load/unshift 语义一致
+            merged.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            if (merged.length > MAX_TASKS) merged = merged.slice(0, MAX_TASKS);
+          }
+        }
+      } catch { /* 磁盘不可读/损坏：退化为只写本方（不因合并失败而丢本次写入）*/ }
+      // ⚠ **只把合并结果写盘，不写回 this.tasks** ——
+      //   否则本方内存会混入另一进程的任务，而 _current 索引并未同步建立，
+      //   会出现「list() 里有、isBusy() 却 false」的不一致视图。
+      //   本实例的语义（list/isBusy/current）严格只覆盖**自己创建**的任务；
+      //   跨进程的完整视图由读盘方（面板/API 每次读盘）获得。
+      // ⚠ tmp 名必须**唯一**：固定 '.tmp' 会让两个进程并发写同一临时文件 →
+      //   rename 出混合内容（与 store.js 同类隐患）。
+      const tmp = this.file + '.tmp.' + process.pid + '.' + Date.now();
+      fs.writeFileSync(tmp, JSON.stringify({ tasks: merged }, null, 2), { mode: 0o600 });
       fs.renameSync(tmp, this.file);
     } catch (e) {
       this._log('error', 'tasks persist failed: ' + e.message);

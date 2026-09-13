@@ -74,6 +74,36 @@ async function main() {
   }
   check('历史保留上限 200', reg3.list().length === 200, String(reg3.list().length));
 
+  // ── 场景：**跨进程**双写者不得丢失更新（2026-09-13 P2 修复）──
+  //   缺陷：守卫（supervisor.js:203）与 router-daemon（daemon.js:55）各持一个
+  //     TaskRegistry 实例、写同一个 tasks.json，而 _save 是「整份覆盖」→
+  //     第一个进程刚写的任务会被第二个进程的覆盖抹掉。
+  //   修法：_save 落盘前重读磁盘并按 id 合并（本方优先，其余磁盘条目保留）。
+  {
+    const TMP2 = fs.mkdtempSync(path.join(os.tmpdir(), 'task-xproc-'));
+    const guard = new TaskRegistry({ stateDir: TMP2 });   // 模拟守卫进程
+    const daemon = new TaskRegistry({ stateDir: TMP2 });  // 模拟 router-daemon 进程
+    const g1 = guard.begin('native', 'install', { id: 'main', name: '原生 DSH' }, {});
+    guard.start(g1.id);
+    const d1 = daemon.begin('proxy-app', 'update', { id: 'app1', name: 'Proxy' }, {});
+    daemon.start(d1.id);
+    const disk = JSON.parse(fs.readFileSync(path.join(TMP2, 'tasks.json'), 'utf8'));
+    const kinds = disk.tasks.map((x) => x.kind + '/' + x.action);
+    check('跨进程：守卫与 daemon 的任务都留在磁盘（旧实现只剩后者）',
+      kinds.indexOf('native/install') >= 0 && kinds.indexOf('proxy-app/update') >= 0, kinds.join(','));
+    // 反向：同 id 必须以本方为准（不能出现重复条目）
+    const g2 = guard.begin('native', 'upgrade', { id: 'main', name: '原生 DSH' }, {});
+    guard.start(g2.id);
+    const disk2 = JSON.parse(fs.readFileSync(path.join(TMP2, 'tasks.json'), 'utf8'));
+    const ids = disk2.tasks.map((x) => x.id);
+    check('跨进程：任务 id 无重复', new Set(ids).size === ids.length, String(ids.length));
+    check('跨进程：daemon 的条目在守卫后续写入后仍在',
+      disk2.tasks.some((x) => x.kind === 'proxy-app'), 'ok');
+    // 反向：本进程自己的条目数不被合并放大
+    check('跨进程：守卫自己看到 2 条', guard.list().length === 2, String(guard.list().length));
+    fs.rmSync(TMP2, { recursive: true, force: true });
+  }
+
   console.log(failures === 0 ? '\ntask-registry: ALL PASS' : '\ntask-registry: ' + failures + ' FAILED');
   process.exit(failures === 0 ? 0 : 1);
 }
