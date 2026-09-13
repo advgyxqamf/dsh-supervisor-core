@@ -140,23 +140,33 @@ console.log('== R5 发布脚本不得执行 npm config set ==');
 }
 
 // ── R6 CI 平台分工 ──
-console.log('== R6 CI 矩阵不含 ubuntu ==');
+console.log('== R6 CI 发布矩阵覆盖四平台 ==');
 {
   // 经 _workflow.js 读取（**行尾归一化**）：Windows 检出为 CRLF，直接读会让下面 `\n` 锚定的
   // 正则全部失配 → 取到空段 → 5 个断言失败（2026-09-11 真实 Windows CI 事故）。
   const y = readWorkflow('build.yml');
   const code = stripComments(y);
-  // ⚠ 断言范围必须精确到「build 发布矩阵」这一 job（2026-09-11 两次修正）：
-  //   linux-x64 由**本地**发布，故 CI 的 npm 发布矩阵不得含 ubuntu；
-  //   但使用 ubuntu 的 job 是正当存在的 —— `precheck`（探测是否已全部发布）与
-  //   `release`（汇总 artifact → 挂 GitHub Release，不发 npm）。
-  //   故必须按 job 名切分，而非按「全文」或「release 之前的所有内容」。
+  // ⚠ 2026-09-13 决策反转（按明确要求）：**四平台全部由 CI 产出**。
+  //   旧断言「发布矩阵不含 ubuntu」编码的是**私有仓省额度**的旧决策
+  //   （linux-x64 由本地发布）；内核仓已于 2026-09-13 转为公开、Actions 免额度，
+  //   该决策随之作废 → 本条断言**反转为**「矩阵必须覆盖全部四平台」，
+  //   以免 CI 悄悄退化成少平台而无人察觉。
+  //   仍按 job 名切分：precheck 与 release 使用 ubuntu 是正当的。
   // job 段提取改用 _workflow.js 的实现（行尾无关，已由门禁以 CRLF 夹具实测）。
   const jobSectionOf = (name) => jobSection(code, name);
   const buildSection = jobSectionOf('build');
   const releaseSection = jobSectionOf('release');
   const precheckSection = jobSectionOf('precheck');
-  check('R6-a 发布矩阵不含 ubuntu', !/os:\s*ubuntu/.test(buildSection) && !/runs-on:\s*ubuntu/.test(buildSection), buildSection.match(/os:\s*\S+/g));
+  // R6-a（2026-09-13 反转）：发布矩阵必须**覆盖全部四个平台**。
+  //   用 indexOf 而非正则，避免在门禁源码里引入转义脆弱性。
+  const osList = buildSection.split('os:').slice(1).map(function (x) { return x.split('\n')[0].trim(); }).join(', ');
+  check('R6-a 发布矩阵含 ubuntu（四平台全由 CI 产出）', buildSection.indexOf('os: ubuntu') >= 0, osList);
+  check('R6-a2 发布矩阵含 linux + win + darwin 两架构',
+    buildSection.indexOf('os: ubuntu') >= 0 && buildSection.indexOf('windows-latest') >= 0
+    && buildSection.indexOf('macos-latest') >= 0 && (buildSection.indexOf('macos-14') >= 0 || buildSection.indexOf('macos-15') >= 0),
+    osList);
+  check('R6-a3 Linux 基座固定 ubuntu-22.04（glibc 2.35，否则产物无法在 22.04 / Debian 12 运行）',
+    buildSection.indexOf('ubuntu-22.04') >= 0, osList);
   check('R6-b build 用 matrix.os', /runs-on:\s*\$\{\{\s*matrix\.os\s*\}\}/.test(buildSection) && /windows-latest/.test(y));
   check('R6-c 含 macos', /macos-latest/.test(y) && /macos-14/.test(y));
   check('R6-d release job 只挂资产、不发布 npm', releaseSection.length > 0 && !/npm\s+publish/.test(releaseSection) && !/ci-core\.sh/.test(releaseSection), releaseSection.length ? 'ok' : '未取到 release job');
@@ -166,7 +176,7 @@ console.log('== R6 CI 矩阵不含 ubuntu ==');
     (releaseSection.match(/needs:[^\n]*/) || [])[0]);
   // precheck：全平台本地发布后跳过昂贵矩阵（省额度），其自身不得发布 npm
   check('R6-f 存在 precheck 且不发布 npm', precheckSection.length > 0 && !/npm\s+publish/.test(precheckSection), precheckSection.length ? 'ok' : '未取到');
-  check('R6-g precheck 用 ubuntu（1x 计费，成本远低于 mac 10x）', /runs-on:\s*ubuntu/.test(precheckSection), 'ok');
+  check('R6-g precheck 用 ubuntu', /runs-on:\s*ubuntu/.test(precheckSection), 'ok');
 }
 
 // ── R7 平台闸 ──

@@ -152,9 +152,19 @@ console.log('== T6 纯 JS 产物前提 ==');
       check('T6-e 实测：全部平台目录 core.cjs 哈希一致', new Set(hashes).size === 1, hashes.length + ' 份，唯一哈希 ' + new Set(hashes).size);
     } else {
       console.log('SKIP T6-e（产物不足 2 个平台目录；先跑 build:launcher:all 可覆盖）');
+      // 2026-09-13：CI 会先跑 build:launcher:all 并设 DSH_LAUNCHER_REQUIRED=1；
+      // 此时产物不足即**硬失败**，不得静默跳过（否则该断言在产线上永不检查）。
+      if (process.env.DSH_LAUNCHER_REQUIRED === '1') {
+        check('T6-e 需要真实产物（已声明 DSH_LAUNCHER_REQUIRED=1，不得静默跳过）', false,
+          '当前版本 ' + CUR_VER + ' 的平台目录不足 2 个');
+      }
     }
   } else {
     console.log('SKIP T6-d/T6-e（尚无 dist/launcher 产物）');
+    if (process.env.DSH_LAUNCHER_REQUIRED === '1') {
+      check('T6-d/T6-e 需要真实产物（已声明 DSH_LAUNCHER_REQUIRED=1，不得静默跳过）', false,
+        'dist/launcher 不存在（CI 应先跑 npm run build:launcher:all）');
+    }
   }
 }
 

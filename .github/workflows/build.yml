@@ -102,15 +102,23 @@ jobs:
         #   「声明了壳仓却缺失」时**硬失败**而不是跳过，防止检出失败再度退化。
         env:
           DSH_SHELL_REPO: ${{ github.workspace }}/shell-repo
+          # ⚠ 2026-09-13：声明「launcher 产物必须存在」——
+          #   all-platforms-test 的 T6-d（产物无 .node）/ T6-e（四平台 core.cjs 哈希一致）
+          #   需要真实产物。原先无产物时静默 SKIP → 该断言在 CI 中永不检查。
+          #   这里先构建，再声明需要；若构建失败或产物缺失，T6 **硬失败**而不是跳过。
+          DSH_LAUNCHER_REQUIRED: '1'
         run: |
           # 不截断：门禁失败时断言文案就是排障依据。
           set -o pipefail
+          # 先产出 dist/launcher（四平台），让 T6-d/T6-e 真的执行（不再 SKIP）。
+          npm run build:launcher:all 2>&1 | tail -20
           xvfb-run -a npm test 2>&1 | tail -60
 
   # ── precheck：该 tag 版本是否已在 npm 全部发布？ ──
-  # 为什么需要：全平台本地发布后，tag 仍会触发本 workflow。若无此判断，
-  #   每次发布都会白烧一轮 mac/win 矩阵（macOS 按 10x 计费，约 110 分钟/次）。
-  #   有它则退化为一次 ubuntu 探测（约 1 分钟，1x），把额度消耗降低约 99%。
+  # ⚠ 2026-09-13 定位变更：内核仓已公开（Actions 免额度），故**不再是为省额度**。
+  #   保留目的是**防重复发布**（npm 同版本不可重发），并让「四平台齐备」成为可验证的收敛条件。
+  #   副作用即「已知边界」：四平台齐备后构建矩阵不再运行 —— 想在 CI 重跑完整构建，
+  #   必须存在一个**未发布的新版本**。见 release/README.md §1.2。
   # 判据：package.json#npmPublish.packages 声明的**每个**平台子包，在该版本下是否都已存在于 npm。
   precheck:
     runs-on: ubuntu-latest
@@ -160,10 +168,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux 不在 CI 生产（2026-09 定案，额度优化）：linux-x64 子包改由**本地**
-          # `npm run release:core:publish` 在 Linux 机器上构建并直推 npm（见 release-core.sh）；
-          # tag 推送后本矩阵仅负责 macOS/Windows 三平台（win-x64 / darwin-arm64 / darwin-x64）。
-          # 注意：因此 Linux 的 launcher 资产不再挂到 GitHub Release（npm 是其分发通道）。
+          # ⚠ 2026-09-13 变更（按明确要求）：**四平台全部由 CI 产出**。
+          #   原「Linux 不在 CI 生产」的分工**起源是私有仓额度限制**（linux 本地发以省额度）；
+          #   内核仓已于 2026-09-13 转为**公开**，Actions 免额度 → 该分工作废，统一由 CI 生产，
+          #   使「CI 绿 = 四平台产物齐备」成为单一且可验证的事实。
+          #   Linux **必须**用 ubuntu-22.04 基座（glibc 2.35）：在 24.04（glibc 2.39）构建的产物
+          #   无法在 22.04 / Debian 12 运行（Rust std 对 pidfd_* 的弱引用被解析成硬性 verneed）。
+          #   门禁：`test/glibc-gate-test.js` + `ci/check-glibc.sh`；构建后由 ci-core.sh 的
+          #   「glibc 基座门禁（Linux）」步骤校验产物不要求高于 2.35 的符号。
+          - os: ubuntu-22.04
+            artifact: linux-x64
+            arch_override: ""
           - os: windows-latest
             artifact: win-x64
             arch_override: ""
