@@ -31,6 +31,10 @@ class InstanceManager {
     this.events = opts.events || null;
     this.dist = opts.dist || null;       // 统一分发：沙箱 npm 安装与 DSH 自升级共用全局镜像源
     this.dshBin = opts.dshBin || 'dsh';
+    // 平台服务控制器：**可注入**（与本仓对 npmBin 的约定一致 —— 测试应显式注入，
+    // 而非 patch 模块导出：后者在「值绑定」时会静默失效并跑真实副作用）。
+    // 默认取模块单例，生产行为不变。
+    this.service = opts.service || service;
     // 平台能力门（2026-09 审计修复）：沙箱实例经 systemd-run 独立 cgroup 管理 → 仅 Linux+systemd 可用。
     // 非支持平台在此显式记录，启停方法返回明确错误——原实现各 execFileSync 逐点 catch 吞错后
     // 误报「启动失败/端口冲突」等误导性原因（mac/win 上静默半瘫的根因之一）。
@@ -242,7 +246,7 @@ class InstanceManager {
         this.logger.info && this.logger.info('已将阻挡 systemd-run 的模板让位（改名保留，未删除）：' + aside);
         if (this.events) this.events.append('systemd_template_moved_aside', { from: this.systemdTemplatePath, to: aside });
       }
-      const reloaded = service.daemonReload();
+      const reloaded = this.service.daemonReload();
       if (reloaded === false) this.logger.warn && this.logger.warn('systemd daemon-reload 失败（不阻断实例创建）');
       return true;
     } catch (e) {
@@ -488,10 +492,24 @@ class InstanceManager {
     //
     //   修法：停止后复核 `isUnitActive`；仍活跃 → **不删目录**，如实上报并把实例留档（不静默）。
     const unit = 'dsh-web@' + id;
-    service.stopUnit(unit); // 尽力停（失败只 return false，不抛）
+    // ⚠ P1 修复（2026-09-13，失效模式 a+e）：**stopUnit 在不支持用户单元的平台上会抛**。
+    //
+    //   缺陷：上一轮注释写「尽力停（失败只 return false，不抛）」—— 该断言**是错的**：
+    //     platform/os/service.js 的 makeUnsupported（macOS launchd / Windows 服务 / 未知平台）
+    //     里 stopUnit() **直接 throw CapabilityError**（…不支持以用户单元方式管理被管实例）。
+    //     于是本函数在 macOS / Windows 上**每次删除实例都抛未捕获异常**
+    //     → 删除操作整体失败（HTTP 500），实例既没被移除、也没给出可理解的提示。
+    //
+    //   为什么长期不可见：该异常在 Linux 上不触发（Linux 有 systemd 用户单元），
+    //     而本轮之前没有门禁在 mac/win 上执行过 removeInstance；
+    //     四平台 CI 上线后，新门禁首次在 macOS runner 上执行即崩在这一行。
+    //
+    //   修法：与下方 isUnitActive 同样的「平台能力差异不是错误」处理 ——
+    //     不支持用户单元 ⇒ 无单元可停 ⇒ 无需停、也不是失败。
+    try { this.service.stopUnit(unit); } catch { /* 平台不支持用户单元：无单元可停，非失败 */ }
     // 复核：以平台层判定为准（无单元/不支持平台 → false，与 service.js:90 的语义一致）。
     let stillActive = false;
-    try { stillActive = service.isUnitActive(unit) === true; } catch { stillActive = true; }
+    try { stillActive = this.service.isUnitActive(unit) === true; } catch { stillActive = true; }
     // 沙箱实例：独立根目录（install 依赖 + data 数据）。删除是破坏性操作，仅对 sandbox 域生效
     // （main/native 永不删除）；失败只警告不阻塞。
     if (inst && inst.domain === 'sandbox' && inst.id !== 'main' && !stillActive) {
@@ -878,7 +896,7 @@ class InstanceManager {
   _cleanStaleUnit(unit) {
     // 平台 Provider 负责 systemd 特有布局（transient 单元文件 + daemon-reload 语义）；
     // 域层不再触碰 systemctl / XDG_RUNTIME_DIR 路径（跨平台审计 §7.1）。
-    service.cleanTransient(unit);
+    this.service.cleanTransient(unit);
     this.logger.info && this.logger.info('cleaned stale transient unit: ' + unit);
   }
 
@@ -916,7 +934,7 @@ class InstanceManager {
       }
       this._cleanStaleUnit('dsh-web@' + inst.id);
       try {
-        service.startTransient({ unit: 'dsh-web@' + inst.id, cmd: cmdArr, env, props, workingDir });
+        this.service.startTransient({ unit: 'dsh-web@' + inst.id, cmd: cmdArr, env, props, workingDir });
       } catch (e) {
         const msg = 'systemd 启动失败: ' + (e.message || e);
         inst.state.lastError = msg;
@@ -973,7 +991,7 @@ class InstanceManager {
     const inst = this.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: '实例不存在' };
     if (!this.sandboxSupported) return { ok: false, error: '当前平台不支持沙箱实例（需 Linux + systemd-run；能力矩阵见 GET /env/status 的 capabilities.multiInstance）' };
-    service.stopUnit('dsh-web@' + inst.id, { timeoutMs: 20000 }); // RC4：有界，防 dbus 挂起冻结守卫
+    this.service.stopUnit('dsh-web@' + inst.id, { timeoutMs: 20000 }); // RC4：有界，防 dbus 挂起冻结守卫
     inst.state.phase = 'STOPPED';
     this.save();
     this._stopLanForInstance(inst);

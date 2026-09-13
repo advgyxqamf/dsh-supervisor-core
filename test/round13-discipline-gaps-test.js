@@ -114,6 +114,36 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     check('② 反向：不存在的实例报「实例不存在」', r3 && r3.ok === false && /不存在/.test(r3.error || ''), JSON.stringify(r3));
   }
 
+  // ── ②-b：stopUnit 抛「平台不支持」时，删除**不得崩溃**（macOS/Windows 的真实情形）──
+  //
+  //   ⚠ 2026-09-13（P1）：这条是本轮**由 macOS runner 逼出来**的缺陷 ——
+  //     platform/os/service.js 的 makeUnsupported（macOS launchd / Windows 服务 / 未知平台）
+  //     其 stopUnit() **直接 throw CapabilityError**，而 removeInstance 原先假定它「不抛」→
+  //     在 mac/win 上**每次删除都抛未捕获异常**（删除整体失败）。
+  //   这里显式注入一个「会抛的 stopUnit」，于是**在 Linux 上也能拦住**该回归，
+  //   不必等到 mac/win runner。（service 是模块级单例：patch 同一对象再还原。）
+  console.log('== ②-b stopUnit 抛能力异常时删除不崩 ==');
+  {
+    const { InstanceManager } = require(path.join(ROOT, 'src', 'domains', 'instance'));
+    // 经**构造期注入**伪造平台服务（本仓约定：显式注入，而非 patch 模块导出 ——
+    // 后者在值绑定时会静默失效并跑真实副作用，故 test-safety-gate 的 A 条明确禁止）。
+    const m2 = new InstanceManager({
+      dir: path.join(TMP, 'sup2'),
+      logger: { info() {}, warn() {}, error() {} },
+      service: {
+        stopUnit() { throw new Error('CapabilityError: 测试注入（模拟 macOS/Windows 不支持用户单元）'); },
+        isUnitActive() { return false; },
+      },
+    });
+    m2.instances = [{ id: 'i9', name: 'x', domain: 'sandbox', port: 0, state: { phase: 'STOPPED' } }];
+    m2.tasks = { isBusy: () => false };
+    let threw = null; let out = null;
+    try { out = m2.removeInstance('i9'); } catch (e) { threw = e; }
+    check('②-b stopUnit 抛能力异常时删除不得崩溃（macOS/Windows 真实情形）',
+      threw === null && out && out.ok === true,
+      threw ? ('崩溃: ' + threw.message) : JSON.stringify(out));
+  }
+
   // ── ③ 令牌恢复文件权限收口 ──
   console.log('== ③ 令牌恢复文件 mode 收口 ==');
   {
