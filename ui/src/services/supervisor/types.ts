@@ -496,18 +496,28 @@ export interface EnvStatus {
     expectedAbsence?: boolean;
   } | null;
 }
-/** Node.js 环境检测：当前版本 vs 官方最新 LTS（GET /env/node-lts） */
+/** Node.js 环境检测（GET /env/node-lts）。
+ *
+ *  ⚠ 2026-09-13 修正契约（此前声明了后端**从不产出**的字段）：
+ *    旧声明含 latestLts / ltsName / updateAvailable，而内核
+ *    `guard/supervisor/settings-view.js::nodeLtsStatus()` **明确不做远端查询**
+ *    （避免守卫启动依赖网络），实返只有 { ok, current, major, ltsLine, suggested,
+ *    fetchedAt, cached }。于是前端那两个分支恒不可达、类型声明与实现分叉。
+ *    现按真实返回对齐。若产品确需「官方最新 LTS」，应另开端点或改走壳 env_status 契约。 */
 export interface NodeLtsStatus {
   ok: boolean;
-  /** 当前系统 Node 版本（去 v 前缀，如 26.7.0） */
+  /** 当前系统 Node 版本（如 26.7.0） */
   current?: string | null;
-  /** 官方最新 LTS 版本（如 24.20.0）；探测失败时为 null */
-  latestLts?: string | null;
-  /** LTS 代号（如 Krypton） */
-  ltsName?: string | null;
-  /** 当前版本 < 最新 LTS 时为 true */
-  updateAvailable?: boolean;
-  checkedAt?: string;
+  /** 当前主版本号 */
+  major?: number | null;
+  /** 当前主版本是否为偶数（本地保守判定「通常为 LTS 线」，非远端断言） */
+  ltsLine?: boolean | null;
+  /** 后端生成的展示建议（含是否 LTS 线的说明） */
+  suggested?: string | null;
+  /** 本次探测时刻（ms） */
+  fetchedAt?: number | null;
+  /** 是否命中 6h 磁盘缓存 */
+  cached?: boolean;
   error?: string | null;
 }
 

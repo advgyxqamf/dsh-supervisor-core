@@ -271,16 +271,20 @@ function EnvDetect() {
   // 无数据（加载中）或失败且无当前版本时不渲染
   if (!node?.current) return <span className="min-w-[120px] text-xs text-muted-foreground">环境检测…</span>;
 
+  // ⚠ 2026-09-13：改为消费后端**真实产出**的字段。
+  //   原实现读 latestLts / updateAvailable / ltsName —— 后端（settings-view.js::nodeLtsStatus）
+  //   从不产出这三个键（它不做远端查询），故「可更新到 vX LTS」整块是**不可达死分支**。
+  //   现用 ltsLine（偶数主版本=通常为 LTS 线）给出真实提示，suggested 作 title 明细。
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="whitespace-nowrap">环境检测 · Node v{node.current}</span>
-      {node.updateAvailable && node.latestLts ? (
+      <span className="whitespace-nowrap" title={node.suggested || undefined}>环境检测 · Node v{node.current}</span>
+      {node.ltsLine === false ? (
         <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-warning-background px-2 py-0.5 font-semibold text-warning">
           <TriangleAlert className="size-3" />
-          可更新到 v{node.latestLts}{node.ltsName ? " LTS" : ""}
+          非 LTS 线（建议偶数主版本）
         </span>
-      ) : node.latestLts ? (
-        <span className="hidden whitespace-nowrap text-muted-foreground/70 sm:inline">最新 LTS v{node.latestLts}</span>
+      ) : node.ltsLine === true ? (
+        <span className="hidden whitespace-nowrap text-muted-foreground/70 sm:inline">LTS 线</span>
       ) : null}
     </span>
   );
