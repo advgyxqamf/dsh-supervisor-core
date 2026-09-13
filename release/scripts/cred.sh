@@ -21,6 +21,10 @@ set -u
 # 凭据库根：默认**绝对路径**（$HOME 被 DSH 重定向，不可用 ~）；
 # 可用 DSH_CRED_DIR 覆盖（测试 / 换机 / 多套环境）。
 STORE=${DSH_CRED_DIR:-/home/bowen/.dsh/credentials}
+#  2026-09-14 跨平台归一：Windows 传入路径可能含反斜杠，而本脚本多处把
+#   $STORE / $INDEX 放进**双引号 shell 串**（反斜杠=转义，会被吃）；
+#   node 在 Windows 上同样接受正斜杠。故统一归一为 /。
+STORE=$(printf '%s' "$STORE" | tr '\\' '/')
 INDEX="$STORE/index.json"
 # ⚠ 导出供 node 子进程读取：**禁止**把路径插进 JS 源码字符串 ——
 #   Windows 路径含反斜杠，在 JS 单引号串里是**无效转义**（\U \A 等被吃），
