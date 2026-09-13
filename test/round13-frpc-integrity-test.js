@@ -75,7 +75,21 @@ function makeTarGz(frpcBody) {
       dir: path.join(TMP, 's-' + Math.random().toString(36).slice(2)),
       logger: { warn: (m) => warns.push(String(m)), info() {}, error() {} },
     });
+    // ⚠ 2026-09-13 修复（P1）：覆盖 frpTag 后**必须同步重算 binPath**。
+    //   构造函数按**真实平台**算 binPath（Windows → bin/frpc.exe，其余 → bin/frpc），
+    //   而本测试把 frpTag 固定为 linux/amd64（exe:false）以避开平台差异 ——
+    //   但若不同步重算，Windows 上就会出现：
+    //     解包写入 bin/frpc（按覆盖后的 exe:false）
+    //     断言检查 bin/frpc.exe（仍是构造函数按 win32 算出的路径）
+    //   → 「frpc not found in archive (linux_amd64)」——
+    //     这是**测试夹具的缺陷**，不是产品问题（产品侧两者同源）。
+    //   修法：与构造函数**同一表达式**重算 binPath，保证两侧始终一致。
     mgr.frpTag = { os: 'linux', arch: 'amd64', tag: 'linux_amd64', exe: false };
+    mgr.binPath = path.join(mgr.binDir, mgr.frpTag.exe ? 'frpc.exe' : 'frpc');
+    // 不变量：binPath 必须与其 frpTag 同源（防再次出现「解包写一个名字、断言看另一个」）
+    check('夹具不变量：binPath 与 frpTag.exe 同源',
+      mgr.binPath === path.join(mgr.binDir, mgr.frpTag.exe ? 'frpc.exe' : 'frpc'),
+      mgr.binPath);
     mgr._sumCache = {};
     // 桩网络层：官方校验表 + 归档下载
     mgr._download = async (url) => {
