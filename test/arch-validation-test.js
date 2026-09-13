@@ -37,8 +37,20 @@ check('A-b 不再有「非 arm64 即 x64」的静默回落',
 check('A-c 平台判定也不得静默回落 linux',
   !/process\.platform === 'darwin' \? 'darwin' : \(process\.platform === 'win32' \? 'win' : 'linux'\)/.test(src),
   '已移除');
-check('A-b 存在白名单映射表 archMap', /archMap\s*=\s*\{/.test(src), '有');
-check('A-b 未知架构会抛错', /不支持的平台组合/.test(src), '有');
+// 2026-09-13（跨平台架构规范化）：平台映射表已收口到 src/platform/matrix.js，
+//   故此处**不再断言 dist/index.js 里存在映射表**（那是实现细节，且正是被消除的重复），
+//   改为断言两条**结构性不变量**：
+//     ① dist 的 _platformTag 必须委托平台层（不得自己持平台知识）；
+//     ② 平台层矩阵确实存在白名单映射与「未知组合抛错」。
+const matrixSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'matrix.js'), 'utf8');
+check('A-b _platformTag 委托平台层矩阵（不再自持 os/arch 映射表）',
+  /return matrix\.npmTag\(\)/.test(src), '已委托');
+check('A-b 平台矩阵存在白名单映射表', /const OS_TAG\s*=\s*\{/.test(matrixSrc), '有');
+check('A-b 平台矩阵对未知组合抛错（不静默回落）',
+  /不支持的平台组合/.test(matrixSrc), '有');
+// 反向：若有人把映射表写回 dist，本条与上面的委托断言会同时失败（防回退）
+check('A-b 反向：dist 中不得再出现 os/arch 映射对象字面量',
+  !/osMap\s*=\s*\{/.test(src) && !/archMap\s*=\s*\{/.test(src), '已清除');
 
 // ── A-a：行为级 —— 用注入的平台/架构直接验证映射 ──
 // 注：_platformTag 读 process.platform/arch（全局），故用子进程改这两个全局再断言。

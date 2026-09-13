@@ -18,6 +18,8 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+// 平台知识唯一事实源（跨平台架构规范）：能力查询（进程组语义）经此，不自行判断 platform。
+const matrix = require('../../platform/matrix');
 const { semverCompare } = require('../dist/index');
 const { dirSizeBytes } = require('../../platform/fs-utils');
 
@@ -398,7 +400,8 @@ class PluginManager {
         const killTree = (sig) => {
           if (!child) return;
           try {
-            if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, sig);
+            // 能力查询（而非自行判断 platform）：POSIX 进程组语义只在支持的平台可用。
+            if (matrix.supportsProcessGroup() && child.pid) process.kill(-child.pid, sig);
             else child.kill(sig);
           } catch { try { child.kill(sig); } catch {} }
         };

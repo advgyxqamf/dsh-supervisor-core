@@ -10,6 +10,8 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { execFile } = require('node:child_process');
 const ex = require('../../platform/exec');
+// 平台知识唯一事实源（跨平台架构规范）：os/arch→标签映射只在 src/platform/matrix.js。
+const matrix = require('../../platform/matrix');
 const netInfo = require('../../platform/os/netinfo');
 const { EnvCatalog } = require('../../platform/env-catalog');
 const { semverCompare } = require('../../domains/dist/index');
@@ -142,8 +144,9 @@ class SettingsView {
   guardCorePkg() {
     const raw = this.config.corePackageName;
     if (!raw) return null;
-    const map = { win32: 'win', linux: 'linux', darwin: 'darwin' };
-    return String(raw).replace(/{os}/g, map[process.platform] || process.platform).replace(/{arch}/g, String(process.arch)) || null;
+    // 2026-09-13（跨平台架构规范化）：平台知识收口到 src/platform/matrix.js。
+    //   （此处原有第三份 os 映射表 { win32, linux, darwin } → { win, linux, darwin }。）
+    return String(raw).replace(/{os}/g, matrix.osTag()).replace(/{arch}/g, matrix.current().arch) || null;
   }
 
   /** 守卫自更新（2026-09 收敛：npm 通道）——查 @dsh-sup/dsh-core-<os>-<arch> 全 tag 最高版本（全更新：

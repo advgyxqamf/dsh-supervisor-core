@@ -3,6 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+// 平台知识唯一事实源（跨平台架构规范）：os/arch→标签映射只在 src/platform/matrix.js。
+const matrix = require('./platform/matrix');
 // ⚠ 此处的 `node:child_process` 导入已删除（2026-09-12，P2 死代码清理）：
 //   全文件对 `spawn`/`execFileSync` **零调用**（仅注释提及）——
 //   它还是 G9 门禁的盲区：G9 只扫**调用**，不扫**导入**，故这一行得以长期存活。
@@ -974,7 +976,7 @@ class Supervisor {
     if (!this.notifyEnabled) return;
     platform.notify(title, body, () => {
       this.notifyEnabled = false; // 环境无通知工具，静默停用
-      this.logger.warn('桌面通知不可用（' + process.platform + '），已停用');
+      this.logger.warn('桌面通知不可用（' + matrix.osTag() + '），已停用');
     });
   }
 

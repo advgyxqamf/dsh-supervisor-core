@@ -8,6 +8,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+// 平台知识唯一事实源（跨平台架构规范）：os/arch→标签映射只在 src/platform/matrix.js。
+const matrix = require('../../platform/matrix');
 const http = require('node:http');
 const https = require('node:https');
 const { spawn } = require('node:child_process');
@@ -23,14 +25,10 @@ const FRP_VERSION = '0.61.1';
  *  @param arch 可选（默认 process.arch）
  *  @returns {{ tag:string, exe:boolean }} 或 null（不支持的平台） */
 function frpPlatformTag(platform, arch) {
-  const pl = platform || process.platform;
-  const ar = arch || process.arch;
-  const osMap = { linux: 'linux', darwin: 'darwin', win32: 'windows' };
-  const archMap = { x64: 'amd64', arm64: 'arm64' };
-  const os = osMap[pl];
-  const am = archMap[ar];
-  if (!os || !am) return null;
-  return { os, arch: am, tag: os + '_' + am, exe: pl === 'win32' };
+  // 2026-09-13（跨平台架构规范化）：**平台知识收口到 src/platform/matrix.js**。
+  //   此处原有一份独立的 os/arch 映射表（{ linux, darwin, win32 } → { linux, darwin, windows }），
+  //   是全仓 5 份同事实副本之一。现改为委托，保持对外行为（含"不支持返回 null"）不变。
+  return matrix.frpTag(platform, arch);
 }
 
 // 下载镜像前缀（国内镜像优先，GitHub 官方兜底）。URL 主体按平台动态生成（2026-09 审计修复：
@@ -303,8 +301,9 @@ class FrpManager {
     // logTail 仅承载运行期 frpc stdout（否则安装完成日志永久残留、前端一直显示）。
     const report = (msg) => { if (onProgress) try { onProgress(msg); } catch {} };
     if (!this.frpTag) {
-      if (this.events) this.events.append('frpc_install_failed', { detail: '当前平台无 frpc 官方产物: ' + process.platform + '/' + process.arch });
-      return { ok: false, error: '当前平台不支持 FRP（' + process.platform + '/' + process.arch + '），仅 linux/darwin/win32 × x64/arm64' };
+      const cur = matrix.current();
+      if (this.events) this.events.append('frpc_install_failed', { detail: '当前平台无 frpc 官方产物: ' + cur.platform + '/' + cur.arch });
+      return { ok: false, error: '当前平台不支持 FRP（' + cur.platform + '/' + cur.arch + '），仅 linux/darwin/win32 × x64/arm64' };
     }
     const asset = 'frp_' + FRP_VERSION + '_' + this.frpTag.tag + '.tar.gz';
     const urls = downloadUrls(asset);

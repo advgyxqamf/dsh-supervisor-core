@@ -62,6 +62,78 @@
 
 ---
 
+## 0.3 跨平台架构规范（**工业标准 · 唯一合法做法**）
+
+> 本节回答一个明确要求：**「后续开发不会再因为内部业务逻辑开发而影响跨平台构建能力」**。
+> 办法不是靠自觉，而是**把平台知识收口到一处 + 用门禁锁住边界**。
+
+### 铁律一：平台知识只允许存在于 `src/platform/**`
+
+`process.platform` / `process.arch` / `os.platform()` / `os.arch()`
+**只允许出现在 `src/platform/**`**。业务域（`domains/`、`guard/`、`api/` …）必须经：
+
+| 需求 | 唯一入口 |
+|---|---|
+| 取平台事实（platform/arch/osTag）| `src/platform/matrix.js` 的 `current()` / `osTag()` |
+| 取 npm / 产物标签 | `src/platform/matrix.js` 的 `npmTag()` |
+| 取 FRP 官方产物标签 | `src/platform/matrix.js` 的 `frpTag()` |
+| 判断平台能力（如进程组语义）| `src/platform/matrix.js` 的 `supportsProcessGroup()`，或 `platform/os/index.js` 的 `capabilities()` |
+| 需要平台专属行为 | `src/platform/os/*` 的 Provider（`service` / `desktop` / `pidlookup` …）|
+
+**为什么**（本仓付出过的代价）：os/arch→标签 这一事实曾散落 **5 份**
+（`frpmgr.js` / `dist/index.js` / `settings-view.js` / `plugins.js` / `platform/os/*`）。
+多份副本必然漂移；更关键的是——**业务域持有的平台知识在非本平台上不会被校验**，
+一旦写错，只有在对应平台的构建/运行中才暴露。
+
+### 铁律二：禁止在业务域写 os/arch 映射表
+
+禁止（历史形态，已清除）：
+
+```js
+const osMap = { darwin: 'darwin', win32: 'win', linux: 'linux' };
+const os = osMap[process.platform];
+if (process.platform !== 'win32') { /* POSIX 进程组 */ }
+```
+
+正确：
+
+```js
+const matrix = require('../../platform/matrix');
+const os = matrix.osTag();
+if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
+```
+
+### 铁律三：新增平台支持 = 固定四步（不得跳步）
+
+| 步 | 动作 | 由哪道门禁守 |
+|---|---|---|
+| 1 | 在 `package.json#npmPublish.packages` 声明子包 | `platform-matrix-single-source-test` M-a |
+| 2 | 在 `src/platform/matrix.js` 的 `SUPPORTED` 加入该组合 | 同上 M-a / M-b |
+| 3 | 在 `src/platform/os/*` 补该平台 Provider 分支（`capabilityProfile` 显式档位）| `cross-platform-architecture-gate-test` CP-3 |
+| 4 | 在 `.github/workflows/build.yml` 的 build 矩阵加入 runner | `release-auth-test` R6-a2 |
+
+### 守住边界的三道门禁（**均已注入验证**）
+
+| 门禁 | 守什么 |
+|---|---|
+| `test/platform-matrix-single-source-test.js`（17 断言）| 矩阵与发布清单**逐项一致**；`src/` 中**除 matrix.js 外无第二份 os/arch 映射表**；标签取值正确（含 FRP 的第三方命名 `windows_amd64` ≠ npm 的 `win-x64`）|
+| `test/cross-platform-architecture-gate-test.js`（11 断言）| **平台事实只在 `src/platform/**`**；业务域无映射表；三平台档位齐备且与矩阵同集合；`engines.node` 单一声明 |
+| `test/test-chain-completeness-test.js`（10 断言）| `test/*-test.js` **要么在链中、要么在显式排除表里写理由** —— 消灭「新增门禁静默不进 CI」|
+
+> 三道门禁都有**反向断言**（判据必须能识别违规形态），并已用真实注入验证：
+> 业务域写回 `process.platform` → CP-1 失败；写回 os 映射表 → M-c / CP-2 失败；
+> 新增一个不在链中的测试 → N-a 失败；矩阵与发布清单不一致 → M-a 失败。
+
+### 为什么这能「防止业务开发破坏跨平台构建」
+
+1. **知识单源** → 平台事实不存在「改一处忘了另一处」的漂移空间。
+2. **边界由门禁强制** → 业务域一旦越界，`npm test`（**在 Linux 上**）立刻失败，
+   不必等到 mac/win runner 才发现。
+3. **新增测试自动有归属** → 不会出现「写了门禁但没接进 CI」。
+4. **新增平台是清单化流程** → 四步各有门禁，跳步即失败。
+
+---
+
 ## 1. 产线实证与已知边界（2026-09-13）
 
 ### 1.1 本地全平台真实构建（已跑通）

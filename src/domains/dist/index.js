@@ -15,6 +15,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
+// 平台知识唯一事实源（跨平台架构规范）：os/arch→标签映射只在 src/platform/matrix.js。
+const matrix = require('../../platform/matrix');
 const { spawn } = require('node:child_process');
 // P1-C：npm 的统一解析入口（Windows 上是 npm.cmd；裸 'npm' 会 ENOENT）。
 const { npmBin } = require('../../platform/os/exec-path');
@@ -249,14 +251,11 @@ class DistributionManager {
    *   并如实上报（见该函数的 try/catch），不会让守卫崩溃。
    */
   _platformTag() {
-    const osMap = { darwin: 'darwin', win32: 'win', linux: 'linux' };
-    const archMap = { arm64: 'arm64', x64: 'x64' };
-    const os = osMap[process.platform];
-    const arch = archMap[process.arch];
-    if (!os || !arch) {
-      throw new Error('不支持的平台组合: ' + process.platform + '/' + process.arch + '（仅 linux/darwin/win32 × x64/arm64）');
-    }
-    return os + '-' + arch;
+    // 2026-09-13（跨平台架构规范化）：**平台知识收口到 src/platform/matrix.js**。
+    //   此处原有第二份 os/arch 映射表；现改为委托。
+    //   ⚠ 错误文案由 matrix.npmTag 原样抛出 —— 它是既有对外契约
+    //     （test/arch-validation-test.js 断言其内容），不得改动。
+    return matrix.npmTag();
   }
 
   /**
