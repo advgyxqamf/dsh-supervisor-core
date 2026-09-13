@@ -67,7 +67,7 @@ xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
 - **运行时依赖**：Node.js ≥18（launcher 需目标机 node；SEA 免运行时优势已弃，换取三端可运行可发布）。
 - **版本自包含**：esbuild 编译期注入 `__DSH_VERSION__`，launcher 任意 cwd 自报正确版本；提升走 `release/scripts/bump.sh --core`（单源 = `package.json.version`）。
 - **平台命名**：npm 内核子包按平台分（`@scope/dsh-core-linux-x64` / `darwin-arm64` / `darwin-x64` / `win-x64`；`process.platform` 的 `win32` 需映射 `win`）。各平台在对应平台机器上各自构建（无交叉编译）。
-- **平台生产分工（2026-09 定案，GitHub 额度优化）**：**linux-x64 本地生产**——Linux 机器执行 `npm run release:core:publish` 走完整门禁后直推 npm；**win-x64 / darwin-arm64 / darwin-x64 由 GitHub CI** 在 tag 触发后生产。故 CI 矩阵不含 ubuntu，本地真发布有平台闸（非 Linux 直接拒绝，防与 CI 二次发布）。
+- **平台生产分工（2026-09-13 硬标准）**：**四平台全部由 GitHub CI 产出**（`build` job 的 4 runner 矩阵：ubuntu-22.04 / windows-latest / macos-latest / macos-14）；**本地不再有任何平台构建/发布路径**（`--all-platforms` 本地 exit 2，`release-core.sh` 已删除）。
 - **许可**：内核 **UNLICENSED**（闭源构建物，主 `package.json`/`LICENSE` 声明）；壳 **MIT**（`src-tauri/LICENSE`）。
 - **双仓库（壳开源引流）**：壳源码位于公开仓库 `wasi7mglns/dsh-supervisor-launcher`（MIT 许可）；
   本仓库为内核（私有，`advgyxqamf/dsh-supervisor-core`）。两仓**完全独立**——
@@ -75,7 +75,7 @@ xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
   壳相关工具与文档均在壳仓自身。
 - **跨仓协作方式**：内核侧仅保留**对接代码**（`src/domains/shell/`、`src/api/shell.js` ——
   内核需展示桌面版本并观测壳健康，属内核职责）；壳的构建、签名、发布、测试全部由壳仓自持。
-- **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/` 发布脚本集 + `release/scripts/ci-core.sh` 产线核心 + `release/scripts/release-core.sh` 一键编排 + `release/runbooks/` 操作手册 + `release/README.md` SOP）。一键发布见 `npm run release:core`（dry-run）/ `npm run release:core:publish`（真发，仅 Linux）。
+- **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/ci-core.sh` 产线核心 + `release/runbooks/` 操作手册 + `release/README.md` 索引）。**流程唯一事实源见 `RELEASE-STANDARD.md`**；**构建与发布一律经 GitHub CI**（本地不得产生发布产物）。
 
 ## 架构
 
@@ -298,7 +298,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 - **发布通道（D1，2026-09 定案）**：守卫自身更新统一走 npm 平台子包（`DistributionManager.runNpmInstall` + `@dsh-core/<os>-<arch>`）；`release/scripts/release.sh` 不再产出自更新 manifest，仅作源码打包出口。
 - 底层执行器：`src/domains/dist/self-update.js`（tar 解包/SHA256 校验/`current` 软链原子翻转/剪枝；guard-update-test 全量覆盖，作回归保留，非发布通道）。
 - 接入：配置 `selfUpdateManifestUrl` / `selfUpdateDir`；API `GET /self-update/status`、`POST /self-update/apply`。
-- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）；推荐一键：`npm run release:core:all` / `npm run release:core:all:publish`。
+- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）；推荐一键：`CI（tag 触发）` / `CI（tag 触发，四平台各自 ci-core.sh --publish）`。
 - 环境状态：`GET /env/status`（node/npm/git 探针 + 壳写入的 runtime.json）、`GET /env/dsh`（DSH 本体安装/纳管判定）。
 
 ### 跨平台打包（**已移至壳仓**）

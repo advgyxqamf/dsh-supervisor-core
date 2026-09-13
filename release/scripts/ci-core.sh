@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 内核发布产线（CI 核心逻辑单源）——供 .github/workflows/build.yml 的 **四平台** build 矩阵调用
-# 同时是**本地 Linux 生产**的实际构建+发布体（由 release-core.sh 编排调用）。
+# CI 的 build 矩阵与 test job 都直接调用本脚本（**无本地编排器**）。
 # 用法: release/scripts/ci-core.sh [--publish] [--all-platforms]
 #   - 无 --publish      = 只验证（verify:versions → build-ui → npm test → build:launcher → 子包 dry-run）
 #   - --publish         = 验证通过后追加真发布（**本机平台**子包 → 官方 registry）
@@ -27,7 +27,10 @@ ALL_PLATFORMS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --publish) PUBLISH=1 ;;
-    --all-platforms) ALL_PLATFORMS=1 ;;
+    --all-platforms)
+      # 硬标准（2026-09-13）：本地不得有全平台构建/发布路径。
+      echo '拒绝：--all-platforms 已废弃（2026-09-13 硬标准：构建与发布均经 GitHub CI）。' >&2
+      exit 2 ;;
     *) echo "未知参数: $1（支持 --publish / --all-platforms）"; exit 2 ;;
   esac
   shift
@@ -41,8 +44,8 @@ npm run verify:versions
 echo "=== [1/5] 前端门禁（typecheck + lint + vitest）+ 构建 UI 产物 ==="
 # ⚠ 2026-09-12 修复：前端门禁此前**从未在任何路径上执行** ——
 #   `ui/package.json` 有 typecheck/lint/test 与 3 个 .test.ts（15 个用例），
-#   但 `build-ui.sh` **只构建不测试**，而 CI 注释声称的「release-core.sh 的 [3/7] UI 门禁」
-#   并不存在（release-core 只有 [1/5]–[3/5]）。
+#   但 `build-ui.sh` **只构建不测试** —— 历史上曾有一处不存在于任何脚本的「[3/7] UI 门禁」
+#   被写进 CI 注释（编排器 release-core.sh 早已只有 [1/5]–[3/5]，现已删除）。
 #   现由此处在**构建之前**跑完整 verify：语法/类型/测试不过就不该产出镜像。
 #
 # 顺序理由：`npm run verify` 内部已含 build（typecheck → lint → test → build），

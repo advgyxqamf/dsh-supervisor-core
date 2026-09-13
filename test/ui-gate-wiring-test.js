@@ -34,7 +34,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 const ciCore = fs.readFileSync(path.join(ROOT, 'release', 'scripts', 'ci-core.sh'), 'utf8');
 const buildUi = fs.readFileSync(path.join(ROOT, 'release', 'scripts', 'build-ui.sh'), 'utf8');
 const uiPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'ui', 'package.json'), 'utf8'));
-const releaseCore = fs.readFileSync(path.join(ROOT, 'release', 'scripts', 'release-core.sh'), 'utf8');
+// release-core.sh 已于 2026-09-13 删除（硬标准：构建/发布均经 GitHub CI）
 // ⚠ 必须经 `_workflow.js` 读取（门禁 W4 强制）：它做 CRLF/CR/LF 归一化，
 //   裸 readFileSync 在 Windows 检出下会让按行解析失配（本仓已有该事故记录）。
 const W = require(path.join(__dirname, '_workflow.js'));
@@ -84,18 +84,15 @@ check('U-b verify 串包含 typecheck/lint/test/build 四步',
 //   用简单的 includes 会把说明文字当成仍然有效的声明（我第一版就踩了这个假阳性）。
 //   判据：不得存在「以肯定语气指向 [3/7]」的句子（排除标记为「原写/校正/并不存在」的说明行）。
 {
+  // 2026-09-13：release-core.sh 已删除（硬标准：构建/发布均经 GitHub CI），[3/7] 之争随之终结。
+  //   改为断言：CI 注释里不得再出现该历史阶段的「有效声称」（说明性行不算）。
   const liveClaim = ciYml
     .split(String.fromCharCode(10))
-    .filter((l) => {
-      if (!/\[3\/7\]/.test(l)) return false;
-      // 说明性行（含「原写」「校正」「不存在」「2026-09-12」）不算有效声称
-      return !/原写|校正|不存在|2026-09-12|并不存在/.test(l);
-    });
-  check('U-c CI 注释不再**声称** release-core.sh 有 [3/7]',
-    liveClaim.length === 0, liveClaim.length ? liveClaim.join(' | ').slice(0, 80) : '已校正');
+    .filter((l) => /release-core.sh/.test(l))
+    .filter((l) => !/已删除|删除|原写|校正|不存在|2026-09-13/.test(l));
+  check('U-c CI 注释不再把 release-core.sh 当作现行编排器',
+    liveClaim.length === 0, liveClaim.length ? liveClaim.join(' | ').slice(0, 80) : '已清理');
 }
-check('U-c release-core.sh 确实没有 [3/7]（证明上述校正是必要的）',
-  !/\[3\/7\]/.test(releaseCore), '确认无此阶段');
 
 // ── 反向：build-ui 只构建不测试（说明为何必须由 ci-core 补上 verify）──
 check('反向：build-ui.sh 自身不跑 test（故上游必须显式补）',

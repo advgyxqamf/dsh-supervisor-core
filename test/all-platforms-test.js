@@ -50,43 +50,50 @@ console.log('== T1 平台矩阵（单一事实源）==');
   check('T1-f 矩阵可推出全部子包名', pkgs.every((p) => derived.includes(p)), JSON.stringify(derived));
 }
 
-// ── T2 脚本接入 ──
-console.log('== T2 脚本已接入 --all-platforms ==');
+// ── T2 脚本接入（**2026-09-13 硬标准改版**）──
+//
+// 硬标准：**任何平台构建/发布都必须经 GitHub CI**；本地不得有全平台路径。
+// 故：
+//   · build-launcher.sh --all-platforms  **仅 CI 内允许**（CI test job 需四平台产物）
+//   · publish-core.sh --all-platforms     **一律拒绝**（本地不得全平台发布）
+//   · ci-core.sh --all-platforms          **一律拒绝**
+//   · release-core.sh                     **已删除**（纯本地编排器，CI 从不调用）
+console.log('== T2 硬标准：本地无全平台构建/发布路径 ==');
 {
   const build = read('release/scripts/build-launcher.sh');
   const pub = read('release/scripts/publish-core.sh');
   const ci = read('release/scripts/ci-core.sh');
-  const rel = read('release/scripts/release-core.sh');
-  check('T2-a build-launcher 接受 --all-platforms', /--all-platforms\)/.test(build) && /ALL=1/.test(build), 'ok');
-  check('T2-b publish-core 接受 --all-platforms', /--all-platforms\)/.test(pub) && /ALL=1/.test(pub), 'ok');
-  check('T2-c publish-core 自递归调用（单一路径，不复制逻辑）',
-    /bash "\$ROOT\/release\/scripts\/publish-core\.sh"/.test(pub), 'ok');
-  check('T2-d ci-core 透传 PLAT_ARGS', /PLAT_ARGS/.test(ci) && /--all-platforms/.test(ci), 'ok');
-  check('T2-e release-core 接受 --all-platforms', /--all-platforms\)/.test(rel), 'ok');
-  check('T2-f release-core 全平台走 ci-core --all-platforms', /ci-core\.sh --all-platforms/.test(rel), 'ok');
-  check('T2-g release-core 全平台发布走 publish:core --all-platforms', /publish:core -- --publish --all-platforms/.test(rel), 'ok');
-  // T2-j 发布时序：**必须先发布、后 tag**（2026-09-11 修复 409 竞态）。
-  //   旧顺序「先 tag+push 再本地发布」会让 CI 的 build 矩阵与本地**同时 PUT 同一个包**：
-  //   tag 一推 CI 立刻启动，而 CI 在（tag 触发 + 有 NPM_TOKEN）时会执行 ci-core --publish。
-  //   实测 v0.1.5-BETA.1 的 win-x64 即因此报 409 Conflict。
-  //   断言用**行号先后**判定，防止有人把顺序改回去。
-  const idxPublish = rel.indexOf('publish:core -- --publish --all-platforms');
-  const idxTag = rel.indexOf('git tag "v$VER"');
-  check('T2-j release-core 先发布后 tag（防与 CI 竞态）',
-    idxPublish > 0 && idxTag > 0 && idxPublish < idxTag,
-    'publish@' + idxPublish + ' tag@' + idxTag);
-  // 平台清单一律来自 _platforms.sh，不得在别处硬编码平台列表
-  check('T2-h build-launcher 从 _platforms.sh 取矩阵', /\. "\$ROOT\/release\/scripts\/_platforms\.sh"/.test(build), 'ok');
-  check('T2-i publish-core 从 _platforms.sh 取矩阵', /\. "\$ROOT\/release\/scripts\/_platforms\.sh"/.test(pub), 'ok');
-}
+  const pkg = require(path.join(ROOT, 'package.json'));
 
-// ── T3 npm scripts 接线 ──
-console.log('== T3 npm scripts（用户入口）==');
-{
-  const sc = require(path.join(ROOT, 'package.json')).scripts;
-  for (const k of ['build:launcher:all', 'publish:core:all', 'release:core:all', 'release:core:all:publish']) {
-    check('T3 ' + k + ' 存在', typeof sc[k] === 'string' && /--all-platforms/.test(sc[k]), sc[k]);
-  }
+  check('T2-a build-launcher 的 --all-platforms 受 GITHUB_ACTIONS 守卫（CI-only）',
+    /--all-platforms\)/.test(build) && /GITHUB_ACTIONS/.test(build), 'ok');
+  check('T2-a2 本地调用确实被拒绝（exit 2 且带说明）',
+    /GITHUB_ACTIONS:-\}\" != 'true'/.test(build) && /只允许在 GitHub CI 内运行/.test(build), 'ok');
+  check('T2-a3 CI 内仍放行（CI test job 需四平台产物供 T6-d/T6-e）',
+    /ALL=1/.test(build), 'ok');
+  check('T2-b publish-core 的 --all-platforms 一律拒绝（本地不得全平台发布）',
+    /--all-platforms\)/.test(pub) && /已废弃/.test(pub) && /exit 2/.test(pub), 'ok');
+  check('T2-d ci-core 的 --all-platforms 一律拒绝',
+    /--all-platforms\)/.test(ci) && /已废弃/.test(ci) && /exit 2/.test(ci), 'ok');
+
+  // release-core.sh 已删除（纯本地编排器）
+  check('T2-e release-core.sh 已删除（不再有本地发布编排）',
+    !fs.existsSync(path.join(ROOT, 'release', 'scripts', 'release-core.sh')), '已删除');
+  check('T2-f 无任何文件再引用 release-core',
+    !read('release/scripts/ci-core.sh').includes('release-core.sh 编排调用'),
+    'ok');
+
+  // npm scripts：本地发布入口必须不存在；仅保留 CI 用的构建入口
+  const gone = ['release:core', 'release:core:publish', 'release:core:all', 'release:core:all:publish', 'publish:core:all'];
+  const still = gone.filter((k) => pkg.scripts[k]);
+  check('T2-g 本地发布类 npm script 已全部移除', still.length === 0, still.join(', ') || '已移除 ' + gone.length + ' 个');
+  check('T2-h 仅保留 CI 内的四平台构建入口 build:launcher:all',
+    typeof pkg.scripts['build:launcher:all'] === 'string'
+    && /--all-platforms/.test(pkg.scripts['build:launcher:all']), pkg.scripts['build:launcher:all']);
+
+  // 平台清单一律来自 _platforms.sh，不得在别处硬编码平台列表
+  check('T2-i build-launcher 从 _platforms.sh 取矩阵', /\. "\$ROOT\/release\/scripts\/_platforms\.sh"/.test(build), 'ok');
+  check('T2-j publish-core 从 _platforms.sh 取矩阵', /\. "\$ROOT\/release\/scripts\/_platforms\.sh"/.test(pub), 'ok');
 }
 
 // ── T4 同源保证（构建期断言）──

@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UI="$ROOT/ui"
 SKIP_INSTALL=0
 [ "${1:-}" = "--skip-install" ] && SKIP_INSTALL=1
-# 环境变量等价形式（2026-09-10）：供本地编排（release-core.sh）在 ui/node_modules 已就绪时
+# 环境变量等价形式（2026-09-10）：供 CI（ci-core.sh）在 ui/node_modules 已就绪时
 # 跳过 npm ci，省时；CI 侧不设置该变量 → 仍走可复现的 npm ci。
 [ "${DSH_UI_SKIP_INSTALL:-0}" = "1" ] && SKIP_INSTALL=1
 

@@ -131,7 +131,7 @@ console.log('== R4 规范位置（真实 home/.npmrc）命中 ==');
 // ── R5 不污染开发机 npm 配置 ──
 console.log('== R5 发布脚本不得执行 npm config set ==');
 {
-  for (const f of ['ci-core.sh', 'release-core.sh', 'publish-core.sh', 'configure-credentials.sh']) {
+  for (const f of ['ci-core.sh', 'publish-core.sh', 'configure-credentials.sh']) {
     const src = fs.readFileSync(path.join(S, f), 'utf8');
     // 允许出现在注释中，但不得是可执行语句
     const code = src.split(String.fromCharCode(10)).filter((l) => !/^\s*#/.test(l)).join(String.fromCharCode(10));
@@ -179,13 +179,25 @@ console.log('== R6 CI 发布矩阵覆盖四平台 ==');
   check('R6-g precheck 用 ubuntu', /runs-on:\s*ubuntu/.test(precheckSection), 'ok');
 }
 
-// ── R7 平台闸 ──
-console.log('== R7 真发布平台闸 ==');
+// ── R7 硬标准：构建与发布均经 GitHub CI（2026-09-13）──
+//
+//   旧 R7 断言 release-core.sh 的「非 Linux 拒绝真发布」平台闸 —— 那是**本地发布时代**的防护。
+//   硬标准落地后本地发布路径整体移除，该闸失去对象。现断言：本地不得存在全平台构建/发布路径。
+console.log('== R7 硬标准：构建/发布均经 GitHub CI ==');
 {
-  const src = fs.readFileSync(path.join(S, 'release-core.sh'), 'utf8');
-  check('R7-a 有非 Linux 真发布拒绝', /PUBLISH.*1.*PLAT.*!=.*linux|PLAT.*!=.*"linux"/.test(src), 'ok');
-  check('R7-b 委托 ci-core.sh（薄编排，不重复实现）', /ci-core\.sh/.test(src));
-  check('R7-c 不重复实现 npm test（避免与 ci-core 双份维护）', !/^\s*npm test\s*$/m.test(src));
+  check('R7-a release-core.sh 已删除（不再有本地发布编排）',
+    !fs.existsSync(path.join(S, 'release-core.sh')), '已删除');
+  const pub = fs.readFileSync(path.join(S, 'publish-core.sh'), 'utf8');
+  check('R7-b publish-core 拒绝 --all-platforms（本地不得全平台发布）',
+    /--all-platforms\)/.test(pub) && /已废弃/.test(pub) && /exit 2/.test(pub), 'ok');
+  const ci = fs.readFileSync(path.join(S, 'ci-core.sh'), 'utf8');
+  check('R7-c ci-core 拒绝 --all-platforms', /--all-platforms\)/.test(ci) && /已废弃/.test(ci), 'ok');
+  const build = fs.readFileSync(path.join(S, 'build-launcher.sh'), 'utf8');
+  check('R7-d build-launcher 的 --all-platforms 仅 CI 内放行（GITHUB_ACTIONS 守卫）',
+    /GITHUB_ACTIONS/.test(build), 'ok');
+  check('R7-e npm scripts 无本地发布入口',
+    ['release:core', 'release:core:publish', 'release:core:all', 'release:core:all:publish', 'publish:core:all']
+      .every((k) => !require(path.join(ROOT, 'package.json')).scripts[k]), 'ok');
 }
 
 const failed = results.filter((r) => !r);

@@ -28,7 +28,16 @@ ALL=0
 OUT_REL="dist/launcher"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --all-platforms) ALL=1 ;;
+    --all-platforms)
+      # 硬标准（2026-09-13）：**任何平台构建都必须经 GitHub CI**，本地不得有全平台构建残留。
+      #   本选项仅允许在 GitHub Actions 内（CI 的 test job 需四平台产物供 T6-d/T6-e 断言）。
+      #   本地一律拒绝 —— 防止「本地构建 → 本地发布」这条旁路复活。
+      if [ "${GITHUB_ACTIONS:-}" != 'true' ]; then
+        echo '拒绝：--all-platforms 只允许在 GitHub CI 内运行（GITHUB_ACTIONS=true）。' >&2
+        echo '  硬标准：所有平台构建必须经 GitHub CI 完成；本地不得产生发布产物。' >&2
+        exit 2
+      fi
+      ALL=1 ;;
     -*) echo "未知参数: $1（支持 [outDir] / --all-platforms）"; exit 2 ;;
     *) OUT_REL="$1" ;;
   esac
