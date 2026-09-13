@@ -37,3 +37,20 @@
 **追溯方式**：本地 tag archive/orphan-main-20260909（指向 dac0b3bc16381993f1568d7d69065d46c5b60ce9）。
 远端删除后本地仍可 git show archive/orphan-main-20260909:bin/dsh-supervisor 取回。
 
+## 现存归档分支 `archive/kernel-2026-09`（保留，未删除）
+
+2026-09-13 工程清理时**评估过删除**，结论是**保留**，理由如下：
+
+| 项 | 实测 |
+|---|---|
+| master **未含**的提交 | **110** 个（router 迁移 S2–S5 等）|
+| master 未含的文件 | **379** 个（含 `docs/ARCHITECTURE-*`、`AUDIT-REPORT.md`、`HANDOFF.md` 等）|
+| 安全扫描 | 抽样 `config.json` / `docs/token-management.md` / 报告类文件：**均不含密钥形态** |
+
+即它是**真正的历史归档**，不是残留分支。删除会丢失 110 个提交与 379 个文件，
+属**不可逆**操作，故：**不删除**，仅登记在此。
+
+> 如需清理，请先确认其内容在别处有备份（例如打成离线 bundle 或本地 tag），再执行。
+> 本次已删除的只有**已合并**的临时分支（`docs/shell-required-checks`）与
+> **过时/错误的凭据文档**（见 `CREDENTIALS-STANDARD.md` 与 
+> `INCIDENT-2026-09-13-credential-overwrite.md`）。

@@ -216,7 +216,7 @@ release/
 ├── runbooks/                  ← 操作手册（已纳入 git 版本管理）
 │   ├── publish-and-verify.md  ← 发布与验收：全流程 + 状态追踪
 │   ├── verify-desktop.md      ← 桌面真机手工验收清单（GUI 场景）
-│   └── credentials.md         ← 凭据/令牌管理（GitHub PAT + NPM token，值不入库）
+│   └── （凭据 runbook 已删除，见根目录 CREDENTIALS-STANDARD.md）
 └── scripts/                   ← 发布自动化脚本（唯一可执行集）
     ├── bump.sh                ← 版本提升（**--core 内核单源**；壳版本提升见壳仓 scripts/bump-shell.sh）
     ├── build-ui.sh            ← 前端统一构建（ui/ → ui-react/ 镜像；npm test 与 launcher 携带依赖）
@@ -353,7 +353,7 @@ npm run release:core:publish
 > 必须遵守 §0.2 的时序 —— **内核先发**，壳随后；并做一次两侧版本错配的交叉验证。
 > 不涉及契约时可与壳完全独立。
 
-### 平台分工（2026-09 定案；2026-09-13 注：额度动因已随转公开解除，见本节末尾「备注（待决策）」）
+### 平台分工（2026-09 定案；2026-09-13 **已统一为四平台全由 CI 产出**）
 
 | 平台 | 生产位置 | 子包 |
 |---|---|---|
@@ -366,10 +366,9 @@ npm run release:core:publish
 的矩阵**只含 mac/win 三平台**，且前端门禁作业已并入本地 release-core.sh（每次发布都会跑，不会漏跑）。
 Linux 的 launcher 构建物**不挂 GitHub Release**（npm 即其分发通道）。
 
-> ⚠ **2026-09-13 备注（待决策）**：上述「Linux 本地 / mac+win CI」的分工**起源于私有仓的额度限制**，
-> 该限制已随转公开消失。若要进一步统一，可把 `ubuntu-22.04` 加回 CI 矩阵，让**四平台全部由 CI 产出**，
-> 本地 `--all-platforms` 退化为「发布前自证 / 离线兜底」。**这是流程决策，尚未执行**——
-> 现有分工仍然有效且可用（`v0.1.5-BETA.1` 的 CI 四 job 全绿即为实证）。
+> ✅ **2026-09-13 已执行**：`ubuntu-22.04` 已加回 CI build 矩阵，**四平台全部由 CI 产出**
+> （`v0.1.5-BETA.2` 的 tag run 实证：precheck + test + 四平台 build + release 全绿）。
+> 本地 `--all-platforms` 退化为「发布前自证 / 离线兜底」。
 
 **真发布有平台闸**：release-core.sh --publish 在非 Linux 机器上直接拒绝（exit 2）并提示走 tag 触发 CI，
 避免与 CI 形成同平台二次发布（npm 同版本不可重发）。
@@ -407,7 +406,7 @@ git add -A && git commit && git tag v<ver> && git push origin main && git push o
 
 ## 凭据与令牌（**认证单源**，2026-09-10 标准化）
 
-发布链路需要的令牌**值不存仓库目录**，按 `release/runbooks/credentials.md` 管理。
+发布链路需要的令牌**值不存仓库目录**，按根目录 **`CREDENTIALS-STANDARD.md`** 管理（工具 `release/scripts/cred.sh`，规范库 `/home/bowen/.dsh/credentials/` 0700/0600）。
 
 | 令牌 | 消费方 | 最小权限 |
 |---|---|---|

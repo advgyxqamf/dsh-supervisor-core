@@ -145,6 +145,10 @@ echo -n TOKEN | bash release/scripts/cred.sh put 名   # 写入并置 active
 
 ## 8. 事故记录与由此产生的第 4 条铁律（2026-09-13）
 
+> 完整复盘（时间线 / 根因四层 / 为何既有防线没拦住 / 残余风险 / 流程变更）：
+> **`INCIDENT-2026-09-13-credential-overwrite.md`**
+
+
 ### 事故：`put` 覆盖了真令牌
 
 | 项 | 内容 |

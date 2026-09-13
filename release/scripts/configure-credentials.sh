@@ -2,7 +2,13 @@
 # 本机凭据安全配置脚本：把令牌值从「环境变量」写入「系统级安全存储」，值绝不落入仓库/历史/日志。
 # 用法（仓库根执行）：
 #   bash release/scripts/configure-credentials.sh --npm     # NPM_TOKEN 环境变量 → ~/.npmrc（0600）
-#   bash release/scripts/configure-credentials.sh --git     # GH_TOKEN 环境变量 → 配置 git credential helper
+#
+# 2026-09-13：已删除 --git 模式（原「GH_TOKEN -> git credential helper store」）。
+#   理由：它与现行标准冲突且多余 ——
+#     · 两仓 push 走 SSH 部署密钥（repo-local core.sshCommand），不用 https 凭据；
+#     · GitHub 凭据的现行唯一标准是 CREDENTIALS-STANDARD.md + release/scripts/cred.sh
+#       （规范库 0700/0600、清单化管理）。
+#   保留旧机制会诱导「把令牌写进 ~/.git-credentials」—— 那正是标准要消灭的散落副本。
 #   bash release/scripts/configure-credentials.sh --check   # 只读自检（不含任何值）
 # 原则：本脚本不接收命令行明文参数、不打印 token、不写仓库内任何文件。
 #
@@ -40,26 +46,6 @@ write_npmrc() {
   fi
   echo "   验证：bash release/scripts/configure-credentials.sh --check"
   unset NPM_TOKEN
-}
-
-configure_git() {
-  [ -n "${GH_TOKEN:-}" ] || { echo "❌ GH_TOKEN 环境变量为空（请先 export GH_TOKEN=...）"; exit 1; }
-  # 用 credential helper store 保存（写入 ~/.git-credentials 0600）——不内嵌 remote URL
-  git config --global credential.helper store
-  TMP="$(mktemp)"
-  # 已有行保留，仅替换 https://github.com 行
-  if [ -f "$CRED" ]; then
-    grep -v '^https://github.com' "$CRED" > "$TMP" || true
-  fi
-  # x-access-token 是 GitHub 对 PAT 作为口令的标准占位用户名
-  printf 'https://x-access-token:%s@github.com\n' "$GH_TOKEN" >> "$TMP"
-  chmod 600 "$TMP"
-  mv "$TMP" "$CRED"
-  chmod 600 "$CRED"
-  echo "✅ GitHub token 已写入 git credential store（$CRED 0600）"
-  echo "   验证：git ls-remote --heads origin"
-  echo "   注：本仓 git push 走 SSH（repo-local core.sshCommand），通常无需本项。"
-  unset GH_TOKEN
 }
 
 check() {
@@ -102,7 +88,7 @@ check() {
 
 case "${1:-}" in
   --npm) write_npmrc ;;
-  --git) configure_git ;;
+  --git) echo "❌ --git 模式已于 2026-09-13 删除（GitHub 凭据见 CREDENTIALS-STANDARD.md；本脚本只管 npm）。" >&2; exit 2 ;;
   --check) check ;;
-  *) echo "用法: configure-credentials.sh --npm | --git | --check"; exit 2 ;;
+  *) echo "用法: configure-credentials.sh --npm | --check"; exit 2 ;;
 esac

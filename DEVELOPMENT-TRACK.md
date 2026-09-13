@@ -165,6 +165,22 @@ bash release/scripts/ci-core.sh   # CI 等价预演（需 DSH_SHELL_REPO）
 - 用 `bash release/scripts/cred.sh list|doctor|verify` 查看与管理；
 - ⚠ `$HOME` 被重定向到实例数据目录，**一律用绝对路径**，禁止 `~`；
 - 新增 / 轮换后必须 `npm test`（`credential-hygiene-test`，18 断言）。
+### 5.2 不可逆操作（破坏性操作）
+
+**任何不可逆操作**（覆盖凭据 / 发 npm 包 / force push / 删分支 / 覆盖文件）执行前必须自问三问：
+
+1. 会不会不可逆？→ 2. 有无备份/回滚手段？→ 3. **失效方向是否安全**（出错时是拒绝，还是降级到真机）？
+
+并遵守：
+
+- 破坏性子命令**默认拒绝真机**，需显式确认；
+- 覆盖前先备份，使操作可逆；
+- **注入验证优先选非破坏性注入点**；
+- 轮换/迁移期保留旧值副本，直到新值验证通过。
+
+> 血泪案例（务必读）：`INCIDENT-2026-09-13-credential-overwrite.md` ——
+> 我用「破坏隔离」去证明门禁有效，而那道隔离保护的正是不可逆操作，结果覆盖了真令牌。
+
 ## 6. 提交规范
 
 - 中文 commit message；
@@ -243,8 +259,11 @@ git switch master && git pull --ff-only
 
 ### 壳仓
 
-壳仓属**另一账号**（`wasi7mglns`），自动化令牌对其**无 admin 权限**
-（`Resource not accessible by personal access token`）→ 分支保护须由该仓 admin 设置。
+壳仓属**另一账号**（`wasi7mglns`）。**2026-09-13 已设置分支保护**（required checks =
+`version` + 4 条 `build (...)`，strict + enforce_admins）。
+
+两仓保护配置见 `CREDENTIALS-STANDARD.md` 与本节；壳仓的 required 语境**内嵌矩阵参数**，
+改平台矩阵时必须同步更新保护配置（否则旧语境永不出现 → 所有 PR 阻塞）。
 
 已完成的准备工作（本仓已推）：
 

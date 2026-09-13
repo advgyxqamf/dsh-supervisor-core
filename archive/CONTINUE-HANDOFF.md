@@ -36,7 +36,8 @@
 
 ## 五、凭据与账号
 
-- 新 token 文件：`/home/bowen/.dsh/supervisor/instances/inst-1788823804493-427/data/.dsh/attachments/v1/files/6d/6d2808346a38b6a06ef21a21992a8b3385f0122ecd8a5f0ace32482b660693fe/gh_token.txt`（94 字节 fine-grained PAT）
+~~（已移除：令牌路径与导出命令）~~ —— 凭据一律经 **CREDENTIALS-STANDARD.md** 管理，
+~~**禁止**记录实例附件目录（ephemeral，换会话即失效）等非规范位置。~~
 - 归属账号：`wasi7mglns`（已验证可建私有+公开仓）
 - 旧账号 `lobbowen` 已弃用（旧仓无法再访，历史靠 bundle 备份留档）
 
@@ -113,7 +114,8 @@ git push origin v0.1.0     # 推送 tag → 触发挂 Release CI
 ## 八、命令速查（新窗口直接可用）
 
 ```bash
-export TOKEN="$(cat 上面那个gh_token.txt路径)"
+~~（已移除：令牌路径与导出命令）~~ —— 凭据一律经 **CREDENTIALS-STANDARD.md** 管理，
+~~**禁止**记录实例附件目录（ephemeral，换会话即失效）等非规范位置。~~
 # 查看两新仓
 curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos/wasi7mglns/dsh-supervisor-core/contents/
 curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos/wasi7mglns/dsh-supervisor-launcher/contents/

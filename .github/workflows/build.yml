@@ -185,9 +185,14 @@ jobs:
           - os: macos-latest
             artifact: darwin-arm64
             arch_override: ""
-            # GitHub 已无 Intel macOS runner（macos-13 弃用、macos-14 亦为 arm64）。
-            # launcher 为架构无关纯 JS，仅 npm os/cpu 元数据区分——darwin-x64 用 macos-14(arm64)
-            # + DSH_ARCH_OVERRIDE=x64 构建（产物相同，仅包名/元数据不同）。
+            # 事实修正（2026-09-13）：此前此处写「GitHub 已无 Intel macOS runner」——错误。
+            #   GitHub 有原生 Intel 标签 macos-15-intel（壳仓矩阵在用且实测成功）；
+            #   弃用的是 macos-13，而 macos-14 确实是 arm64。
+            #   本仓仍用 macos-14(arm64) + DSH_ARCH_OVERRIDE=x64 出 darwin-x64：
+            #   launcher 是架构无关纯 JS，仅 npm os/cpu 元数据区分，产物等价；
+            #   且该组合自 0.1.5-BETA.1 起连续多轮 tag 构建成功（已实证）。
+            #   切 macos-15-intel 属**矩阵行为变更**，当前不可验证（build 受 need_build 门控，
+            #   版本全发布时不运行）→ 留待下一次发版评估，由真实构建裁决。
           - os: macos-14
             artifact: darwin-x64
             arch_override: x64

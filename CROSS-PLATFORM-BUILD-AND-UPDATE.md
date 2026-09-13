@@ -186,7 +186,9 @@ $ bash ci/check-glibc.sh <binary> 2.35
 **壳仓 `dsh-supervisor-launcher` 是公开仓（MIT）→ GitHub Actions 标准 runner 额度免费。**
 因此壳的构建矩阵**不受额度约束**，可以按「覆盖优先」设计（多发行版、多架构）。
 
-**内核仓 `dsh-supervisor-core` 是私有仓 → 受额度约束** → 这也是「Linux 本地生产」决策的由来。
+**内核仓 `dsh-supervisor-core` 已转为公开仓**（2026-09-13）→ 不再受 Actions 额度约束；「Linux 本地生产」的额度动因随之消失，现**四平台全由 CI 产出**（见 release/README.md）。
+
+~~原文（已作废）：内核仓是私有仓 → 受额度约束 → 这也是「Linux 本地生产」决策的由来。~~
 
 ---
 
@@ -274,9 +276,9 @@ $ bash ci/check-glibc.sh <binary> 2.35
   ③ 汇总 job：组装 npm 包 + shell-manifest.json → npm publish
   ④ 同时挂 GitHub Release（人工下载通道）
 
-【内核发布】私有仓 dsh-supervisor-core（额度受限）
-  linux : 本地 npm run release:core:publish（不经 CI）
-  mac/win: tag → GitHub Actions 三平台矩阵
+【内核发布】dsh-supervisor-core（已公开；四平台全由 CI 产出）
+  linux : CI（ubuntu-22.04 基座 / glibc 2.35）
+  mac/win: tag → GitHub Actions（同一矩阵，四平台）
 ```
 
 ### 6.1 清单（shell-manifest.json）
