@@ -39,14 +39,23 @@ function firstExecutable(dir, base, platform) {
   return null;
 }
 
-/** 标准安装目录（按优先级；跨平台）。 */
-function standardDirs(platform, home) {
+/** 标准安装目录（按优先级；跨平台）。
+ *
+ *  ⚠ 2026-09-13（跨平台架构规范化）：**env 可注入**（默认 process.env）。
+ *    原实现直接读 process.env.APPDATA/LOCALAPPDATA —— 于是「注入 platform='win32'」
+ *    在 Linux 上**拿不到 Windows 目录**（那是宿主 env 而非平台事实），
+ *    使「在 Linux 上穷举 Windows 解析行为」不可能。现 env 与 platform 一并可注入。
+ *  @param platform 可选（默认 process.platform）
+ *  @param home 可选（默认 os.homedir()）
+ *  @param env 可选（默认 process.env） */
+function standardDirs(platform, home, env) {
   const pl = platform || process.platform;
   const h = home || os.homedir();
+  const e = env || process.env;
   const dirs = [];
   if (pl === 'win32') {
-    if (process.env.APPDATA) dirs.push(path.join(process.env.APPDATA, 'npm'));
-    if (process.env.LOCALAPPDATA) dirs.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'dsh-supervisor'));
+    if (e.APPDATA) dirs.push(path.join(e.APPDATA, 'npm'));
+    if (e.LOCALAPPDATA) dirs.push(path.join(e.LOCALAPPDATA, 'Programs', 'dsh-supervisor'));
     dirs.push(path.join(h, '.local', 'bin')); // 兼容旧布局（未必存在，解析时按 isFile 过滤）
   } else {
     dirs.push(path.join(h, '.local', 'bin'));
@@ -56,9 +65,11 @@ function standardDirs(platform, home) {
   return dirs;
 }
 
-/** PATH 内查找（跨平台；Windows 走 PATHEXT；兼容大小写不一的 `Path`）。 */
-function inPath(base, platform) {
-  const raw = process.env.PATH || process.env.Path || '';
+/** PATH 内查找（跨平台；Windows 走 PATHEXT；兼容大小写不一的 `Path`）。
+ *  ⚠ env 可注入（默认 process.env）——理由同 standardDirs：让平台行为可在任意宿主上穷举。 */
+function inPath(base, platform, env) {
+  const e = env || process.env;
+  const raw = e.PATH || e.Path || '';
   for (const d of raw.split(path.delimiter)) {
     if (!d) continue;
     const hit = firstExecutable(d, base, platform);
@@ -75,14 +86,20 @@ function inPath(base, platform) {
  */
 function resolveExecutable(base, opts) {
   const o = opts || {};
-  if (o.envVar && process.env[o.envVar]) {
-    const v = process.env[o.envVar];
+  const pl = o.platform;              // 未传 = 宿主（保持既有默认行为不变）
+  const env = o.env;                  // 未传 = process.env
+  const E = env || process.env;
+  if (o.envVar && E[o.envVar]) {
+    const v = E[o.envVar];
     try { if (fs.statSync(v).isFile()) return v; } catch { /* 覆盖路径无效：继续常规解析 */ }
   }
-  const inPathHit = inPath(base);
+  // ⚠ 2026-09-13：**platform / env 必须向下传播**（原实现两者都不传 →
+  //   npmBin({platform:'win32'}) 在 Linux 上会按**宿主**规则解析出 POSIX 路径，
+  //   使「platform 可注入，便于纯函数测试」形同虚设）。
+  const inPathHit = inPath(base, pl, env);
   if (inPathHit) return inPathHit;
-  for (const d of [...(o.extraDirs || []), ...standardDirs()]) {
-    const hit = firstExecutable(d, base);
+  for (const d of [...(o.extraDirs || []), ...standardDirs(pl, undefined, env)]) {
+    const hit = firstExecutable(d, base, pl);
     if (hit) return hit;
   }
   return null;
@@ -105,10 +122,12 @@ function resolveExecutable(base, opts) {
  * @returns {string} 可执行的绝对路径，或回退名（'npx'）
  */
 function npxBin(opts) {
-  const pl = (opts && opts.platform) || process.platform;
+  const o = opts || {};
+  const pl = o.platform || process.platform;
+  const env = o.env || process.env;
   if (pl !== 'win32') return 'npx';
-  const resolved = resolveExecutable('npx', { extraDirs: [
-    process.env.APPDATA ? path.join(process.env.APPDATA, 'npm') : null,
+  const resolved = resolveExecutable('npx', { platform: pl, env, extraDirs: [
+    env.APPDATA ? path.join(env.APPDATA, 'npm') : null,
   ].filter(Boolean) });
   if (resolved) return resolved;
   return 'npx.cmd';
@@ -134,11 +153,13 @@ function npxBin(opts) {
  * @returns {string} 可执行的绝对路径，或回退名（'npm'）
  */
 function npmBin(opts) {
-  const pl = (opts && opts.platform) || process.platform;
+  const o = opts || {};
+  const pl = o.platform || process.platform;
+  const env = o.env || process.env;
   if (pl !== 'win32') return 'npm';
   // Windows：先按逻辑名解析（候选名含 npm.cmd / npm.bat / npm.exe，PATHEXT 展开）。
-  const resolved = resolveExecutable('npm', { extraDirs: [
-    process.env.APPDATA ? path.join(process.env.APPDATA, 'npm') : null,
+  const resolved = resolveExecutable('npm', { platform: pl, env, extraDirs: [
+    env.APPDATA ? path.join(env.APPDATA, 'npm') : null,
   ].filter(Boolean) });
   if (resolved) return resolved;
   // 解析不到时**仍返回 npm.cmd**：Windows 上 `npm` 无扩展名可执行的概率为零，

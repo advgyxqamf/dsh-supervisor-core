@@ -169,6 +169,17 @@ function status() {
       guiLabel: GUI_LABEL,
     };
   }
+  // ⚠ 2026-09-13（跨平台架构规范化，失效模式 a：声明与实现不一致）：
+  //   原先此处是无条件 fallthrough（注释只写 "Linux"），**没有 `if (isLinux)` 守卫** ——
+  //   于是任何**未知平台**（freebsd/…）都会落进 Linux 分支并对外声称
+  //   `kind: 'systemd'`，与 platform/os/index.js 的 `capabilityProfile().hostService = 'none'`
+  //   （以及 service.js 的 `NONE` provider，kind='none'）**互相矛盾**。
+  //   实测（子进程伪造 platform=freebsd）：`status()` → `{"kind":"systemd",...}`，
+  //   而同一平台的能力档位声明 hostService='none' —— 同一事实两个相反答案。
+  //   现改为：未知平台显式 `kind: 'none'` 且不触碰 systemctl（不产生误导性的 ENOENT 噪声）。
+  if (!isLinux && !isMac && !isWindows) {
+    return { kind: 'none', unit: 'unsupported', on: false, gui: false };
+  }
   // Linux
   let unit = 'unknown';
   const en = ex.runDetail('systemctl', ['--user', 'is-enabled', 'dsh-supervisor.service']);
