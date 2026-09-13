@@ -178,7 +178,10 @@ class ProxyProvider extends ProviderBase {
     // 防残留：同账号只保留一条 proxyInstance 端口记录（旧实例残留清理）
     if (inst.keyId) {
       const owner = 'proxy:' + inst.keyId;
-      for (const rec of ports.list()) if (rec.owner === owner && rec.port !== inst.port) { try { ports.release(rec.port); } catch {} }
+      // ⚠ 2026-09-13（失效模式 g）：释放时**带上该记录的 owner** ——
+      //   list() 快照与 release 之间存在 TOCTOU：期间若该端口被他人重新登记，
+      //   不带 ownerId 的 release 会误删**他人**记录（与实例域 P1-3 同一类缺陷）。
+      for (const rec of ports.list()) if (rec.owner === owner && rec.port !== inst.port) { try { ports.release(rec.port, rec.owner); } catch {} }
     }
     // ── 认领前置：绑定端口上的本账号幸存进程（2026-09 复检根治：一律弃用重拉，禁 adopt）──
     // 进程态不落盘，daemon 重启后只恢复 port 绑定；若该绑定端口仍被一个 cmdline 匹配本 app pkg

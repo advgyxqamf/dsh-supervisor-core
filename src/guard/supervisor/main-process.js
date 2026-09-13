@@ -186,7 +186,12 @@ class MainProcess {
       this.logger.warn && this.logger.warn('register dsh-main ' + newPort + ' 失败，保留旧端口 ' + oldPort + ': ' + ((e && e.message) || e));
       return false;
     }
-    try { if (oldPort !== newPort) ports.release(oldPort); } catch {}
+    // ⚠ 2026-09-13（失效模式 g）：**带 ownerId** —— 与实例域 P1-3 的修法同规。
+    //   按端口号无条件释放可能删掉**他人**的记录（若 oldPort 期间被别的 owner 重新登记）。
+    //   ⚠ owner 必须与 ports.register('dsh-main', p) 写入的**完全一致**：那是 'system:' + role
+    //     （ports.js:156），不是 'dsh-main'。写错会让释放变 no-op → 旧端口残留
+    //     （由 test/main-port-rederive-test.js 捕获）。
+    try { if (oldPort !== newPort) ports.release(oldPort, 'system:dsh-main'); } catch {}
     this.config.targetPort = newPort;
     try { this.config.healthUrl = 'http://' + this.config.targetHost + ':' + newPort + '/'; } catch {}
     // 概念清分(2026-09-06)：main 不再登记于沙箱 instances——端口唯一事实源 = config.targetPort，

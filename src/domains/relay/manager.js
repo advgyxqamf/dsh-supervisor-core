@@ -361,7 +361,8 @@ class LanManager {
       }
       // 注册表单 owner 单记录：清重复残留（真源唯一）
       for (const rec of ports.list()) {
-        if (rec.owner === owner && rec.port !== wanPort) { try { ports.release(rec.port); } catch {} }
+        // ⚠ 2026-09-13：带 owner（防 list→release 之间的 TOCTOU 误删他人记录，见实例域 P1-3）。
+        if (rec.owner === owner && rec.port !== wanPort) { try { ports.release(rec.port, rec.owner); } catch {} }
       }
       if (!ports.isRegistered(wanPort)) ports.allocateMark(wanPort, 'relay', owner);
       // inst.wanPort 仅镜像（守护快照 save 为 noop 不回写；守卫本地模式有 save 则同步）

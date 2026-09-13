@@ -206,9 +206,21 @@ class PortRegistry {
   release(port, ownerId) {
     const p = Number(port);
     const rec = this._records.get(p);
-    if (ownerId !== undefined && ownerId !== null && rec.owner !== ownerId) return false;
+    // ⚠ P2 修复（2026-09-13，失效模式 a）：**空值检查必须在 owner 比较之前**。
+    //
+    //   缺陷：原顺序是「先比对 rec.owner，再判 !rec」——
+    //     而 rec 为 undefined 时读 rec.owner 会**抛 TypeError**
+    //     （Cannot read properties of undefined (reading 'owner')）。
+    //     实测：release(未登记端口, 任意ownerId) → TypeError。
+    //   后果：本函数文档明确写「传了 ownerId → 仅当登记 owner 匹配才释放（不匹配即 no-op，
+    //     并返回 false）」—— 而「端口尚未登记/已被别处释放」恰恰是**良构调用方最常见的场景**
+    //     （ownerId 参数的存在意义就是让「如果归我再释放」安全），本该 no-op 返回 false，
+    //     却抛异常。包裹了 try/catch 的调用方会把它静默吞掉 → 契约无声失效；
+    //     未包裹的调用方直接崩。
+    //   修法：先判空返回 false，再做 owner 比较。
     if (!rec) return false;
     // ownerId 为 undefined/null = 调用方未声明归属（既有语义：无条件按端口号释放）。
+    if (ownerId !== undefined && ownerId !== null && rec.owner !== ownerId) return false;
 
     this._records.delete(p);
     this._save();
