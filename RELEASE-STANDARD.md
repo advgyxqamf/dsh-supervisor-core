@@ -4,6 +4,21 @@
 > 由 `test/release-spec-consistency-test.js` **机器校验**：本文件写的每个入口、矩阵、job、门禁
 > 都必须与仓库现实一致 —— 规范**无法漂移**（改了代码不改这里，或反之，门禁即红）。
 
+## 0. 硬标准（2026-09-13，不可协商）
+
+> **所有平台构建与发布必须经 GitHub CI 完成。本地不得产生任何发布产物。**
+
+| 要求 | 实现 | 门禁 |
+|---|---|---|
+| 四平台构建只在 CI 内发生 | `build` job 的 4 runner 矩阵，各 runner 只构建**自己**的平台 | `all-platforms-test` T2-a/T2-a2 |
+| 本地不得全平台构建 | `build-launcher.sh --all-platforms` 受 `GITHUB_ACTIONS` 守卫，本地 exit 2 | T2-a2 |
+| 本地不得全平台发布 | `publish-core.sh --all-platforms` 一律 exit 2 | T2-b |
+| 无本地发布编排器 | `release-core.sh` **已删除** | T2-e |
+| npm scripts 无本地发布入口 | `release:core*` 与 `publish:core:all` 全部移除 | T2-g |
+
+**为什么**：本地构建让「产物从哪来」不可复现、不可审计；曾出现「本地发一部分、CI 发一部分」的分裂，以及本机与 CI 同平台二次发布（npm 同版本不可重发，实测 409 Conflict）。统一到 CI 后：产物可追溯、四平台同构、发布单一入口。
+
+---
 ## 为什么需要这份文件（问题的实质）
 
 此前**不是没有文档**，而是同一事实散落多处（实测）：
@@ -45,14 +60,13 @@
 | S2 | 版本一致性预检 | `npm run verify:versions` | ✅ | 修派生处 |
 | S3 | 前端产物 | `bash release/scripts/build-ui.sh` | ✅ | 修 UI 构建 |
 | S4 | 全量回归 | `npm test` | ✅ | 修缺陷（含注入验证）|
-| S5 | launcher 构建（4 平台）| `npm run build:launcher:all` | ✅ | 看该平台日志 |
-| S6 | 子包组装 dry-run | `npm run publish:core:all` | ✅ | 修元数据/布局 |
-| S7 | 真发布 | `npm run release:core:all:publish` | ✅ | **npm 同版本不可重发** → 提版本重来 |
+| S5 | **推向 CI**（commit + tag + push）| `git push origin HEAD --tags` | ✅ | **此后一切构建/发布都在 CI 内完成** |
+| S6 | CI 四平台构建 | 自动（`build` job，4 runner 矩阵）| ✅ | 看该平台日志 |
+| S7 | CI 四平台发布 | 自动（`build` job 内 `ci-core.sh --publish`）| ✅ | npm 同版本不可重发 → 提版本重来 |
 | S8 | 发布后验证 | 见 §5 | ✅ | 立即处置（见 §6）|
 
-> **一条命令走完全部**：`npm run release:core:all`（dry-run，等价 S2–S6）
-> 与 `npm run release:core:all:publish`（真发，加 S7）。
-> 分阶段表是为了**知道卡在哪一步**，不是为了手敲每一步。
+> **本地只做到 S4**（门禁 + 前端产物）；**S5 起全部在 CI 内完成**。
+> 本地可用 `npm run build:launcher:all` 仅在 **CI 内**生效（有 `GITHUB_ACTIONS` 守卫，本地一律 exit 2）。
 
 ## 2. 平台矩阵（单一事实源）
 
@@ -76,9 +90,6 @@
 
 | 用途 | 命令 |
 |---|---|
-| 全平台 dry-run（推荐先跑）| `npm run release:core:all` |
-| 全平台真发布 | `npm run release:core:all:publish` |
-| 单平台真发布（历史模式）| `npm run release:core:publish` |
 | CI 产线核心（测试 job 与 build 矩阵共用）| `bash release/scripts/ci-core.sh` |
 | 仅构建 launcher | `npm run build:launcher:all` |
 | 仅组装/发布子包 | `npm run publish:core:all` |
@@ -156,10 +167,8 @@
 ```json release-pipeline
 {
   "version": 1,
+  "hardStandard": "所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物",
   "entries": {
-    "allDryRun": "npm run release:core:all",
-    "allPublish": "npm run release:core:all:publish",
-    "singlePublish": "npm run release:core:publish",
     "ciCore": "release/scripts/ci-core.sh",
     "publishCore": "release/scripts/publish-core.sh",
     "buildLauncher": "release/scripts/build-launcher.sh",
@@ -170,21 +179,56 @@
     "cred": "release/scripts/cred.sh"
   },
   "stages": [
-    { "id": "S0", "cmd": "bash release/scripts/cred.sh doctor" },
-    { "id": "S1", "cmd": "bash release/scripts/bump.sh --core <ver>" },
-    { "id": "S2", "cmd": "npm run verify:versions" },
-    { "id": "S3", "cmd": "bash release/scripts/build-ui.sh" },
-    { "id": "S4", "cmd": "npm test" },
-    { "id": "S5", "cmd": "npm run build:launcher:all" },
-    { "id": "S6", "cmd": "npm run publish:core:all" },
-    { "id": "S7", "cmd": "npm run release:core:all:publish" }
+    {
+      "id": "S0",
+      "cmd": "bash release/scripts/cred.sh doctor"
+    },
+    {
+      "id": "S1",
+      "cmd": "bash release/scripts/bump.sh --core <ver>"
+    },
+    {
+      "id": "S2",
+      "cmd": "npm run verify:versions"
+    },
+    {
+      "id": "S3",
+      "cmd": "bash release/scripts/build-ui.sh"
+    },
+    {
+      "id": "S4",
+      "cmd": "npm test"
+    },
+    {
+      "id": "S5",
+      "cmd": "git push origin HEAD --tags"
+    },
+    {
+      "id": "S6",
+      "cmd": "CI: build job (4 runner matrix)"
+    },
+    {
+      "id": "S7",
+      "cmd": "CI: ci-core.sh --publish (per platform)"
+    }
   ],
   "matrixSource": "package.json#npmPublish.packages",
   "ciWorkflow": ".github/workflows/build.yml",
-  "ciJobs": ["precheck", "test", "build", "release"],
-  "ciRunners": ["ubuntu-22.04", "windows-latest", "macos-latest", "macos-14"],
+  "ciJobs": [
+    "precheck",
+    "test",
+    "build",
+    "release"
+  ],
+  "ciRunners": [
+    "ubuntu-22.04",
+    "windows-latest",
+    "macos-latest",
+    "macos-14"
+  ],
   "tagPattern": "v*",
   "requiredSections": [
+    "## 0. 硬标准（2026-09-13，不可协商）",
     "## 1. 全流程（阶段化）",
     "## 2. 平台矩阵（单一事实源）",
     "## 3. 入口命令（唯一入口）",

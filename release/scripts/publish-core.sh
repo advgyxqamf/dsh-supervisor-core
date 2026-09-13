@@ -25,7 +25,11 @@ MAIN_LICENSE="$(node -p "require('./package.json').license")"
 [ -n "$SCOPE" ] || SCOPE="@dsh-sup"   # 产品 scope（2026-09 用户定稿：@dsh-sup/dsh-core-<os>-<arch>）
 while [ $# -gt 0 ]; do case "$1" in
   --publish) PUBLISH=1 ;;
-  --all-platforms) ALL=1 ;;
+  --all-platforms)
+    # 硬标准（2026-09-13）：**发布也经 GitHub CI**。曾可本机一次发四平台 —— 那正是本地残留的发布侧。
+    echo '拒绝：--all-platforms 已废弃（2026-09-13 硬标准）。' >&2
+    echo '  四平台子包由 CI 各平台 runner 各自发布（tag 触发）；本地不得全平台发布。' >&2
+    exit 2 ;;
   --dry-run) PUBLISH=0 ;;   # 显式 dry-run（默认即 dry-run；供编排脚本语义清晰传递）
   --scope) SCOPE="${2:?--scope 需要值}"; shift ;;
   --scope=*) SCOPE="${1#*=}" ;;

@@ -13,11 +13,11 @@
 两仓**不共享目录**：壳的构建、签名、发布、测试全部由壳仓自持；
 内核仓只保留对接代码（`src/domains/shell/`、`src/api/shell.js`）。
 
-## 内核发布：全平台本地构建（推荐，零 GitHub Actions 额度）
+## 内核发布：四平台全由 CI 产出（2026-09-13 硬标准）
 
 ```bash
 # 一条命令走完：门禁 → 构建 → 派生 4 平台 → tag/push → 直推 npm
-npm run release:core:all:publish
+git push origin HEAD --tags   # 触发 CI 四平台构建+发布
 ```
 
 **为什么一台 Linux 就能产出四平台**：launcher 是**纯 JS 产物**（内核运行时依赖为 0、
@@ -36,10 +36,10 @@ bash release/scripts/bump.sh --core 0.1.5-BETA.1
 #    然后整理 CHANGELOG.md：[未发布] → [0.1.5-BETA.1]
 
 # 2) dry-run（完整门禁 + 组装 + 打印计划，不 tag 不发布）
-npm run release:core:all
+git push origin HEAD --tags   # 触发 CI（dry-run 阶段在本地 S2-S4 完成）
 
 # 3) 真发布（内部会 tag + push + 4 平台直推 npm）
-npm run release:core:all:publish
+git push origin HEAD --tags   # 触发 CI 四平台构建+发布
 ```
 
 ### 门禁内容（`ci-core.sh`）
@@ -100,7 +100,7 @@ dsh-supervisor-gui --service-plan --service-apply # 实际建立服务定义
 
 ## 状态追踪（2026-09-11）
 
-- [x] **全平台本地生产落地**：`release:core:all:publish` 零 GitHub 额度；四平台 `core.cjs` 同源验证
+- [x] **四平台全由 CI 产出**（2026-09-13 硬标准）：tag 触发 `build` 矩阵；本地不再有全平台构建/发布路径
 - [x] **双仓彻底隔离**：壳资产全部移出本仓（含 `export-shell.sh`、`shell-release/`、壳设计文档、
       `bump.sh --shell`、跨仓测试断言）；壳 checkout 已移出本仓目录
 - [x] **版本管理规范**：内核单源 `package.json.version`；壳版本由壳仓 `bump-shell.sh` 三处互锁

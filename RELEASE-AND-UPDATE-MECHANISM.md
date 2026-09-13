@@ -78,7 +78,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 | 平台 | 生产位置 | 入口 | 命令 |
 |---|---|---|---|
-| **linux-x64** | **本地 Linux 机器**（省 CI 额度） | `npm run release:core:publish` | 完整门禁 → tag/push → 本地直推 npm |
+| **linux-x64** | **本地 Linux 机器**（省 CI 额度） | `CI（tag 触发）` | 完整门禁 → tag/push → 本地直推 npm |
 | win-x64 / darwin-arm64 / darwin-x64 | GitHub CI | tag `v<ver>` 触发 `build.yml` | mac/win 三平台矩阵 → `ci-core.sh --publish` |
 
 **认证**：`NPM_TOKEN`（经临时 userconfig 注入，不落盘）或既有 `~/.npmrc` 登录态；解析单源在 `release/scripts/_npm-auth.sh`。
@@ -186,7 +186,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 ```
 【内核发布】
-  本地 Linux:  npm run release:core:publish
+  本地 Linux:  CI（tag 触发）
                  → 干净树+CHANGELOG 预检 → ci-core 全套门禁 → tag/push → 本地发 linux 子包
   CI mac/win:  tag v<ver> 触发 build.yml → 三平台各自 ci-core.sh --publish
 

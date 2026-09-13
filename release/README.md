@@ -168,7 +168,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 
 ### 1.1 本地全平台真实构建（已跑通）
 
-`npm run release:core:all`（dry-run）**完整跑通**：
+`CI（tag 触发）`（dry-run）**完整跑通**：
 
 ```text
 [1/6] 前端构建 ui/ → ui-react/ 镜像
@@ -231,7 +231,7 @@ release/
     ├── ci-core.sh             ← 发布产线核心逻辑（**单源**：CI 与本地 Linux 生产都跑它）
     ├── publish-core.sh        ← 内核 npm 平台子包发布（dry-run/--publish；self-check 版本核对）
     ├── release.sh             ← 源码打包出口（tar.gz，非发布通道）
-    ├── release-core.sh        ← 一键发布编排（薄编排：委托 ci-core.sh + 平台闸/预检/tag 时序）
+    ├── （release-core.sh 已于 2026-09-13 删除 —— 硬标准：构建/发布均经 GitHub CI）
     ├── configure-credentials.sh ← 本机凭据安全配置（环境变量 → 0600 配置，值不入库）
     └── verify-versions.js     ← 版本自洽校验（内核 package.json 单源）
 ```
@@ -244,12 +244,8 @@ release/
 | `npm run build:launcher` | build-launcher.sh | 构建内核 launcher（唯一构建入口） |
 | `npm run publish:core` | publish-core.sh | 内核子包发布（默认 dry-run） |
 | `npm run publish:core -- --publish` | publish-core.sh | 真发布（本机平台） |
-| `npm run release:core` | release-core.sh | **一键编排 dry-run** |
-| `npm run release:core:publish` | release-core.sh --publish | **一键编排真发**（本机平台 + CI 补其余） |
 | `npm run build:launcher:all` | build-launcher.sh --all-platforms | 一次构建 → 派生 4 平台目录 |
-| `npm run publish:core:all` | publish-core.sh --all-platforms | 全平台子包发布（默认 dry-run） |
-| `npm run release:core:all` | release-core.sh --all-platforms | **全平台 dry-run** |
-| `npm run release:core:all:publish` | release-core.sh --all-platforms --publish | **全平台真发（推荐，零 GitHub 额度）** |
+| `CI 内装配（仅 CI）` | publish-core.sh --all-platforms | 全平台子包发布（默认 dry-run） |
 | `npm run release:guard` | release.sh | 源码打包 |
 
 > 已移除：`build:sea` / `verify:shell`（2026-09 双仓拆分：SEA 形态全平台弃用 → launcher 形态）。
@@ -261,77 +257,24 @@ release/
 > 壳文档 → `docs/`。本仓仅保留**内核侧**的壳对接代码（`src/domains/shell/`、`src/api/shell.js`
 > —— 内核需要展示桌面版本并观测壳健康，属内核职责）。
 
-## 内核生产模式：全平台本地构建（可离线 / 可复现；额度动因已解除）
+## 内核构建模式（2026-09-13 硬标准改版）
 
-### 为什么可行
+> **本节原为「全平台本地构建」，2026-09-13 硬标准落地后整节废弃。**
+> 现行唯一流程见 `RELEASE-STANDARD.md`。
 
-内核实测满足以下三条，**平台差异不存在于代码中**：
-
-| 事实 | 数值 |
+| 项 | 现行（硬标准）|
 |---|---|
-| 运行时依赖数 | **0** |
-| 产物中 `.node` 原生二进制 | **0 个** |
-| esbuild 打包参数 | 仅 `--platform=node` + 版本注入，**无任何平台相关参数** |
+| 构建发生地 | **仅 GitHub CI**（`build` job 的 4 runner 矩阵）|
+| 发布发生地 | **仅 GitHub CI**（tag 触发，各平台 runner 执行 `ci-core.sh --publish`）|
+| 本地允许做什么 | 门禁（S0-S4）`npm test` / `verify:versions` / `build-ui.sh` |
+| 本地禁止做什么 | 任何平台构建/发布产物（`--all-platforms` 本地一律 exit 2；`release-core.sh` 已删除）|
+| 四平台同源如何保证 | launcher 为架构无关纯 JS，CI 四平台产物 `core.cjs` 逐字节一致（由 CI 断言）|
 
-launcher 是**纯 JS 产物**，四平台之间只差 npm 包名与 `os`/`cpu` 元数据。因此正确做法是
-**构建一次 → 派生四份元数据包装**，而非「在四台机器上各构建一次」。
+**历史动因与消解**：内核仓原为私有，Actions 按倍率计费（macOS 10x），2000 分钟/月实测耗尽；
+「本地构建 mac/win」曾是**被迫**选择。2026-09-13 转公开后免额度，但硬标准要求「构建与发布一律经 CI」——
+理由不再是额度，而是**可复现、可审计、单一入口**。原「全平台本地构建」能力已按硬标准移除。
 
-> 实测佐证：同一 bundle 在 `linux` / `win32` / `darwin` 三种覆盖下 sha256 完全一致；
-> 本地用 `--all-platforms` 产出的四份 `core.cjs` 与 CI 在 macOS/Windows 上产出的**逐字节相同**。
-
-### 两种模式
-
-```bash
-# A) 全平台本地生产（推荐）—— 不经 CI，零额度
-npm run release:core:all           # dry-run：门禁 + 构建 4 平台 + 组装 + 打印计划
-npm run release:core:all:publish   # 真发：4 平台全部直推 npm
-
-# B) 单平台本地 + CI 补 mac/win（历史模式，消耗额度）
-npm run release:core:publish
-```
-
-### 模式 A 的定位（2026-09-13 改写：额度动因已解除）
-
-**历史动因（已消失）**：内核仓原为**私有**，Actions 按倍率计费（Linux 1x、Windows 2x、
-**macOS 10x**），mac/win 矩阵约 110 分钟/次，2000 分钟/月额度实测耗尽
-（run #25 起 job 拿不到 runner、`steps=0`、秒级失败）—— 这曾是模式 A 的**被迫**理由。
-
-**2026-09-13 起**：内核仓转为**公开**，Actions 免额度（含 macOS）。
-因此模式 A 不再是「省额度」的手段，其价值改为：
-
-| 价值 | 说明 |
-|---|---|
-| **可离线/可复现** | 不依赖 GitHub 可用性；一台 Linux 即可产出四平台正确产物（纯 JS，零平台差异） |
-| **发布前本地自证** | 门禁 + 构建 + 冒烟 + 子包 dry-run 全在本地跑完，再决定是否发 |
-| **CI 的对照物** | 与 CI 产物**逐字节比对**，任何「平台相关」代码混入都会当场暴露 |
-
-**模式 B（tag 触发 CI 构建 mac/win）在公开仓下同样免费**，两条路径可自由选择：
-- 想最快、最省事 → 模式 B（push tag，CI 全自动）。
-- 想在发布前本地跑完整套件、或需要离线 → 模式 A。
-
-**当前工作流仍保留 `precheck`**：不是为省额度，而是**防重复发布**
-（npm 同版本不可重发），并让「四平台齐备」成为可验证的收敛条件。
-
-### 模式的自动收敛（workflow `precheck`）
-
-模式 A 仍会推送 tag，因而仍会触发 workflow。为免白烧额度，workflow 加了 `precheck` job：
-
-```
-tag 推送
-  └─ precheck（ubuntu，约 1 分钟）  用 npm view 逐个检查 4 个平台子包是否已存在
-       ├─ 已全部存在 → **跳过整个 build 矩阵**（省下约 110 分钟，含 macOS 10x）
-       └─ 有缺失     → 照常构建缺失平台并发布（模式 B 的收敛路径）
-```
-
-因此无论用哪种模式发布，tag 推送后系统都会收敛到「四平台齐备」，且**不会重复发布**
-（`publish-core.sh` 的幂等分支：同版本已存在则跳过并核对 `unpackedSize`）。
-
-### 同源保证
-
-`build-launcher.sh --all-platforms` 内置断言：**四份 `core.cjs` 必须逐字节一致**，否则立即失败。
-这从构造上消除了「同版本不同平台代码不同」的风险 —— 该风险曾真实发生过
-（BETA.2 的 linux/darwin 包缺少 frpc 崩溃修复，而 win 包有，原因正是三平台在不同时间点各自构建）。
-
+---
 
 ## 版本规范
 
@@ -348,9 +291,9 @@ tag 推送
 # 2) 提升版本
 bash release/scripts/bump.sh --core 0.1.2-BETA.7
 # 3) 一键编排 dry-run（干净树+CHANGELOG 预检 → 委托 ci-core.sh 全部门禁 → 打印发布计划）
-npm run release:core
+见 `RELEASE-STANDARD.md`（本地只做 S2–S4，S5 起在 CI）
 # 4) 真发（commit + tag v<ver> + push --tags 触发 mac/win CI；随后本机发 linux 子包）
-npm run release:core:publish
+CI（tag 触发）
 ```
 
 > **与壳发布的先后**：若本次内核改动涉及**跨仓契约**（新增/移除/改语义的字段），
@@ -361,20 +304,18 @@ npm run release:core:publish
 
 | 平台 | 生产位置 | 子包 |
 |---|---|---|
-| **linux-x64** | **本地 Linux 机器**（release:core:publish） | @dsh-sup/dsh-core-linux-x64 |
+| **linux-x64** | **CI**（ubuntu-22.04 基座）| @dsh-sup/dsh-core-linux-x64 |
 | win-x64 | GitHub CI（tag 触发 build.yml 矩阵） | @dsh-sup/dsh-core-win-x64 |
 | darwin-arm64 | GitHub CI | @dsh-sup/dsh-core-darwin-arm64 |
 | darwin-x64 | GitHub CI | @dsh-sup/dsh-core-darwin-x64 |
 
 **Linux 不经 GitHub**：本地跑完整门禁后直推 npm。因此 .github/workflows/build.yml
-的矩阵**只含 mac/win 三平台**，且前端门禁作业已并入本地 release-core.sh（每次发布都会跑，不会漏跑）。
 Linux 的 launcher 构建物**不挂 GitHub Release**（npm 即其分发通道）。
 
 > ✅ **2026-09-13 已执行**：`ubuntu-22.04` 已加回 CI build 矩阵，**四平台全部由 CI 产出**
 > （`v0.1.5-BETA.2` 的 tag run 实证：precheck + test + 四平台 build + release 全绿）。
 > 本地 `--all-platforms` 退化为「发布前自证 / 离线兜底」。
 
-**真发布有平台闸**：release-core.sh --publish 在非 Linux 机器上直接拒绝（exit 2）并提示走 tag 触发 CI，
 避免与 CI 形成同平台二次发布（npm 同版本不可重发）。
 
 CI 产线（.github/workflows/build.yml → release/scripts/ci-core.sh）：mac/win 三平台各自
@@ -455,5 +396,4 @@ scope 单源声明于 `package.json → npmPublish.scope = "@dsh-sup"`（`dsh-co
   `configure-credentials.sh` 共用）；规范位置 = **真实 home** 的 `~/.npmrc`，详见「凭据与令牌」节。
   发布脚本**绝不**执行 `npm config set`（不改开发机全局 registry、不把 token 明文写入 `~/.npmrc`）。
 - **手册入库**：runbooks 随工程纳入 git 版本管理。
-- **发布从干净树出发**：release-core.sh 预检 git status，脏树中止。
 - **跨平台标准**：发布平台各自独立——mac/win 为 CI 独立 job（fail-fast:false），linux 为本地编排单跑。
