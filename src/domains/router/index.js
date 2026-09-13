@@ -136,6 +136,18 @@ class RouterService {
 
   _save() {
     if (this._persistEnabled === false) return; // L3：状态文件由 router-daemon 独占写（守卫监督模式不写，防双写覆盖）
+    // ⚠ P2/P3 修复（2026-09-13）：providers.json 解析失败后**禁止回写**。
+    //   缺陷：store.load() 曾把「解析失败」与「本来就是空」混为一谈（静默返回空列表），
+    //     而本类在启动维护阶段会立刻 _save()，把「空」覆盖回文件 →
+    //     一次外部损坏/半写即让**全部供应商与账号配置（含 API Key）静默清零且不可恢复**。
+    //   现 store 在解析失败时置 loadedOk=false 并保留 .corrupt-<ts> 现场；
+    //   本处在 loadedOk=false 时跳过写盘，给人修复/恢复的机会（并已由 store 记 error 日志）。
+    if (this.store && typeof this.store.canPersist === 'function' && !this.store.canPersist()) {
+      if (this.logger && this.logger.warn) {
+        this.logger.warn('router save skipped：providers.json 读取异常（已保留现场），拒绝用空态覆盖');
+      }
+      return;
+    }
     try { this.store.save(this.providers); }
     catch (e) { this.logger.warn && this.logger.warn('router save failed: ' + e.message); }
   }

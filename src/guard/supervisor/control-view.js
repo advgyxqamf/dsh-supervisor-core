@@ -14,6 +14,11 @@ const monitor = require('../../guard/monitor/index');
 const ports = require('../../guard/lifecycle/ports').shared;
 const guardian = require('../../guard/guardian/index');
 
+/** 监督拍内拉取 router 域摘要的超时（ms）。
+ *  必须远小于心跳拍宽对「阻塞」的容忍度：摘要只是只读缓存，失败即降级。
+ *  对照 _ctlCall 的默认 120s —— 那会阻塞整条唯一心跳（见调用点说明）。 */
+const ROUTER_SUMMARY_TIMEOUT_MS = 5000;
+
 class ControlView {
   routerProviders() {
     const presets = this.router.constructor.presets();
@@ -393,7 +398,16 @@ class ControlView {
           // R4 域摘要入目录（黑盒摘要引用，只读缓存；拉取失败仅降级——不影响监督）
           try {
             if (this.routerDaemonActive() && this.managedObjects) {
-              const s = await this.routerApi().domainSummary();
+              // ⚠ P2 修复（2026-09-13）：**必须给这一处显式短超时**。
+              //   domainSummary 经 ctl 转发，而 _ctlCall 的默认超时是 **120s**（见本文件 :67-69）。
+              //   本 await 位于心跳的**串行** for 循环内 → 会把同拍后续的 lan/主实例/沙箱
+              //   全部阻塞，并与「心跳是唯一周期驱动」复合：一拍最长 120s，
+              //   期间 main 收敛、沙箱自愈、daemon 监督全部停摆（且只有 debug 级日志）。
+              //   摘要只是**只读缓存**，失败可降级，不值得阻塞监督 → 5s 上限。
+              //   ⚠ 必须直接走 _ctlCall 的 timeoutMs 形参：门面 proxy 的签名是
+              //     fn=(...args)=>_ctlCall(port,prop,args)，把 {timeoutMs} 当**方法参数**传
+              //     会被送到 daemon 的 domainSummary 而不是当超时用（我第一版就写错了）。
+              const s = await this._ctlCall(this._routerCtlPort(), 'domainSummary', [], ROUTER_SUMMARY_TIMEOUT_MS);
               const e = this.managedObjects.get('router-daemon');
               if (e && s && typeof s === 'object') {
                 e.domainSummary = Object.assign({ fetchedAt: Date.now() }, s);
@@ -434,7 +448,18 @@ class ControlView {
         this._guardianEvent('lan', 'skip-guardian-off');
         return { ok: false };
       }
+      // ⚠ P3 修复（2026-09-13，失效模式 g + f）：守护计数必须写**消费方读的那一份**。
+      //   缺陷：router 分支写 ManagedLifecycle.restartCount(:411)，lan 分支却写**目录 entry**
+      //     (:437)。而消费方 _guardianEvent 只读 lc.restartCount →
+      //     · entry.restartCount 全仓**零读取**（只在 objects.js 的 load/save 里搬运，是只写不读字段）；
+      //     · lan 的 lc.restartCount 无任何写入点 → _guardianEvent('lan','pull') 恒发 restartCount: 0。
+      //   后果：面板/审计只能看到 router 的真实守护次数，lan 恒显示 0
+      //     （用户无法判断远程控制在反复被拉起）。两条路径的纪律不对称。
+      //   修法：与 router 分支对称，写 lifecycle 项；entry 仍保留（目录自身视图的一致性）。
       if (entry) entry.restartCount = (entry.restartCount || 0) + 1;
+      const llc = this.lifecycleManager && typeof this.lifecycleManager.get === 'function'
+        ? this.lifecycleManager.get('lan-daemon') : null;
+      if (llc) llc.restartCount = (llc.restartCount || 0) + 1;
       const rt = this._ensureLanRuntime(true);
       if (rt.mode === 'daemon' && rt.spawned) {
         if (this.logger && this.logger.warn) this.logger.warn('[lan] 监督：lan-daemon 失联，已重新拉起 pid=' + rt.spawned);

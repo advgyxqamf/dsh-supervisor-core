@@ -561,7 +561,22 @@ class Supervisor {
         this.nativeManager.checkUpdate();
       }, this.config.updateCheckIntervalMs || 3600000);
     }
-    this._startShellWatchdog();
+    // ⚠ P3 修复（2026-09-13，失效模式 g）：「失败隔离」纪律必须在本调用点也执行。
+    //   缺陷：本行是 start() 的**最后一个调用且为裸调用**（无 try），而同函数内其它装配
+    //     都在 try 或自带 guard 内。该函数自己的注释明确声明
+    //     「任何异常都不得影响守卫主循环 —— 看护是**增强**，不是依赖」，
+    //     但其内部 try 只包住 createShellWatchdog/setInterval 那段；
+    //     一旦有异常逃逸出该 try，就会从 start() 冒泡出去，
+    //     而此刻**首拍 tick 与心跳 interval 刚刚建好** → 调用方（bin 守护入口）
+    //     拿不到「已启动」，且异常路径下守卫状态不明确。
+    //   修法：与同文件其它装配同规，包 try/catch 并只记 warn（增强失败不阻断主循环）。
+    try {
+      this._startShellWatchdog();
+    } catch (e) {
+      if (this.logger && this.logger.warn) {
+        this.logger.warn('[shell-watchdog] 启动异常（不影响守卫主循环）: ' + ((e && e.message) || e));
+      }
+    }
   }
 
   /**

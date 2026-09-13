@@ -252,6 +252,12 @@ class ManagedRegistry {
     const e = this.get(id);
     if (!e) return { ok: false, error: '未注册: ' + id };
     const o = opts || {};
+    // ⚠ P3 修复（2026-09-13）：**清掉节流游标**。
+    //   _nextTickAt 原先只写不读其它、且**没有任何清除路径**（全仓仅 heartbeat 内一处读写）。
+    //   对象注销后若同 id 重新注册，旧游标不会跟着新对象走（新对象是新 entry，天然无游标），
+    //   故注销本身影响有限；真正的缺口是「守卫重启才自然丢失」——
+    //   在 unregister 处显式清除，使生命周期边界上的语义完整、可测。
+    e._nextTickAt = null;
     // 级联停/清理由调用方决定（域业务保留最终权力）；这里只做目录应做的：
     // 1) 释放所有权端口（若注入统一端口注册表，按 owner=本对象释放）
     for (const op of e.ownership.ports) this._releasePort(op.port, e.id);
@@ -335,7 +341,9 @@ class ManagedRegistry {
       const tickEvery = ad.tickEvery || (e.ownership && e.ownership.meta && e.ownership.meta.tickEvery) || 1;
       if (tickEvery > 1) {
         if (e._nextTickAt && now < e._nextTickAt) continue; // 节流(daemon 类≈6拍30s)
-        e._nextTickAt = now + tickEvery * iv;
+        // ⚠ 用**本次实际执行时刻**前推（而非 heartbeat 入口的 now）：
+        //   本循环是串行的，前面的对象耗时会让 now 变陈旧 → 节流窗被系统性拉长。
+        e._nextTickAt = Date.now() + tickEvery * iv;
       }
       try {
         // ⚠ P1 修复（2026-09-13）：**单个 adapter 不得拖死整条心跳**。
