@@ -150,15 +150,30 @@ export function RegistryCard() {
   );
 }
 
-/** 测试手动镜像可达性（直连 fetch，不改配置） */
+/** 测试手动镜像可达性（**经同源后端**探测，不改配置）。
+ *
+ *  ⚠ 2026-09-13 修复（P2）：本条原为浏览器**直连**用户填写的镜像源
+ *    （fetch(url + "/-/ping")），而本页由内核伺服且带 CSP connect-src 'self'
+ *    （src/api/index.js）→ 浏览器**在发起前即按 CSP 拦截**，fetch 立刻 reject
+ *    → catch 统一 toast「探测失败」。
+ *    后果：该按钮对**任何**地址恒报失败、换网络也无解，用户会误以为镜像损坏；
+ *    且 UI 无法区分「真的不可达」与「被策略阻断」。
+ *    改走 POST /dist/registry/probe（服务端探测，不受页面 CSP 约束），
+ *    并复用内核选源的**同一探测规格**，避免「测试说可达、实际选源不同」的分叉。
+ */
 async function testLatency(url: string) {
   if (!/^https?:\/\//.test(url)) { toast.error("请输入合法镜像 URL"); return; }
   toast.info("测试中…");
   try {
-    const start = Date.now();
-    const res = await fetch(url.replace(/\/+$/, "") + "/-/ping", { signal: AbortSignal.timeout(4000) });
-    const ms = Date.now() - start;
-    if (res.ok) toast.success("可达，延迟 " + ms + " ms");
-    else toast.error("不可达");
-  } catch { toast.error("探测失败"); }
+    const r = await supervisorApi.registryProbe(url.replace(/\/+$/, ""));
+    if (r && r.ok === true && typeof r.latencyMs === "number") {
+      toast.success("可达，延迟 " + r.latencyMs + " ms");
+    } else if (r && typeof r.error === "string" && r.error) {
+      toast.error("探测失败：" + r.error);
+    } else {
+      toast.error("不可达");
+    }
+  } catch (e) {
+    toast.error("探测失败：" + (e instanceof Error ? e.message : String(e)));
+  }
 }

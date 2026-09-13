@@ -193,6 +193,9 @@ export const supervisorApi = {
   registrySet: (p: { mode: "auto" | "manual"; origins: string[]; manualOrigin?: string }) =>
     post<GenericOk & RegistryInfo>("/dist/registry/set", p),
   registryRefresh: () => post<GenericOk & RegistryInfo>("/dist/registry/refresh"),
+  /** 同源单源探活（服务端探测，不受页面 CSP connect-src 'self' 约束）。
+   *  ⚠ 2026-09-13：原先由浏览器直连用户填的镜像 → 被 CSP 拦截 → 恒报「探测失败」。 */
+  registryProbe: (origin: string) => post<GenericOk & { origin: string; ok: boolean; latencyMs: number | null; probe?: string }>("/dist/registry/probe", { origin }),
   selfUpdateStatus: () => get<SelfUpdateStatus>("/self-update/status"),
   selfUpdateApply: () => post<SelfUpdateStatus>("/self-update/apply"),
   selfUpdateRestart: () => post<SelfUpdateStatus>("/self-update/restart-guard"),

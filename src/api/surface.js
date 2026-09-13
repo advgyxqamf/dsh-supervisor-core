@@ -97,6 +97,9 @@ const SURFACE = [
   { path: '/dist/registry',         methods: ['GET'],  domain: 'dist', category: 'public', consumers: ['UI(RegistryCard)'], note: '镜像源状态' },
   { path: '/dist/registry/refresh', methods: ['POST'], domain: 'dist', category: 'public', consumers: ['UI(RegistryCard)'], note: '镜像源测速刷新' },
   { path: '/dist/registry/set',     methods: ['POST'], domain: 'dist', category: 'public', consumers: ['UI(RegistryCard)'], note: '镜像源手动固定' },
+  // 同源单源探活：页面带 CSP connect-src 'self'，浏览器直连镜像必被拦截 →
+  // 「测试」按钮必须经本端点由服务端探测（并复用内核选源的同一探测规格）。
+  { path: '/dist/registry/probe',   methods: ['POST'], domain: 'dist', category: 'public', consumers: ['UI(RegistryCard 测试按钮)'], note: '同源单源探活（服务端，不受页面 CSP 限制）' },
 
   // ── 局域网/公网（relay.js）──
   { path: '/lan-access', methods: ['GET'], domain: 'relay', category: 'public', consumers: ['UI(LanPage)'], note: '远程代理列表' },

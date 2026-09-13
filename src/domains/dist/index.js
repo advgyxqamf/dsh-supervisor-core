@@ -287,6 +287,22 @@ class DistributionManager {
     } catch (e) { return { ok: false, latencyMs: Date.now() - start, probe: kind }; }
   }
 
+  /** 探测**单个** origin 的可达性与延迟（供面板「测试」按钮的同源调用）。
+   *
+   *  ⚠ 2026-09-13：新增。由 api/dist.js 的 `POST /dist/registry/probe` 调用 ——
+   *    原因见那里的说明（页面 CSP `connect-src 'self'` 使浏览器直连镜像恒失败）。
+   *
+   *  关键：**复用 _probeRegistry**，即与内核选源使用**完全相同的探测规格**
+   *    （契约 probe.kind/pathTemplate 或退化的 /-/ping）—— 否则「测试按钮说可达」
+   *    与「实际选源结果」会再次分叉（本仓已踩过同一镜像两种探测法差 6.7 倍的坑）。
+   */
+  async probeOrigin(origin) {
+    const o = String(origin || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(o)) return { origin: o, ok: false, latencyMs: null, error: '非法 origin' };
+    const p = await this._probeRegistry(o);
+    return { origin: o, ok: !!p.ok, latencyMs: p.latencyMs, probe: p.probe };
+  }
+
   /** 生效的候选 registry 列表（用户配置或默认）。 */
   _registryOrigins() {
     const o = (this.registryConfig && this.registryConfig.origins) || [];
