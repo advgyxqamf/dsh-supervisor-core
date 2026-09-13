@@ -235,4 +235,11 @@ function pgrepList(pattern) {
   return out;
 }
 
-module.exports = { findListeningPid, isAlive, readCmdline, isDshCmdline, pgrepList };
+// 归一化 cmdline 的路径分隔符为 "/"。
+// 为什么必须：readCmdline 返回各平台**原生**分隔符（Linux /proc、macOS ps、Windows wmic/ps），
+//   而本仓的进程**标记**（daemon-lifecycle 的 _cmdMarks、supervise-view/control-view 的
+//   "/domains/..." 字面量）按约定统一为 "/"。直接 indexOf 在 Windows 上**永远不匹配** →
+//   认不出自己的 daemon（可能误判端口异主 / 重复拉起）。故比较前两侧都要归一化。
+function normCmdline(s) { return String(s || '').replace(/\\/g, '/'); }
+
+module.exports = { findListeningPid, isAlive, readCmdline, normCmdline, isDshCmdline, pgrepList };

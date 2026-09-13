@@ -136,7 +136,10 @@ class DaemonLifecycle {
     try {
       const pid = pidlook.findListeningPid(this.ctlPort);
       if (!pid) return null;
-      const cmd = pidlook.readCmdline(pid) || '';
+      // 2026-09-13 修复（P1）：**两侧都要归一化**。
+      //   _cmdMarks 已被构造器 norm() 成 "/"，而 readCmdline 返回**原生**分隔符 ——
+      //   Windows 的 cmdline 是反斜杠 → 直接 indexOf 永远 -1 → 认不出自己的 daemon。
+      const cmd = pidlook.normCmdline(pidlook.readCmdline(pid) || '');
       // P0-2：按**全部**标记匹配（含从 script 派生的路径形态）——见构造器说明。
       return this._cmdMarks.some((mk) => mk && cmd.indexOf(mk) >= 0) ? pid : null;
     } catch { return null; }

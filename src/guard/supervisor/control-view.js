@@ -188,7 +188,8 @@ class ControlView {
     try {
       const pid = pidlook.findListeningPid(this._lanCtlPort());
       if (!pid) return false;
-      const cmd = pidlook.readCmdline(pid) || '';
+      // 2026-09-13 修复（P1）：同 supervise-view —— 归一化后再与 "/" 字面量比较。
+      const cmd = pidlook.normCmdline(pidlook.readCmdline(pid) || '');
       return cmd.indexOf('lan-daemon') >= 0 || cmd.indexOf('/domains/relay/daemon.js') >= 0;
     } catch { return false; }
   }

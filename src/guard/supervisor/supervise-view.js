@@ -101,7 +101,9 @@ class SuperviseView {
     try {
       const pid = pidlook.findListeningPid(this._routerCtlPort());
       if (!pid) return false;
-      const cmd = pidlook.readCmdline(pid) || '';
+      // 2026-09-13 修复（P1）：路径字面量是 "/"，而 Windows 的 cmdline 是反斜杠
+      //   → 直接 indexOf 永远 -1 → 认不出 daemon 已在跑（可能重复拉起）。
+      const cmd = pidlook.normCmdline(pidlook.readCmdline(pid) || '');
       return cmd.indexOf('router-daemon') >= 0 || cmd.indexOf('service-daemon') >= 0 || cmd.indexOf('/domains/router/daemon.js') >= 0;
     } catch { return false; }
   }

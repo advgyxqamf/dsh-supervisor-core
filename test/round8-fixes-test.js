@@ -76,25 +76,57 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     cmdMark: 'router-daemon', identityFile: path.join(os.tmpdir(), 'j-b.json'),
   });
   check('J-b 标记含语义名', lc._cmdMarks.includes('router-daemon'), JSON.stringify(lc._cmdMarks));
-  // 2026-09-13 修复（P1）：**不得硬编码路径分隔符**。
-  //   原断言 m.endsWith('/src/domains/router/daemon.js') 用的是 **正斜杠**，
-  //   而 Windows 上 path.join 产出**反斜杠** → 该断言在 Windows 必红
-  //   （实测 v0.1.5-BETA.2 的 windows-latest leg：J-b 唯一失败项）。
-  //   改用 path.join 构造期望后缀（分隔符随平台，与实现同一来源）。
-  const expectSuffix = path.join('src', 'domains', 'router', 'daemon.js');
+  // ⚠ 2026-09-13 更正：标记**本来就统一为 "/"**（构造器用 norm() 归一化），
+  //   故此处**正斜杠字面量是正确的**（我先前误改成 path.join，反而弄坏了它 —— 已回退）。
   check('J-b 标记含 script 绝对路径',
-    lc._cmdMarks.some((m) => m.endsWith(expectSuffix)), '期望后缀 ' + expectSuffix);
+    lc._cmdMarks.some((m) => m.endsWith('/src/domains/router/daemon.js')), '有');
   // 行为级：真实 spawn 产生的 cmdline 必须被匹配。
-  // ⚠ 同样做**分隔符归一化**再比较：标记来自 path.join（本机分隔符），
-  //   而这里模拟的 cmdline 也由本机拼接，故归一化后比较是平台无关的等价检验。
-  const norm = (x) => String(x).replace(/[\\/]+/g, '/');
-  const realCmd = norm(process.execPath + ' ' + script + ' -c /x/cfg.json');
+  //   此处用**原生** cmdline（不手工归一化）—— 因为产品必须自己归一化：
+  //   实测 Windows 上原生 cmdline 是反斜杠，而标记是正斜杠 → 曾是**真实产品缺陷**
+  //   （daemon-lifecycle._ctlOwnerPid 在 Windows 永远认不出自己的 daemon）。
+  //   修法见 src/platform/os/pidlookup.js 的 normCmdline + 三处调用点。
+  //   下面这行因此同时是「测试」与「产品不变量」的检验。
+  const realCmd = process.execPath + ' ' + script + ' -c /x/cfg.json';
+  const norm = (x) => String(x).replace(/\\/g, '/');
   check('J-b 真实 cmdline 能被匹配（旧实现 indexOf=-1）',
-    lc._cmdMarks.some((m) => m && realCmd.indexOf(norm(m)) >= 0),
+    lc._cmdMarks.some((m) => m && norm(realCmd).indexOf(m) >= 0),
     'realCmd=' + realCmd.slice(0, 70));
   // 反向：确认旧写法（只用 this.cmdMark）已不在匹配点
   const dlSrc = read('src/guard/proc/daemon-lifecycle.js');
   check('J-b _ctlOwnerPid 用 _cmdMarks 匹配', /_cmdMarks\.some/.test(dlSrc), '已改');
+
+  // -- J-b-2: cmdline 与标记的分隔符归一化（2026-09-13 新增，锁真实产品缺陷）--
+  //
+  //   缺陷：标记由构造器 norm() 成 "/"，而 readCmdline 返回原生分隔符；
+  //     Windows 的 cmdline 是反斜杠 -> 直接 indexOf 永远 -1 ->
+  //     认不出自己的 router/lan daemon（可能误判端口异主或重复拉起）。
+  //   修法：pidlookup 导出 normCmdline，三处比较点先归一化。
+  //   本节在 Linux 上也能拦住该回归（不依赖 Windows runner）。
+  const pidSrc = read('src/platform/os/pidlookup.js');
+  check('J-b-2 pidlookup 导出 normCmdline',
+    /module\.exports\s*=\s*\{[^}]*normCmdline[^}]*\}/.test(pidSrc), '已导出');
+  for (const [f, label] of [
+    ['src/guard/proc/daemon-lifecycle.js', 'daemon-lifecycle._ctlOwnerPid'],
+    ['src/guard/supervisor/supervise-view.js', 'supervise-view._routerDaemonActive'],
+    ['src/guard/supervisor/control-view.js', 'control-view lan daemon 判定'],
+  ]) {
+    const src = read(f);
+    check('J-b-2 ' + label + ' 比较前归一化 cmd',
+      /normCmdline\(pidlook\.readCmdline\(pid\)/.test(src), '已归一化');
+    const bare = /const cmd = pidlook\.readCmdline\(pid\) \|\| '';/.test(src);
+    check('J-b-2 ' + label + ' 未回退为裸 readCmdline', !bare, bare ? '**发现裸用法**' : 'ok');
+  }
+  {
+    const { normCmdline } = require(path.join(ROOT, 'src', 'platform', 'os', 'pidlookup.js'));
+    const B = String.fromCharCode(92);
+    const winCmd = 'C:' + B + 'a' + B + 'src' + B + 'domains' + B + 'router' + B + 'daemon.js -c x';
+    check('J-b-2 Windows 风格 cmdline 归一化后可被标记命中',
+      normCmdline(winCmd).indexOf('/src/domains/router/daemon.js') >= 0,
+      normCmdline(winCmd).slice(0, 60));
+    check('J-b-2 posix 风格 cmdline 归一化后不变',
+      normCmdline('/usr/bin/node /x/src/domains/router/daemon.js') === '/usr/bin/node /x/src/domains/router/daemon.js', 'ok');
+    check('J-b-2 空值安全', normCmdline(null) === '' && normCmdline(undefined) === '', 'ok');
+  }
 }
 
 // ── J-c：semverCompare 规范符合性 ──
