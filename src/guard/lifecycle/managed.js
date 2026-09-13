@@ -163,12 +163,20 @@ class ManagedLifecycle {
    */
   async stop(reason) {
     if (this.phase === 'stopped') return { ok: true, already: true };
+    // ⚠ P3 修复（2026-09-13，失效模式 g）：失败时恢复**进入 stop 之前的那个 phase**，
+    //   而不是硬编码 'running'。
+    //   缺陷：原实现在 stop 被拒/抛错时一律 `_setPhase('running')`（注释写「回到运行态」）——
+    //     这只对「停之前确实是 running」成立。若停之前是 failed / backoff / installing
+    //     （例如对一个失败模块点「停止」而底层 stop 又失败），phase 会被改写成
+    //     'running' → 面板把一个**已知失败**的模块显示成**运行中**，与观测相反。
+    //   修法：记下 prevPhase，失败时如实恢复它（对 running/starting 等情形行为不变）。
+    const prevPhase = this.phase;
     this._setPhase('draining');
     try {
       const r = this._stop ? await this._stop(reason) : { ok: true };
       if (r && r.ok === false) {
         this.error = r.error || 'stop 返回 ok:false（未提供 error）';
-        this._setPhase('running'); // 与异常分支一致：未能确认停止 → 回到运行态
+        this._setPhase(prevPhase); // 未能确认停止 → 恢复原相位（不谎报 running）
         if (this.logger && this.logger.warn) this.logger.warn('[lifecycle] ' + this.id + ' stop 被拒: ' + this.error);
         return { ok: false, error: this.error, ...this.snapshot() };
       }
@@ -178,7 +186,7 @@ class ManagedLifecycle {
       return r || { ok: true };
     } catch (e) {
       this.error = (e && e.message) || String(e);
-      this._setPhase('running'); // 停失败回到运行态（可能是观测到的运行）
+      this._setPhase(prevPhase); // 同上：恢复原相位
       if (this.logger && this.logger.warn) this.logger.warn('[lifecycle] ' + this.id + ' stop 失败: ' + this.error);
       return { ok: false, error: this.error };
     }
