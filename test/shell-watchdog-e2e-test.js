@@ -36,28 +36,35 @@ fs.mkdirSync(shDir, { recursive: true });
 
 // 假壳：被拉起即写标记，然后挂住（避免立刻退出被当成又缺失）。
 //
-// ⚠ 2026-09-13 修复（P1）：**必须跨平台构造**。
-//   原实现写的是 '#!/bin/sh' + echo/sleep 的 **POSIX 脚本**，
-//   而 restartShell 用 spawn(exe, [], {detached, stdio:'ignore'}) 直接执行它 ——
-//   Windows **无法执行**该格式（且 .js 也不能直接 spawn）→ 拉起失败 →
-//   本文件 E2E-1/3/4/5 在 Windows 上必红。
-//   修法（与 uninstall-timeout-behavior-test 同一思路）：让假壳是**可被 spawn 的可执行**——
-//      · POSIX：写一个可执行 shell 脚本（保持原样，最贴近真实情形）；
-//      · Windows：写一个 **.cmd 批处理**（cmd.exe 可直接执行；Node 的 spawn 在
-//        Windows 上对 .cmd 会经 cmd.exe 运行）。
-//   两者都只做两件事：把 "launched <pid>" 追加到标记文件；随后挂住约 20s。
+// 2026-09-13（P1）：**必须让假壳是可被 spawn 的可执行**。
+//   历史缺陷演进：
+//     ① 原实现是 '#!/bin/sh' + echo/sleep 的 POSIX 脚本 —— Windows 无法执行；
+//     ② 我改成 .cmd 批处理 —— 仍然失败：Node 的 child_process.spawn **不能直接
+//        spawn .cmd/.bat**（需要 shell:true），而产品用的是
+//        spawn(exe, [], {detached:true, stdio:'ignore'}) → 实测 CI 日志：
+//            [shell-watchdog] 拉起桌面壳失败：拉起新壳失败: spawn EINVAL
+//     ③ 最终方案（两平台都真的能跑）：
+//        · POSIX  ：可执行 shell 脚本（最贴近真实情形）；
+//        · Windows：**拷贝一份 node.exe 作为假壳**（真实 PE，可被 spawn），
+//          再用 NODE_OPTIONS=--require <hook> 让它在启动时写标记并挂住。
+//          hook 经 env 透传（产品 spawn 时传 env: process.env），已实测有效。
+//   两者行为一致：把 "launched <pid>" 追加到标记文件，并挂住约 20s（便于回收）。
 const marker = path.join(HOME, 'launched.txt');
-const fakeShell = path.join(HOME, process.platform === 'win32' ? 'dsh-supervisor-gui.cmd' : 'dsh-supervisor-gui');
-if (process.platform === 'win32') {
-  const L = String.fromCharCode(13) + String.fromCharCode(10);
-  fs.writeFileSync(fakeShell,
-    '@echo off' + L +
-    // 刻意**不写数字 pid**：清理逻辑用 /launched (\d+)/ 取 pid 再 SIGKILL，
-    // 而 cmd 里拿不到子进程真实 pid；若写 %RANDOM%（数字）会被误当作 pid，
-    // 可能**杀掉无关进程**。故此处写平台标识；该 .cmd 约 20s 自行退出，无需回收。
-    'echo launched-win-shim >> "' + marker + '"' + L +
-    // 挂住：ping 是本机回环，稳定且不需要额外工具；约 20s
-    'ping -n 21 127.0.0.1 > nul' + L);
+const isWin = process.platform === 'win32';
+const fakeShell = path.join(HOME, isWin ? 'dsh-supervisor-gui.exe' : 'dsh-supervisor-gui');
+if (isWin) {
+  // 假壳 = node.exe 的拷贝（PE，可被 spawn）；行为由 --require 的 hook 定义。
+  fs.copyFileSync(process.execPath, fakeShell);
+  const hook = path.join(HOME, 'fake-shell-hook.js');
+  fs.writeFileSync(hook, [
+    "const fs = require('node:fs');",
+    // 写真实 pid：清理逻辑据此 SIGKILL 回收（与 POSIX 分支同一格式）
+    "fs.appendFileSync(" + JSON.stringify(marker) + ", 'launched ' + process.pid + String.fromCharCode(10));",
+    "setTimeout(function () {}, 60000);",
+    "",
+  ].join(String.fromCharCode(10)));
+  // NODE_OPTIONS 经 env 透传给被拉起的 node；--require 在允许列表内。
+  process.env.NODE_OPTIONS = '--require ' + hook;
 } else {
   fs.writeFileSync(fakeShell,
     '#!/bin/sh' + String.fromCharCode(10) +
