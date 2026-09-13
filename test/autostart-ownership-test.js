@@ -21,6 +21,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
+const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const POS = path.join(ROOT, 'src', 'platform', 'os');
@@ -58,7 +59,7 @@ console.log('== P2 内核不写/不删守卫 plist ==');
   check('P2-d 用 launchctl enable/disable 持久化开关', /on \? 'enable' : 'disable'/.test(asSrc), 'ok');
   check('P2-e 守卫定义模板已不再是内核资产（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
   // 壳侧必须仍持有守卫 plist 模板（否则两边都没了 → 功能真空）
-  const svc = path.join(ROOT, '..', 'dsh-supervisor-launcher', 'src-tauri', 'src', 'service.rs');
+  const svc = shellRepoHelper.pathIn('src-tauri', 'src', 'service.rs');
   if (fs.existsSync(svc)) {
     const s = fs.readFileSync(svc, 'utf8');
     check('P2-f 壳仍持有守卫 plist 模板（KeepAlive + RunAtLoad）',
@@ -67,6 +68,10 @@ console.log('== P2 内核不写/不删守卫 plist ==');
       /com\.dsh\.supervisor\.plist/.test(s), 'ok');
   } else {
     console.log('SKIP P2-f/P2-g（壳仓不在同级目录）');
+    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
+    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
+    const whyMissing = shellRepoHelper.skipReason('P2-f/P2-g');
+    if (whyMissing) check('P2-f/P2-g 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
   }
 }
 

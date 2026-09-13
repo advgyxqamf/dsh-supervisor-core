@@ -12,6 +12,7 @@
 //   R6 物理隔离：壳状态目录（~/.dsh/shell）与内核状态目录（~/.dsh/supervisor）不同
 
 const fs = require('node:fs');
+const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const os = require('node:os');
 const ROOT = path.join(__dirname, '..');
@@ -189,7 +190,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     // R10-b：壳仓**不得**出现读取 update-journal 的代码。
     //   证明方式：扫壳仓 src-tauri/src/*.rs 与 bootstrap/*.js 中是否出现
     //   update-journal 作为**字符串字面量**（读取路径），注释行排除。
-    const shellRepo = path.join(ROOTD, '..', 'dsh-supervisor-launcher');
+    // 2026-09-13：经 helper 定位（CI 检出壳仓后用 DSH_SHELL_REPO 指定；缺失即硬失败）
+    const shellRepo = shellRepoHelper.shellRepoPath();
     let shellCode = '';
     const collect = (dir) => {
       let ents = [];

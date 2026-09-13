@@ -80,8 +80,28 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
 
+      - name: 检出壳仓（跨仓门禁需要**真实**读取壳仓源码）
+        uses: actions/checkout@v4
+        with:
+          # 壳仓是公开仓，无需凭据。放工作区内（actions/checkout 不允许 ../）。
+          repository: wasi7mglns/dsh-supervisor-launcher
+          path: shell-repo
+
       - name: 内核回归测试（npm test · 经 Xvfb 提供图形会话）
         shell: bash
+        # ⚠ 2026-09-13 修复（P1）：**必须指定壳仓路径**，否则跨仓门禁静默跳过。
+        #   缺陷：本仓有多条门禁读**壳仓**源码验证跨仓契约（服务定义模板 KeepAlive/
+        #   RunAtLoad、identity.json 的 exe 字段、版本向量逐字节一致、
+        #   update-journal/pinnedVersions 未被消费……），它们原先一律写死
+        #   `path.join(ROOT, '..', 'dsh-supervisor-launcher')`（假定两仓同级）。
+        #   而 CI **只检出内核仓** → 这些断言全部走 `SKIP（壳仓不在同级目录）` 分支
+        #   **静默通过** → 跨仓契约在产线上从未被检查（典型假门禁）。
+        #   实证：内核 CI 首次运行 master push 时，唯有 R10 的**反向断言**（扫描非空转）
+        #   失败把问题顶了出来，其余 4 处跨仓断言全部静默 SKIP 通过。
+        #   修法：检出壳仓 + `DSH_SHELL_REPO` 指定路径；且 test/_shell-repo.js 在
+        #   「声明了壳仓却缺失」时**硬失败**而不是跳过，防止检出失败再度退化。
+        env:
+          DSH_SHELL_REPO: ${{ github.workspace }}/shell-repo
         run: |
           # 不截断：门禁失败时断言文案就是排障依据。
           set -o pipefail

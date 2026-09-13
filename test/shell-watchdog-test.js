@@ -12,6 +12,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
+const shellRepoHelper = require('./_shell-repo');
 const fs = require('node:fs');
 const ROOT = path.join(__dirname, '..');
 const { createShellWatchdog, decide, isShellProcess, DEFAULTS } =
@@ -152,7 +153,7 @@ const mk = (opts) => {
   // ── W5 壳侧：identity.json 必须记录 exe（看护的路径来源）──
   console.log('== W5 壳侧契约 ==');
   {
-    const shellRepo = path.join(ROOT, '..', 'dsh-supervisor-launcher');
+    const shellRepo = shellRepoHelper.shellRepoPath();
     const upd = path.join(shellRepo, 'src-tauri', 'src', 'update.rs');
     if (fs.existsSync(upd)) {
       const src = fs.readFileSync(upd, 'utf8');
@@ -160,6 +161,10 @@ const mk = (opts) => {
       check('W5-b identity.json 记录 lastSeenAt', /"lastSeenAt"/.test(src));
     } else {
       console.log('SKIP W5-a/b（壳仓不在同级目录；跨仓断言仅本地可见）');
+      // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
+      // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
+      const whyMissing = shellRepoHelper.skipReason('W5-a/b');
+      if (whyMissing) check('W5-a/b 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
     }
   }
 

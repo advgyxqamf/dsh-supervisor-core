@@ -26,6 +26,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
+const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const POS = path.join(ROOT, 'src', 'platform', 'os');
@@ -157,7 +158,7 @@ console.log('== A5 自愈机制真实性 ==');
 {
   const asSrc = readOs('autostart.js');
   // 守卫 plist 的定义**归桌面壳**（所有权矩阵）—— 内核不再持有该模板，故跨仓读壳的 service.rs。
-  const shellSvc = path.join(ROOT, '..', 'dsh-supervisor-launcher', 'src-tauri', 'src', 'service.rs');
+  const shellSvc = shellRepoHelper.pathIn('src-tauri', 'src', 'service.rs');
   if (fs.existsSync(shellSvc)) {
     const svc = fs.readFileSync(shellSvc, 'utf8');
     check('A5 守卫 plist 含 KeepAlive（守卫崩溃自愈）', /KeepAlive/.test(svc), 'ok');
@@ -166,6 +167,10 @@ console.log('== A5 自愈机制真实性 ==');
     check('A5 内核不再持有守卫 plist 模板（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
   } else {
     console.log('SKIP A5 守卫 plist 断言（壳仓不在同级目录）');
+    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
+    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
+    const whyMissing = shellRepoHelper.skipReason('A5');
+    if (whyMissing) check('A5 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
   }
   // 壳自愈 Windows：shell 检查必须**独立于** `if (-not $up)` 块
   const ps = asSrc.match(/const ps = \[[\s\S]*?\]\.join/);
@@ -224,12 +229,16 @@ console.log('== A7 壳自愈：声明 ↔ 实现 ==');
     check('A7 看护不假成功（失败如实上报）', /restart_failed/.test(wd), 'ok');
   }
   // 跨仓契约：壳必须记录自身 exe（看护的路径来源）
-  const shellUpd = path.join(ROOT, '..', 'dsh-supervisor-launcher', 'src-tauri', 'src', 'update.rs');
+  const shellUpd = shellRepoHelper.pathIn('src-tauri', 'src', 'update.rs');
   if (fs.existsSync(shellUpd)) {
     check('A7 壳 identity.json 记录 exe（看护定位依据）',
       /"exe"\s*:\s*std::env::current_exe\(\)/.test(fs.readFileSync(shellUpd, 'utf8')), 'ok');
   } else {
     console.log('SKIP A7 跨仓 exe 断言（壳仓不在同级目录）');
+    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
+    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
+    const whyMissing = shellRepoHelper.skipReason('A7');
+    if (whyMissing) check('A7 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
   }
 }
 

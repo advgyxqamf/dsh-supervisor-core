@@ -17,6 +17,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
+const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const ROOT = path.join(__dirname, '..');
@@ -53,13 +54,17 @@ console.log('== V1 版本向量（内核实现）==');
 // ── V2 两仓向量文件逐字节一致 ──
 console.log('== V2 两仓向量文件一致 ==');
 {
-  const shell = path.join(ROOT, '..', 'dsh-supervisor-launcher', 'shell-release', 'version-vectors.json');
+  const shell = shellRepoHelper.pathIn('shell-release', 'version-vectors.json');
   if (fs.existsSync(shell)) {
     const a = crypto.createHash('sha256').update(fs.readFileSync(VEC)).digest('hex');
     const b = crypto.createHash('sha256').update(fs.readFileSync(shell)).digest('hex');
     check('V2 内核与壳的向量文件逐字节相同（改一侧即失败）', a === b, a.slice(0, 12) + ' vs ' + b.slice(0, 12));
   } else {
     console.log('SKIP V2（壳仓不在同级目录；跨仓断言仅本地可见）');
+    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
+    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
+    const whyMissing = shellRepoHelper.skipReason('V2');
+    if (whyMissing) check('V2 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
   }
   // 自洽：文件必须可解析且含两个数组
   check('V2 向量文件结构完整', Array.isArray(doc.versionValidation) && Array.isArray(doc.compare));
