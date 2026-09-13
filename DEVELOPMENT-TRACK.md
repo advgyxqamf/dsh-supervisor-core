@@ -163,3 +163,85 @@ bash release/scripts/ci-core.sh   # CI 等价预演（需 DSH_SHELL_REPO）
 - 两仓（内核/壳）**不得共享代码**，只经文件契约：`registry.json` / `identity.json` /
   `update-guard.json` / `update-journal.json`。契约**新增**须向后兼容；
   **删除/语义变更**须**内核先行**，保留一个发布周期的跨版本容忍。
+---
+
+## 7. CI 强制（服务器端兜底，2026-09-13 启用）
+
+本机门禁能拦住错误，但「本机没跑就提交」是常见疏漏。故在 GitHub 侧加了**服务端兜底**。
+
+### 内核仓 `advgyxqamf/dsh-supervisor-core` · `master` 分支保护
+
+| 设置 | 值 | 作用 |
+|---|---|---|
+| Required status checks | `precheck`、`test` | 这两个 check 未通过，**PR 合不进去** |
+| Strict（Require branches to be up to date）| 开启 | 合并前分支必须与 master 同步，强制在新基线上重跑 |
+| Enforce for administrators | 开启 | **管理员也不能绕过** |
+| Required conversation resolution | 开启 | 未解决的评审意见阻止合并 |
+| Allow force push / deletions | 关闭 | 防历史被改写 |
+
+### 为什么只设 `precheck` 与 `test`，不设 `build` 矩阵
+
+`build`（4 平台）与 `release` 是**条件 job**（`if: needs.precheck.outputs.need_build == 'true'`）：
+版本已全部发布时它们**根本不运行**。若把它们设为 required，GitHub 会等一个**永远不会出现的状态**
+→ 所有 PR **永久合不进去**。required 只能设**每次都会跑**的 job。
+
+### 实测结论（修正我先前的判断）
+
+我原先以为「required checks 只在 PR 合并路径评估、直推不受影响」——**实测证伪**。
+开启 `enforce_admins=true` + required checks 后，直推被服务端拒绝：
+
+```
+remote: - 2 of 2 required status checks are expected.
+ ! [remote rejected] master -> master (protected branch hook declined)
+```
+
+即 GitHub **在直推路径上也评估** required checks。由此产生一个**死锁**：
+新提交在推上去之前无法产生 check，而没 check 又推不上去 → **直推通道被完全关闭**。
+
+### 因此：本仓的改代码流程 = **必须走 PR**
+
+```bash
+# 1) 在分支上改并推送
+git switch -c feat/xxx
+git commit -am '...'
+git push origin HEAD:refs/heads/feat/xxx
+
+# 2) 开 PR（随后 precheck/test 自动跑）
+#    gh pr create --fill   或经 GitHub UI/API
+
+# 3) 两个 required check 通过后合并（GitHub UI「Merge」或 API）
+git switch master && git pull --ff-only
+```
+
+> **发布标签不受影响**：`v*` tag 推送走 tag 通道，分支保护只管分支。
+> 故发布流程（打 tag → 触发 release）保持不变。
+
+### 若要放开直推（需要时）
+
+| 想达到的效果 | 怎么改 |
+|---|---|
+| 管理员可直推（其余人仍受门禁）| `enforce_admins: false` |
+| 完全回到无保护 | `DELETE .../branches/master/protection` |
+| 保持现状（**默认**，最强）| 不改，走 PR |
+
+### 为什么只设 precheck 与 test（重申）
+
+`build`（4 平台）与 `release` 是**条件 job**（`need_build == 'true'` 才跑）；
+版本已全部发布时它们**根本不运行**（本 PR 即为 `skipped`）。
+若设为 required，GitHub 会等一个**永远不会出现的状态** → 所有 PR 永久阻塞。
+故 required 只能设**每次都会跑**的 job。
+
+### 壳仓
+
+壳仓 CI 此前只由 `push: tags/main` 触发，**PR 不跑 CI** → 直接设 required 会让 PR 永远等不到状态。
+故须**先补 `pull_request:` 触发器**，再设 required；其 `build` 是无条件 4 平台矩阵，可作为 required 语境。
+
+### 本次启用的完整设置（内核仓 `master`）
+
+| 项 | 值 |
+|---|---|
+| required_status_checks.contexts | `["precheck","test"]` |
+| required_status_checks.strict | `true` |
+| enforce_admins | `true` |
+| required_conversation_resolution | `true` |
+| allow_force_pushes / allow_deletions | `false` |
