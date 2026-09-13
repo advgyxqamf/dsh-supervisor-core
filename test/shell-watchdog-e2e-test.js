@@ -34,14 +34,37 @@ const shDir = path.join(HOME, '.dsh', 'shell');
 fs.mkdirSync(swDir, { recursive: true });
 fs.mkdirSync(shDir, { recursive: true });
 
-// 假壳：被拉起即写标记，然后挂住（避免立刻退出被当成又缺失）
+// 假壳：被拉起即写标记，然后挂住（避免立刻退出被当成又缺失）。
+//
+// ⚠ 2026-09-13 修复（P1）：**必须跨平台构造**。
+//   原实现写的是 '#!/bin/sh' + echo/sleep 的 **POSIX 脚本**，
+//   而 restartShell 用 spawn(exe, [], {detached, stdio:'ignore'}) 直接执行它 ——
+//   Windows **无法执行**该格式（且 .js 也不能直接 spawn）→ 拉起失败 →
+//   本文件 E2E-1/3/4/5 在 Windows 上必红。
+//   修法（与 uninstall-timeout-behavior-test 同一思路）：让假壳是**可被 spawn 的可执行**——
+//      · POSIX：写一个可执行 shell 脚本（保持原样，最贴近真实情形）；
+//      · Windows：写一个 **.cmd 批处理**（cmd.exe 可直接执行；Node 的 spawn 在
+//        Windows 上对 .cmd 会经 cmd.exe 运行）。
+//   两者都只做两件事：把 "launched <pid>" 追加到标记文件；随后挂住约 20s。
 const marker = path.join(HOME, 'launched.txt');
-const fakeShell = path.join(HOME, 'dsh-supervisor-gui');
-fs.writeFileSync(fakeShell,
-  '#!/bin/sh' + String.fromCharCode(10) +
-  'echo "launched $$" >> "' + marker + '"' + String.fromCharCode(10) +
-  'sleep 20' + String.fromCharCode(10));
-fs.chmodSync(fakeShell, 0o755);
+const fakeShell = path.join(HOME, process.platform === 'win32' ? 'dsh-supervisor-gui.cmd' : 'dsh-supervisor-gui');
+if (process.platform === 'win32') {
+  const L = String.fromCharCode(13) + String.fromCharCode(10);
+  fs.writeFileSync(fakeShell,
+    '@echo off' + L +
+    // 刻意**不写数字 pid**：清理逻辑用 /launched (\d+)/ 取 pid 再 SIGKILL，
+    // 而 cmd 里拿不到子进程真实 pid；若写 %RANDOM%（数字）会被误当作 pid，
+    // 可能**杀掉无关进程**。故此处写平台标识；该 .cmd 约 20s 自行退出，无需回收。
+    'echo launched-win-shim >> "' + marker + '"' + L +
+    // 挂住：ping 是本机回环，稳定且不需要额外工具；约 20s
+    'ping -n 21 127.0.0.1 > nul' + L);
+} else {
+  fs.writeFileSync(fakeShell,
+    '#!/bin/sh' + String.fromCharCode(10) +
+    'echo "launched $$" >> "' + marker + '"' + String.fromCharCode(10) +
+    'sleep 20' + String.fromCharCode(10));
+  fs.chmodSync(fakeShell, 0o755);
+}
 
 // 壳的 identity.json：phase=ready（非预期缺席）+ 记录 exe（看护的路径来源）
 fs.writeFileSync(path.join(shDir, 'identity.json'), JSON.stringify({
