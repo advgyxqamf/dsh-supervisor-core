@@ -45,6 +45,22 @@ jobs:
         with:
           node-version: '24'
 
+      - name: 构建前端产物（npm test 的面板安全头断言**依赖它**）
+        shell: bash
+        # ⚠ 2026-09-13 修复（P1）：**必须先构建前端**，否则 core-test 的两条安全头断言
+        #   （「面板带 CSP 头」/「nosniff 头存在」）会因静态分支返回 HTTP 503
+        #   「UI not built」而失败 —— 而它们正是**面板安全头**的唯一门禁。
+        #
+        #   缺陷本质：core-test.js 的注释已写明流水线顺序是
+        #     verify → build-ui → npm test（见 release/scripts/ci-core.sh），
+        #   但本 job **只跑 npm test**，把「构建产物」这个**断言前置条件**漏掉了。
+        #   为什么长期不可见：branches:[master] 于 2026-09-12 接入后，
+        #     到我 2026-09-13 推送之前 **master 从无 push**（Actions 里该分支的 push
+        #     run 总数 = 2，都是我的）→ 本 job **从未运行过**，
+        #   一运行即红（run 34737621965：37 passed / 2 failed）。
+        #   修法选择「真的构建」而不是「让断言跳过」—— 跳过等于把安全头门禁删掉。
+        run: bash release/scripts/build-ui.sh
+
       - name: 内核回归测试（npm test）
         shell: bash
         run: |
