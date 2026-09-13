@@ -17,21 +17,93 @@ const isWindows = process.platform === 'win32';
  *  列序取数据行实测布局：sl(0) local(1) rem(2) st(3) tx:rx(4) tr:when(5) retrnsmt(6)
  *  uid(7) timeout(8) inode(9) …（数据行 17 列，表头为 12 名——表头与行不对齐，勿按表头取列；
  *  2026-09 曾误改表头解析导致 inode 取到第 11 列恒错，回退实测列位并保留 ss 兜底）。 */
+// ═══════════════════════════════════════════════════════════════════════════
+// 平台输出**纯解析器**（2026-09-13，跨平台架构规范化）
+//
+// 为什么要单独抽出来：原先各平台的解析**内联在** `macFind`/`winFind`/`linuxFindSs`
+// 里，而它们都带 I/O（`ex.runOut` / `fs.readFileSync`）→ 只能在本平台验证。
+// 而平台解析恰恰是**跨平台 bug 的藏身处**（本仓真实发生过 Windows wmic 解析落空
+// 却**不回退** PowerShell，导致「三端保留 cmdline 防线」的声明在 Windows 上失效）。
+//
+// 抽成纯函数后：**在任意宿主上都能穷举三种平台格式的解析结果**，
+// 且生产代码直接调用它们（不是平行实现 —— 那是"同一事实两处实现"）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 解析 `/proc/net/tcp{,6}` 文本 → 该 port 处于 LISTEN(0A) 的 socket inode 集合。
+ *  @returns {Set<string>} 形如 `socket:[12345]`（与 /proc/<pid>/fd 的 link 同名） */
+function parseProcNetTcpInodes(txt, port) {
+  const inodes = new Set();
+  for (const lineRaw of String(txt || '').split('\n')) {
+    const cols = lineRaw.trim().split(/\s+/);
+    if (cols.length < 10) continue;
+    const local = cols[1];
+    const st = cols[3];
+    const inode = cols[9];
+    if (!local || !inode) continue;
+    const p = local.split(':')[1];
+    if (st === '0A' && p && parseInt(p, 16) === port) inodes.add('socket:[' + inode + ']');
+  }
+  return inodes;
+}
+
+/** 解析 macOS `lsof -nP -iTCP:<port> -sTCP:LISTEN` 输出 → pid 或 null。
+ *  列：COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME（取首个第 2 列为数字的行）。 */
+function parseLsofPid(out) {
+  for (const line of String(out || '').split('\n')) {
+    const m = line.trim().split(/\s+/);
+    if (m.length >= 2 && /^\d+$/.test(m[1])) return Number(m[1]);
+  }
+  return null;
+}
+
+/** 解析 Windows `netstat -ano` 输出 → 监听该 port 的 pid 或 null。
+ *  ⚠ 端口必须**整段相等**（`:41000` 不得被 `:4100` 命中）；容忍 CRLF。 */
+function parseNetstatPid(out, port) {
+  const want = String(port);
+  for (const line of String(out || '').split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 5 && (parts[0] === 'TCP' || parts[0] === 'TCPv6') && parts[3] === 'LISTENING') {
+      const lp = parts[1];
+      const p = lp.slice(lp.lastIndexOf(':') + 1);
+      if (p === want) {
+        const pid = Number(parts[4]);
+        if (Number.isInteger(pid) && pid > 0) return pid;
+      }
+    }
+  }
+  return null;
+}
+
+/** 解析 Linux `ss -tlnHp` 输出 → `users:(("node",pid=123,fd=20))` 里的 pid 或 null。 */
+function parseSsPid(out) {
+  const m = out && /pid=(\d+)/.exec(String(out));
+  return m ? Number(m[1]) : null;
+}
+
+/** 解析 Windows `wmic ... get CommandLine /value` 输出 → 命令行或 null。
+ *
+ *  ⚠ 这是 P1-2 的**回归锚点**：`No Instance(s) Available.`（进程已退出/权限不足）
+ *    必须返回 **null**，从而让调用方**继续走 PowerShell CIM 回退**；
+ *    旧实现在此直接 `return null` 而**跳过回退** → Windows 上 cmdline 防线静默失效。 */
+function parseWmicCommandLine(out) {
+  if (!out) return null;
+  const m = /CommandLine=([\s\S]*)/.exec(String(out));
+  const v = m ? m[1].trim() : '';
+  return v || null;
+}
+
+/** 解析 PowerShell CIM 的 CommandLine 输出 → 命令行或 null（trim；空串视为未取到）。 */
+function parsePowerShellCommandLine(out) {
+  const v = out ? String(out).trim() : '';
+  return v || null;
+}
+
 function linuxListeningInodes(port) {
   const inodes = new Set();
   for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
     let txt = '';
     try { txt = fs.readFileSync(f, 'utf8'); } catch { continue; }
-    for (const lineRaw of txt.split('\n')) {
-      const cols = lineRaw.trim().split(/\s+/);
-      if (cols.length < 10) continue;
-      const local = cols[1];
-      const st = cols[3];
-      const inode = cols[9];
-      if (!local || !inode) continue;
-      const p = local.split(':')[1];
-      if (st === '0A' && p && parseInt(p, 16) === port) inodes.add('socket:[' + inode + ']');
-    }
+    for (const x of parseProcNetTcpInodes(txt, port)) inodes.add(x);
   }
   return inodes;
 }
@@ -59,10 +131,7 @@ function macFind(port) {
     // lsof 输出列：COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
     const out = ex.runOut('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN'], { timeoutMs: 3000 });
     if (!out) return null;
-    for (const line of out.split('\n')) {
-      const m = line.trim().split(/\s+/);
-      if (m.length >= 2 && /^\d+$/.test(m[1])) return Number(m[1]);
-    }
+    return parseLsofPid(out);
   } catch {}
   return null;
 }
@@ -76,18 +145,7 @@ function winFind(port) {
     // netstat 输出例：TCP  127.0.0.1:41000  0.0.0.0:0  LISTENING  12345
     const out = ex.runOut('netstat', ['-ano'], { timeoutMs: 3000 });
     if (!out) return null;
-    const want = String(port);
-    for (const line of out.split('\n')) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length >= 5 && (parts[0] === 'TCP' || parts[0] === 'TCPv6') && parts[3] === 'LISTENING') {
-        const lp = parts[1];
-        const p = lp.slice(lp.lastIndexOf(':') + 1);
-        if (p === want) {
-          const pid = Number(parts[4]);
-          if (Number.isInteger(pid) && pid > 0) return pid;
-        }
-      }
-    }
+    return parseNetstatPid(out, port);
   } catch {}
   return null;
 }
@@ -101,8 +159,8 @@ function linuxFindSs(port) {
   for (const ssBin of candidates) {
     try {
       const out = ex.runOut(ssBin, ['-tlnHp', 'sport = :' + port], { timeoutMs: 3000 });
-      const m = out && /pid=(\d+)/.exec(out);
-      if (m) return Number(m[1]);
+      const pid = parseSsPid(out);
+      if (pid !== null) return pid;
     } catch {}
   }
   return null;
@@ -160,17 +218,14 @@ function readCmdline(pid) {
     //     Windows 上**既不能接管手动启动的 DSH、也不给出任何错误**（与「三端保留防线」的声明相反）。
     //
     //   修法：wmic 仅在**确实解析出非空命令行**时返回；否则继续走回退。
-    if (out) {
-      const m = /CommandLine=([\s\S]*)/.exec(out);
-      const viaWmic = m ? m[1].trim() : '';
-      if (viaWmic) return viaWmic;
-      // 落空 → 继续尝试回退（不再直接 return null）
-    }
+    const viaWmic = parseWmicCommandLine(out);
+    if (viaWmic) return viaWmic;
+    // 落空 → 继续尝试回退（不再直接 return null）——由 parseWmicCommandLine 返回 null 表达
     // wmic 缺失/不可用/无输出/解析不中：回退 PowerShell CIM
     {
       const ps = "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine";
       const o = ex.runOut('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeoutMs: 5000 });
-      return o ? (o.trim() || null) : null;
+      return parsePowerShellCommandLine(o);
     }
   }
   return null;
@@ -242,4 +297,9 @@ function pgrepList(pattern) {
 //   认不出自己的 daemon（可能误判端口异主 / 重复拉起）。故比较前两侧都要归一化。
 function normCmdline(s) { return String(s || '').replace(/\\/g, '/'); }
 
-module.exports = { findListeningPid, isAlive, readCmdline, normCmdline, isDshCmdline, pgrepList };
+module.exports = {
+  findListeningPid, isAlive, readCmdline, normCmdline, isDshCmdline, pgrepList,
+  // 平台输出纯解析器（2026-09-13 抽出：使其可在任意宿主上穷举；生产代码直接调用，非平行实现）
+  parseProcNetTcpInodes, parseLsofPid, parseNetstatPid, parseSsPid,
+  parseWmicCommandLine, parsePowerShellCommandLine,
+};

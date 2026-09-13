@@ -64,7 +64,12 @@ function describe() {
       waylandDisplay: process.env.WAYLAND_DISPLAY || null,
     };
   }
-  return { platform: PLATFORM, available: PLATFORM === 'darwin' || PLATFORM === 'win32',
+  // ⚠ 2026-09-13（失效模式 b：同一事实两处实现）：此处**必须委托 sessionAvailable()**。
+  //   原实现把判定表达式**再写一遍**（`PLATFORM === 'darwin' || PLATFORM === 'win32'`），
+  //   与 sessionAvailable() 内的同一表达式是两份副本 —— 改一处忘另一处即漂移。
+  //   本门禁的注入验证正是这样发现它的：把 sessionAvailable() 改成 return false，
+  //   describe() 仍报可用（因为读的是自己那份），Y-4 因而假绿。
+  return { platform: PLATFORM, available: sessionAvailable(),
            reason: 'session-scoped-by-launcher' };
 }
 
