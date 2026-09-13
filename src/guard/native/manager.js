@@ -20,6 +20,15 @@ const ex = require('../../platform/exec');
 const execPath = require('../../platform/os/exec-path');
 // npm 可执行：优先用注入值（测试），否则经跨平台解析。
 function npmExe(self) { return (self && self._npmBin) || execPath.npmBin(); }
+// 注入的**前置参数**（仅测试用；生产恒为空）。
+// 为什么需要：行为测试要造「挂起 / 正常退出」的假 npm。原实现写 POSIX 脚本
+// （#!/bin/sh + sleep），**Windows 无法执行** → spawn 立刻失败，
+// 「挂起」退化成「立即失败」→ 该测试在 Windows 上必红。
+// 跨平台做法：npmBin 指向 **process.execPath**（四平台同一可执行），
+// 由本函数把「要执行的 .js 路径」作为前置参数拼在前面。
+function npmExeArgs(self) {
+  return (self && Array.isArray(self._npmBinArgs)) ? self._npmBinArgs.slice() : [];
+}
 const { semverCompare, VERSION_RE } = require('../../domains/dist/index');
 
 class NativeManager {
@@ -183,7 +192,7 @@ class NativeManager {
     //   npm/node 在 PATH 指向网络盘、或 npm 因缓存锁挂起时会无限阻塞守卫事件循环。
     const nv = ex.runOut('node', ['--version']);
     if (!nv || !nv.trim()) errors.push('node 未安装或不可执行');
-    const npmv = ex.runOut(npmExe(this), ['--version']);
+    const npmv = ex.runOut(npmExe(this), npmExeArgs(this).concat(['--version']));
     if (!npmv || !npmv.trim()) errors.push('npm 未安装或不可执行');
     let npmRoot = this.npmRoot;
     if (!npmRoot) { const r = ex.runOut(npmExe(this), ['root', '-g']); if (r) npmRoot = r.trim(); }
@@ -220,7 +229,7 @@ class NativeManager {
     let npmRoot = this.npmRoot;
     let pkgDir = null;
     try {
-      if (!npmRoot) { const r = ex.runOut(npmExe(this), ['root', '-g']); if (r) npmRoot = r.trim(); }
+      if (!npmRoot) { const r = ex.runOut(npmExe(this), npmExeArgs(this).concat(['root', '-g'])); if (r) npmRoot = r.trim(); }
       pkgDir = path.join(npmRoot, this.config.packageName || '@deepseek-ai/dsh');
     } catch {}
     this._saveManifest({
@@ -706,7 +715,7 @@ class NativeManager {
     const exitCode = await new Promise((resolve) => {
       let child;
       try {
-        child = spawn(npmExe(this), uninstallArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn(npmExe(this), npmExeArgs(this).concat(uninstallArgs), { stdio: ['ignore', 'pipe', 'pipe'] });
       } catch (e) { return resolve(-1); }
       child.stdout.resume(); child.stderr.resume();
       let done = false;

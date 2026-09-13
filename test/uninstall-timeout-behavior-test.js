@@ -33,10 +33,20 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   const stateDir = path.join(tmp, 'state');
   fs.mkdirSync(stateDir, { recursive: true });
 
-  // 假 npm：**永不退出**（模拟 registry 挂死 / 凭证助手等待）
-  const fakeNpm = path.join(tmp, 'npm-hangs');
-  fs.writeFileSync(fakeNpm, '#!/bin/sh' + String.fromCharCode(10) + 'sleep 1000' + String.fromCharCode(10));
-  fs.chmodSync(fakeNpm, 0o755);
+  // 假 npm：**永不退出**（模拟 registry 挂死 / 凭证助手等待）。
+  //
+  // ⚠ 2026-09-13 修复（P1）：**必须跨平台构造**。
+  //   原实现写的是 '#!/bin/sh' + sleep 1000 的 **POSIX 脚本** ——
+  //   Windows **无法执行**它（无 sh 解释器）→ spawn 立刻失败，
+  //   「挂起」退化成「立即失败」→ timedOut=false → 本测试两条断言在 Windows 上必红
+  //   （实测 v0.1.5-BETA.2 的 windows-latest leg：4ms 返回、timedOut=null→false）。
+  //   修法：用 **Node 自身**当解释器（四平台都是同一个可执行），
+  //   并把「挂起/正常退出」写成两份 .js —— 由 process.execPath 执行，Windows 同样可用。
+  const HANG_JS = 'setTimeout(function () {}, 60000);';   // 60s 不退出（远大于 800ms 超时）
+  const fakeNpmHang = path.join(tmp, 'npm-hangs.js');
+  fs.writeFileSync(fakeNpmHang, HANG_JS);
+  const fakeNpm = process.execPath;                        // 用真实 node 可执行当「解释器」
+  const fakeNpmArg = [fakeNpmHang];                        // 由 manager 的 npmBin 支持数组
 
   // ⚠ 绝不用「patch 模块导出」的方式替换 npm —— 真实事故（2026-09-12）：
   //   `const { npmBin } = require(...)` 是**值绑定**，patch 无效，
@@ -57,6 +67,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // 结构性保险：若将来有人改坏了注入链，这里立刻失败，而不是去跑真实 npm。
   check('前置：npm 已被注入为假可执行（绝不用真实 npm）',
     mgr._npmBin === fakeNpm, String(mgr._npmBin));
+  // 注入「以 node 执行该脚本」的参数（跨平台；不依赖 sh）
+  mgr._npmBinArgs = fakeNpmArg;
 
   // 造一份 manifest（否则 uninstall 没有可清理对象；同时验证「超时保留 manifest」）
   const manifestFile = path.join(stateDir, 'native-manifest.json');
@@ -83,9 +95,11 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // ── 反向：看门狗不能误伤正常完成的卸载 ──
   {
     const quickNpm = path.join(tmp, 'npm-quick');
-    fs.writeFileSync(quickNpm, '#!/bin/sh' + String.fromCharCode(10) + 'exit 0' + String.fromCharCode(10));
-    fs.chmodSync(quickNpm, 0o755);
-    mgr._npmBin = quickNpm; // 注入正常退出的假 npm（同样绝不碰真实 npm）
+    // 正常退出的假 npm：同样用 Node 执行（跨平台），立即退出 0。
+    const quickJs = path.join(tmp, 'npm-ok.js');
+    fs.writeFileSync(quickJs, 'process.exit(0);');
+    mgr._npmBin = process.execPath; // 注入正常退出的假 npm（同样绝不碰真实 npm）
+    mgr._npmBinArgs = [quickJs];
     mgr.uninstalling = null;
     fs.writeFileSync(manifestFile, JSON.stringify({
       version: '0.0.0-test', packageDir: path.join(tmp, 'pkg2'), binPath: path.join(tmp, 'bin2'), dataPaths: [],
