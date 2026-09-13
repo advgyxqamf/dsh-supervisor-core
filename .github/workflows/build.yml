@@ -61,12 +61,31 @@ jobs:
         #   修法选择「真的构建」而不是「让断言跳过」—— 跳过等于把安全头门禁删掉。
         run: bash release/scripts/build-ui.sh
 
-      - name: 内核回归测试（npm test）
+      - name: 安装 Xvfb（图形会话前置条件）
+        shell: bash
+        # ⚠ 2026-09-13 修复（P1）：**必须先提供图形会话**。
+        #   缺陷：守护看护在拉起 GUI 壳前会先判定「有没有图形会话」——
+        #     linux 判据 = DISPLAY/WAYLAND_DISPLAY 环境变量 或 /tmp/.X11-unix/X* 或
+        #     wayland socket（src/platform/os/desktop.js::sessionAvailable）。
+        #     这是**刻意的设计**（防「无显示时拉起必失败 → 重启风暴」）。
+        #   而 GitHub ubuntu runner 是无头的（三者皆无）→ 看护按设计拒绝拉起，
+        #   于是 shell-watchdog-e2e-test 的 4 条断言失败，CI 日志给出确切原因：
+        #       [shell-watchdog] 不拉起桌面壳：无图形会话（注销/纯终端），拉起 GUI 必失败
+        #       FAIL E2E-1 壳缺失 → 被真实拉起（写入标记） / E2E-3 / E2E-4 / E2E-5
+        #   即：**缺的是测试的前置环境，不是产品逻辑错**。
+        #   （本机一直绿，因为宿主有 X11/Wayland socket。）
+        # 修法：装 Xvfb 并用 xvfb-run 跑 npm test —— 让这条 E2E **真的拉起**壳，
+        #   而不是把断言改成「无头就跳过」；跳过等于删掉「壳缺失→真被拉起」这条唯一端到端门禁。
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+
+      - name: 内核回归测试（npm test · 经 Xvfb 提供图形会话）
         shell: bash
         run: |
           # 不截断：门禁失败时断言文案就是排障依据。
           set -o pipefail
-          npm test 2>&1 | tail -60
+          xvfb-run -a npm test 2>&1 | tail -60
 
   # ── precheck：该 tag 版本是否已在 npm 全部发布？ ──
   # 为什么需要：全平台本地发布后，tag 仍会触发本 workflow。若无此判断，
