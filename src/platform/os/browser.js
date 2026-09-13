@@ -9,13 +9,25 @@
 
 const { spawn } = require('node:child_process');
 
+/** 平台 → 打开 URL 的命令（**纯函数，可穷举**；不 spawn）。
+ *
+ *  ⚠ Windows 的 `start` 第一个参数是**窗口标题**，必须显式给空串（`""`），
+ *    否则 URL 会被当成标题、浏览器不打开 —— 这是 `start` 的经典陷阱。
+ *    把它固定成可断言的纯函数，避免"顺手删掉空参数"这类回归。
+ *  ⚠ 未知平台：**有意**退化为 `xdg-open`（best-effort 且失败静默）。
+ *    与 autostart 不同——那里会向用户/面板**宣称**某个服务管理器（kind），
+ *    故未知平台必须显式 none；而这里不宣称任何能力，只是尽力尝试。 */
+function openCommand(platform, url) {
+  const pl = platform || process.platform;
+  if (pl === 'darwin') return { cmd: 'open', args: [url] };
+  if (pl === 'win32') return { cmd: 'cmd', args: ['/c', 'start', '', url] };
+  return { cmd: 'xdg-open', args: [url] };
+}
+
 function open(url) {
   try {
-    const p = process.platform === 'darwin'
-      ? spawn('open', [url], { detached: true, stdio: 'ignore' })
-      : process.platform === 'win32'
-        ? spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' })
-        : spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+    const c = openCommand(process.platform, url);
+    const p = spawn(c.cmd, c.args, { detached: true, stdio: 'ignore' });
     p.on('error', () => {});
     p.unref();
     return true;
@@ -32,6 +44,46 @@ function _spawnDetached(bin, args, env, onExit) {
   return child;
 }
 
+/** 平台 → 隔离打开的**命令规划**（纯函数，可穷举；不 spawn）。
+ *
+ *  返回两种形态：
+ *    · `{kind:'single', bin, args, isolated}`  —— 单命令（darwin/win32）
+ *    · `{kind:'chain', candidates:[...]}`      —— 候选链（linux，按可用性依次尝试）
+ *
+ *  ⚠ Windows 有意**只传** `--incognito` + `--user-data-dir`，不传 antiArgs ——
+ *    `cmd start` 对复杂参数（含引号/反斜杠的指纹参数）转义脆弱，宁可少传也不传坏。
+ *    这是**刻意的权衡**，用断言固定住，防止有人"顺手补全 antiArgs"反而引入转义 bug。
+ *  @param {{profileDir?:string, antiArgs?:string[]}} [opts] */
+function isolatedPlan(platform, url, opts) {
+  const o = opts || {};
+  const antiArgs = o.antiArgs || [];
+  const profileDir = o.profileDir;
+  const pl = platform || process.platform;
+  if (pl === 'darwin') {
+    return { kind: 'single', bin: 'open', args: ['-na', 'Google Chrome', '--args', ...antiArgs], isolated: true, label: 'Google Chrome' };
+  }
+  if (pl === 'win32') {
+    return {
+      kind: 'single', bin: 'cmd',
+      args: ['/c', 'start', '', 'chrome', '--incognito', '--user-data-dir=' + profileDir, url],
+      isolated: true, label: 'chrome',
+    };
+  }
+  // Linux（及未知平台，同 openCommand 的有意退化）：候选按「防风控强度 + 可用性」排序
+  return {
+    kind: 'chain',
+    candidates: [
+      { bin: 'microsoft-edge', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
+      { bin: 'microsoft-edge-stable', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
+      { bin: 'google-chrome', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
+      { bin: 'chromium', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
+      { bin: 'chromium-browser', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
+      { bin: 'firefox', args: ['--private-window', url], isolated: false, watch: true, envKind: 'sys' },
+      { bin: 'xdg-open', args: [url], isolated: false, watch: false, envKind: 'sys' }, // 兜底：无隔离
+    ],
+  };
+}
+
 /**
  * 以隔离 profile + 无痕打开浏览器（OAuth 反指纹登录用）。
  * @param {string} url
@@ -46,31 +98,19 @@ function launchIsolated(url, o) {
   const sysEnv = opts.sysEnv || process.env;
   const onExit = opts.onExit;
   try {
-    if (process.platform === 'darwin') {
-      const p = _spawnDetached('open', ['-na', 'Google Chrome', '--args', ...antiArgs], antiEnv, onExit);
-      return { ok: !!p, bin: p ? 'Google Chrome' : null, isolated: true };
+    const plan = isolatedPlan(process.platform, url, { profileDir, antiArgs });
+    if (plan.kind === 'single') {
+      const env = plan.bin === 'open' ? antiEnv : sysEnv;
+      const p = _spawnDetached(plan.bin, plan.args, env, onExit);
+      return { ok: !!p, bin: p ? plan.label : null, isolated: plan.isolated };
     }
-    if (process.platform === 'win32') {
-      // cmd start 对复杂参数转义脆弱：仅传 incognito + 独立 profile
-      const p = _spawnDetached('cmd', ['/c', 'start', '', 'chrome', '--incognito', '--user-data-dir=' + profileDir, url], sysEnv, onExit);
-      return { ok: !!p, bin: p ? 'chrome' : null, isolated: true };
-    }
-    // Linux：候选按「防风控强度 + 可用性」排序：Edge → Chrome → Chromium → Firefox 无痕 → xdg-open 兜底
-    const candidates = [
-      { bin: 'microsoft-edge', args: antiArgs, env: antiEnv, isolated: true, watch: true },
-      { bin: 'microsoft-edge-stable', args: antiArgs, env: antiEnv, isolated: true, watch: true },
-      { bin: 'google-chrome', args: antiArgs, env: antiEnv, isolated: true, watch: true },
-      { bin: 'chromium', args: antiArgs, env: antiEnv, isolated: true, watch: true },
-      { bin: 'chromium-browser', args: antiArgs, env: antiEnv, isolated: true, watch: true },
-      { bin: 'firefox', args: ['--private-window', url], env: sysEnv, isolated: false, watch: true },
-      { bin: 'xdg-open', args: [url], env: sysEnv, isolated: false, watch: false }, // 兜底：无隔离
-    ];
     let idx = 0;
     const tryNext = () => {
-      if (idx >= candidates.length) return { ok: false, bin: null, isolated: false };
-      const c = candidates[idx++];
+      if (idx >= plan.candidates.length) return { ok: false, bin: null, isolated: false };
+      const c = plan.candidates[idx++];
+      const env = c.envKind === 'anti' ? antiEnv : sysEnv;
       let child;
-      try { child = spawn(c.bin, c.args, { detached: true, stdio: 'ignore', env: c.env || sysEnv }); }
+      try { child = spawn(c.bin, c.args, { detached: true, stdio: 'ignore', env: env || sysEnv }); }
       catch { return tryNext(); }
       // bin 不存在 → 下一个候选（error 事件同步触发，故递归前先注册）
       child.on('error', () => { tryNext(); });
@@ -82,4 +122,4 @@ function launchIsolated(url, o) {
   } catch { return { ok: false, bin: null, isolated: false }; }
 }
 
-module.exports = { open, launchIsolated };
+module.exports = { open, launchIsolated, openCommand, isolatedPlan };

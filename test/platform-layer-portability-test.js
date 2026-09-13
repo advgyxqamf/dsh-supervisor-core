@@ -228,6 +228,93 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'platport-'));
     noNoise === 'unsupported', noNoise);
 }
 
+// ── X-6：file-protect —— POSIX 分支 + Windows 不得静默成功 ──
+{
+  const fp = require(path.join(ROOT, 'src', 'platform', 'os', 'file-protect.js'));
+  check('X-6 hasIcacls(linux/darwin) 恒 false（POSIX 绝不探测 icacls）',
+    fp.hasIcacls('linux') === false && fp.hasIcacls('darwin') === false, 'false');
+  // Windows 分支：在 Linux 上伪造 win32 时 icacls 不存在 → 必须**如实失败**（不静默 ok）
+  const wOut = underFake('win32', [
+    "const fp = require('./src/platform/os/file-protect.js');",
+    "process.stdout.write(JSON.stringify({ f: fp.protectFile('/tmp/nonexistent-xyz'), d: fp.protectDir('/tmp/nonexistent-xyz') }));",
+  ].join(String.fromCharCode(10)));
+  let w = null; try { w = JSON.parse(wOut); } catch { /* EXECFAIL */ }
+  check('X-6 Windows 且 icacls 不可用 → protectFile 如实 ok=false/mode=none（不静默成功）',
+    !!w && w.f.ok === false && w.f.mode === 'none' && !!w.f.reason, w ? JSON.stringify(w.f) : wOut.slice(0, 70));
+  check('X-6 Windows 且 icacls 不可用 → protectDir 同上',
+    !!w && w.d.ok === false && w.d.mode === 'none' && !!w.d.reason, w ? JSON.stringify(w.d) : '-');
+  // POSIX 分支（仅本机为 POSIX 时才有意义）——断言模式名契约
+  if (process.platform !== 'win32') {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'fp-'));
+    const file = path.join(t, 'x');
+    fs.writeFileSync(file, 'x');
+    const r = fp.protectFile(file);
+    check('X-6 POSIX protectFile → ok=true/mode=posix-0600 且实际 0600',
+      r.ok === true && r.mode === 'posix-0600' && (fs.statSync(file).mode & 0o777) === 0o600, JSON.stringify(r));
+    const d = fp.protectDir(t);
+    check('X-6 POSIX protectDir → ok=true/mode=posix-0700',
+      d.ok === true && d.mode === 'posix-0700', JSON.stringify(d));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+}
+
+// ── X-7：netinfo —— 平台支持矩阵 + 未知平台显式空 + pick 纯逻辑 ──
+{
+  const ni = require(path.join(ROOT, 'src', 'platform', 'os', 'netinfo.js'));
+  check('X-7 pick 是纯函数：过滤虚拟接口（docker/veth/br- 等）',
+    Array.isArray(ni.pick) ? false : typeof ni.pick === 'function', typeof ni.pick);
+  for (const [p, want] of [['linux', true], ['darwin', true], ['win32', true], ['freebsd', false]]) {
+    const out = underFake(p, [
+      "const ni = require('./src/platform/os/netinfo.js');",
+      "let r;",
+      "try { r = { supported: ni.supported, n: ni.lanAddresses().length, threw: false }; }",
+      "catch (e) { r = { supported: ni.supported, n: -1, threw: true }; }",
+      "process.stdout.write(JSON.stringify(r));",
+    ].join(String.fromCharCode(10)));
+    let j = null; try { j = JSON.parse(out); } catch { /* EXECFAIL */ }
+    check('X-7 ' + p + ' supported=' + want + ' 且 lanAddresses 不抛异常',
+      !!j && j.supported === want && j.threw === false, j ? JSON.stringify(j) : out.slice(0, 60));
+    if (!want) {
+      check('X-7 未知平台 lanAddresses() 显式返回 []（不猜地址）', !!j && j.n === 0, j ? String(j.n) : '-');
+    }
+  }
+}
+
+// ── X-8：browser —— 平台命令规划（含 Windows start 空标题陷阱）──
+{
+  const br = require(path.join(ROOT, 'src', 'platform', 'os', 'browser.js'));
+  const u = 'http://127.0.0.1:28111/x';
+  const w = br.openCommand('win32', u);
+  check('X-8 win32 openCommand = cmd /c start "" <url>（**空标题位必须存在**）',
+    w.cmd === 'cmd' && JSON.stringify(w.args) === JSON.stringify(['/c', 'start', '', u]), JSON.stringify(w));
+  check('X-8 darwin openCommand = open <url>',
+    JSON.stringify(br.openCommand('darwin', u)) === JSON.stringify({ cmd: 'open', args: [u] }), 'ok');
+  check('X-8 linux openCommand = xdg-open <url>',
+    JSON.stringify(br.openCommand('linux', u)) === JSON.stringify({ cmd: 'xdg-open', args: [u] }), 'ok');
+  check('X-8 未知平台**有意**退化 xdg-open（best-effort，不宣称能力）',
+    br.openCommand('freebsd', u).cmd === 'xdg-open', br.openCommand('freebsd', u).cmd);
+
+  const dp = br.isolatedPlan('darwin', u, { antiArgs: ['--a', '--b'] });
+  check('X-8 darwin 隔离计划 = open -na "Google Chrome" --args <antiArgs>',
+    dp.kind === 'single' && dp.bin === 'open'
+    && JSON.stringify(dp.args) === JSON.stringify(['-na', 'Google Chrome', '--args', '--a', '--b']), JSON.stringify(dp.args));
+  const wp = br.isolatedPlan('win32', u, { profileDir: '/P', antiArgs: ['--a'] });
+  check('X-8 win32 隔离计划只传 incognito + user-data-dir（**刻意不传 antiArgs**）',
+    wp.bin === 'cmd'
+    && JSON.stringify(wp.args) === JSON.stringify(['/c', 'start', '', 'chrome', '--incognito', '--user-data-dir=/P', u]),
+    JSON.stringify(wp.args));
+  const lp = br.isolatedPlan('linux', u, { antiArgs: ['--a'] });
+  check('X-8 linux 候选链：首 Edge、尾 xdg-open、共 7 个（顺序即防风控强度）',
+    lp.kind === 'chain' && lp.candidates.length === 7
+    && lp.candidates[0].bin === 'microsoft-edge' && lp.candidates[6].bin === 'xdg-open',
+    lp.candidates.map((c) => c.bin).join('>'));
+  check('X-8 linux 候选链：xdg-open 兜底 isolated=false；其余前 5 个 isolated=true',
+    lp.candidates[6].isolated === false && lp.candidates.slice(0, 5).every((c) => c.isolated === true),
+    'ok');
+  check('X-8 linux Firefox 用 --private-window（不是 --incognito）',
+    JSON.stringify(lp.candidates[5].args) === JSON.stringify(['--private-window', u]), JSON.stringify(lp.candidates[5].args));
+}
+
 // ── X-5：反向（判据必须能识别宿主泄漏与静默误声明）──
 {
   check('X-5 反向：win32 候选名若缺 npm.cmd 会被判据识别',
