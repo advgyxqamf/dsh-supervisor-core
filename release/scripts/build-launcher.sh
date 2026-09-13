@@ -102,7 +102,7 @@ if [ "$ALL" = 1 ]; then
   for d in "${DIRS[@]}"; do
     h="$(sha256sum "$d/core.cjs" | awk '{print $1}')"
     if [ "$h" != "$BASE_HASH" ]; then
-      echo "  FAIL $(basename "$d") core.cjs 与基准不一致（$h != $BASE_HASH）"; exit 1
+      echo "  FAIL $(basename "$d") core.cjs 与基准不一致（$h != ${BASE_HASH}）"; exit 1
     fi
     printf "  %-42s %s\n" "$(basename "$d")" "${h:0:16}"
   done
