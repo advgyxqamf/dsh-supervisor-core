@@ -508,7 +508,19 @@ class InstanceManager {
     if (this.onRemove) this.onRemove(id, this.instances);
     if (this.onDestroy) { try { this.onDestroy(id); } catch (e) { this.logger.warn && this.logger.warn('onDestroy(' + id + '): ' + (e && e.message)); } }
     if (this.events) this.events.append('inst_removed', { id });
-    return { ok: true };
+    // ⚠ 2026-09-13（P3 修复，失效模式 g）：**安全结果必须对用户可见**。
+    //
+    //   缺陷：L-b 刻意做到「单元仍活跃则不删数据目录」并**记了事件**，但
+    //     · removeInstance 原样返回裸 { ok: true }（不含任何 preserved 字段）；
+    //     · /instances/remove 原样转发；
+    //     · 前端删除成功即静默刷新。
+    //     而删除确认框的文案是「将彻底删除该沙箱实例（含配置与运行时数据）。此操作不可恢复。」
+    //     —— **承诺与真实结果相反**。
+    //   后果：实例仍在运行时点删除，UI 表现为「删除成功、数据已清」，
+    //     实际目录与全部会话数据仍在磁盘；用户与支持都无法从面板得知，
+    //     也无从清理（实例已从列表移除，UI 不再可管）。
+    //   修法：把该结果放进**返回值**（不动既有字段），由 API 原样转发、前端如实提示。
+    return stillActive ? { ok: true, dataPreserved: true, preserveReason: 'unit-still-active' } : { ok: true };
   }
 
   /** 设置实例的监控开关 / 远程控制开关 / 沙箱。 */

@@ -122,7 +122,7 @@ export const supervisorApi = {
     post<GenericOk>("/instances/add", p),
   instanceUpdate: (id: string, patch: { guardian?: boolean; remoteEnabled?: boolean; remoteToken?: string }) =>
     post<GenericOk>("/instances/update", { id, ...patch }),
-  instanceRemove: (id: string) => post<GenericOk>("/instances/remove", { id }),
+  instanceRemove: (id: string) => post<GenericOk & { dataPreserved?: boolean; preserveReason?: string }>("/instances/remove", { id }),
   instanceStart: (id: string) => post<GenericOk>("/instances/start", { id }),
   instanceStop: (id: string) => post<GenericOk>("/instances/stop", { id }),
   instanceOpenWeb: (id: string) => post<GenericOk & { url?: string }>("/instances/open-web", { id }),

@@ -104,6 +104,25 @@ check('L-e 保留显式测试方法', /_setSandboxSupportedForTest\(v\)/.test(co
     /while \(fs\.existsSync\(aside\)\)/.test(body), '有');
 }
 
+// ── L-h：删除实例的「数据已保留」必须对用户可见（P3，2026-09-13）──
+//   缺陷：L-b 做到「单元仍活跃则不删数据目录」并记了事件，但 removeInstance 返回
+//     裸 {ok:true}、API 原样转发、前端成功即静默刷新 —— 而确认框承诺
+//     「彻底删除…不可恢复」。安全结果对用户不可见 = 谎报「数据已清」。
+{
+  check('L-h removeInstance 在上报保留数据（dataPreserved 字段）',
+    /dataPreserved: true/.test(code), '有');
+  check('L-h 保留数据的同时仍返回 ok:true（实例确已移除）',
+    /stillActive \? \{ ok: true, dataPreserved: true/.test(code), '有');
+  // 前端消费：经 supervisorApi 包装（不再静默）
+  const uiClient = fs.readFileSync(path.join(ROOT, 'ui', 'src', 'services', 'supervisor', 'client.ts'), 'utf8');
+  const uiPage = fs.readFileSync(path.join(ROOT, 'ui', 'src', 'features', 'supervisor', 'InstancesPage.tsx'), 'utf8');
+  check('L-h 前端类型声明含 dataPreserved', /instanceRemove:.*dataPreserved/.test(uiClient), '有');
+  check('L-h 前端据 dataPreserved 提示用户（不再静默）',
+    /dataPreserved === true/.test(uiPage), '有');
+  check('L-h 反向：普通删除路径仍返回裸 ok（不误加字段）',
+    /\} else \{ return \{ ok: true \}; \}|: \{ ok: true \};/.test(code), '有');
+}
+
 // ── L-g：新增实例前探测端口**真实占用**（P3）──
 //   缺陷：原实现只查「是否与本进程实例重名」+「注册表是否已登记」，
 //     从不探测本机是否已有进程在监听 → 建到被占端口后实例启动 bind 失败，
