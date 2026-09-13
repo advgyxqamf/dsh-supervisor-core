@@ -187,7 +187,10 @@ case "${1:-list}" in
         if (e.kind!=='github-pat') continue;
         const fs=require('fs');
         // ⚠ 必须用 ${STORE}（DSH_CRED_DIR 可覆盖），不可硬编码库根 —— 否则换库根就误报
-        const ok = e.file && e.file.startsWith(process.env.STORE + '/');
+        // 两侧都归一为 / 再比：Windows 的 e.file 可能是反斜杠形式，
+        // 而 STORE 已被启动时归一为 /（否则恒不匹配 -> doctor 误报缺项，exit 1）。
+        const norm = (x) => String(x).split(String.fromCharCode(92)).join('/');
+        const ok = e.file && norm(e.file).startsWith(norm(process.env.STORE) + '/');
         console.log((ok?'  OK   ':'  FAIL ')+e.name+' -> '+(e.file||'(未设)'));
         if(!ok) process.exitCode=1;
       }
