@@ -76,15 +76,31 @@
 
 ---
 
-## 4. 当前状态（第十二轮后，2026-09-13）
+## 4. 当前状态（**第十三轮后**，2026-09-13）
 
 ```
-内核 plus：  HEAD 408959f（master），工作树干净，未推送 52
-壳 launcher：HEAD 60be949（main），  工作树干净，未推送 45
+内核 plus：  HEAD 702c6ce（master），工作树干净，未推送 63
+壳 launcher：HEAD 97e8edb（main），  工作树干净，未推送 50
 ```
 
-> 任务起点：内核 800b308 / 壳 3448e75。第十二轮新增 2 个 commit（内核 1 / 壳 1，
-> 其中 D-3 第一步与 A 节四项 + D-2 均已合入）。
+> 任务起点：内核 800b308 / 壳 3448e75。**第十三轮新增 11 个内核 commit + 4 个壳 commit**
+> （约 34 项修复，全部经「注入→失败→还原→通过」验证）。
+> 第十二轮已合入 D-3 第一步 / A 节四项 / D-2。
+>
+> 第十三轮重点（详见各 commit message 与壳 docs/DESIGN-COMPLETE.md）：
+>   · **P0** exec.run「成功也返回 null」→ hasTool/isUnitActive 恒假（沙箱功能对所有 Linux
+>     用户不可用、删数据保护失效）
+>   · **P1** 心跳是唯一周期驱动，任一 adapter 卡死即永久停摆（无超时/无兜底/无观测）
+>   · **P1** sanityCheck 丢弃返回值（损坏包会被翻转到 current）、router.js 多处无 catch
+>     （ctl 拒绝时请求永久挂起）
+>   · **P1** 壳投放的镜像契约只读一次（运行中重写永不生效）、frpc 下载零完整性校验
+>   · **P1** 壳仓 macOS 构建断裂（macos.rs 用 SVC_QUICK 却未导入 → E0425）
+>   · **P1/P2** frp 令牌闸只在一条路径、relay 门卫令牌无热换、删除路径不 force 停实例、
+>     插件补丁层队列被异常永久毒化、删除实例与在飞升级无互斥
+>   · **P2** TaskRegistry 跨进程双写者丢更新、registry.json 的 selected 恒 null、
+>     Node 安装零进度反馈、nodeprobe 孤儿线程堆积、镜像「测试」按钮被页面 CSP 拦截、
+>     `ports.release(port, ownerId)` 对未登记端口抛 TypeError
+>   · **P3** 令牌恢复文件权限不收口、providers.json 损坏即静默清零、平台事实误报等
 
 **版本（未改动，勿动）**：
 
@@ -100,8 +116,8 @@
 ### 测试基线（全部 0 失败）
 
 ```
-内核  npm test      78 文件 / 1460 断言 / 0 失败   （任务起点 1098；第十二轮 +1 文件 / +16 断言）
-壳    cargo test    114 项 / 0 失败                （任务起点 77；第十二轮 100 → 114）
+内核  npm test      89 文件 / 1650 断言 / 0 失败  （任务起点 1098；第十三轮 78→89 文件，1460→1650 断言）
+壳    cargo test    129 项 / 0 失败                （任务起点 77；第十三轮 114 → 129）
 壳    cargo check   0 警告
 前端  npm run verify  tsc 0 / eslint 0 / vitest 15 / build 成功（任务起点：从未运行过）
 ```
@@ -213,28 +229,31 @@
 
 ## 8. 剩余任务（可直接执行）
 
-### A. 壳仓（有明确证据，未修）
+> **第十三轮已把 A 节全部项与 B 节全部区域处理完毕**（见下表「结论」列）。
+> A 节两项经独立复核判定为**已文档化/非缺陷**（见 9.7）；其余均已修并有门禁。
 
-| 级别 | 位置 | 问题 |
-|---|---|---|
-| P2 | `mirror.rs` | 声称「缓存（TTL）」但 `checked_at` 无任何过期判定；`selected_node` 只写不读 |
-| P2 | `update.rs` | `reset_guard()` / `mark_pending()` 只写 `update-guard.json`，**不回写 `identity.json`** → 第二状态源陈旧（`commands/mod.rs` 与内核都读它）|
-| P2 | `linux.rs` | `has_privilege_channel` 探测 `pkexec` **或** `sudo`，但 `install_node` 只用 `pkexec` → 有 sudo 无 pkexec 的机器被误判「可自更新」|
-| P3 | `env.rs` | `api_port()` 回退 `3100`，而 `api_base_url` 默认 `36360`（同一事实两个默认）|
-| P3 | `bounded.rs` | spawn 失败 / 第二个临时文件创建失败时，已建的 temp 日志未清理 |
-| P3 | `domain/windowing.rs` | 一段「桌面壳自更新命令」文档注释后**无任何代码**（无宿主）|
-| P3 | `update.rs` | `pinned` 只增不剪（现在成功后会被解除，但失败项长期累积）|
-| 跨仓 | 内核 `domains/shell/index.js` | 写 `update-journal.json` 的 `pinnedVersions` 并称壳会读，**壳仓零消费** —— 契约声明无接收方 |
+### A. 壳仓 —— 已处理
 
-### B. 内核仓（未审计/未完成）
+| 级别 | 位置 | 问题 | 结论 |
+|---|---|---|---|
+| P2 | `mirror.rs` | 声称「缓存（TTL）」但 `checked_at` 无过期判定；`selected_node` 只写不读 | **证伪**：TTL 判定在**内核**（`dist/index.js` 消费 `contract.selected.checkedAt`，30min TTL），层是对的；`selected_node` 有消费（`mirror_status`）。但发现并修复了**真缺陷**：`selected_npm` 从不落盘 → registry.json 的 `selected` 恒 null |
+| P2 | `update.rs` | `reset_guard()`/`mark_pending()` 不回写 `identity.json` | 已修（D-3 第一步：单一写入 helper，+5 注入验证）|
+| P2 | `linux.rs` | 提权通道探测与 `install_node` 分叉 | 已修（共用 `find_privilege_command`）|
+| P3 | `env.rs` | `api_port()` 回退 3100 vs `api_base_url` 36360 | 已修（单一常量 `DEFAULT_API_PORT`）|
+| P3 | `bounded.rs` | 失败路径遗留 temp 日志 | 已修（两条路径都 cleanup）|
+| P3 | `domain/windowing.rs` | 无宿主的文档注释 | 已修（改为指向性说明）|
+| P3 | `update.rs` | `pinned` 只增不剪 | 已修（`pruned_pinned()` 单一裁剪，文件与投影同源）|
+| 跨仓 | 内核 `domains/shell/index.js` | `pinnedVersions` 壳仓零消费 | 已修（如实标注「无接收方」+ **说明为何不能贸然接线**：会重新引入永久拉黑；含跨仓扫描门禁 R10）|
 
-| 位置 | 说明 |
+### B. 内核仓 —— 已处理
+
+| 位置 | 结论 |
 |---|---|
-| `src/guard/lifecycle/managed.js` 深部 | 本轮只修了 `restart()`；`snapshot()` 与各迁移路径未逐条核 |
-| `heartbeat` / `adapter` 调度节流 | 未审 |
-| managed-objects 与实例相位一致性 | 未审 |
-| `registry.json` 在内核其余消费点 | 只核了 `platform/registry-contract.js` 与 `domains/dist`，**`domains/router/daemon.js` 等未核** |
-| 前端其余 JS | 只核了 `updateJob`/`installLog` 的消费（**正常**）|
+| `src/guard/lifecycle/managed.js` 深部 | 已审；`objects.js` 修复：心跳逐对象超时、`_nextTickAt` 复位、节流按实际执行时刻前推、`ports.release` 空值顺序 |
+| `heartbeat` / `adapter` 调度节流 | 已修 **P1**：心跳是唯一周期驱动，任一 adapter 卡死即永久停摆（加逐对象超时 + 兜底释放 + 可观测字段）|
+| managed-objects 与实例相位一致性 | 已核：实例相位词表（STOPPED/INSTALLING/STARTING/RUNNING/BACKOFF/FAILED）与 registry 映射**完整对应**，无缺口 |
+| `registry.json` 在内核其余消费点 | 已核并修 **P1**：契约只在构造期读一次 → 加 60s TTL 重载（主进程与 router-daemon 共用同一实现）|
+| 前端其余 JS | 已核并修 3 项：node-lts 死字段/死分支、镜像「测试」按钮被 CSP 拦截（改同源后端探活）、`core_plan.error` 零消费导致谎报「内核已是最新」|
 
 ### C. 已核实**无问题**（不要重复怀疑，除非有新证据）
 
@@ -389,6 +408,32 @@ reset_guard() / mark_pending() → **只写 update-guard.json，不回写 identi
   · `| tail` 会吞退出码 → 用 `set -o pipefail`；
   · bin crate 上 `--lib` 会报 `no library targets found` → 用 `--bins`；
   · `const { x } = require(...)` 是**值绑定**，patch 模块导出对已解构的引用无效（曾导致测试真跑了 `npm uninstall -g`，已核实无损害）。
+
+---
+
+### 9.7 第十三轮新增的教训（**注释自匹配累计 13 次**）
+
+本轮又 4 次被自己的**说明文字**骗过（判据命中了注释里的旧代码/字段名/调用形态）：
+  1. R10-a 的 surface 断言命中了我自己写的「本条 note 原写…」注释；
+  2. A-2/A-3 用 `include_str!` 读自身源码，针脚字符串就在测试源码里；
+  3. R-c 只剥 `//` 行，而**块注释续行**（`*` 开头）里写着
+     「PortRegistry.release() 现已支持 ownerId」→ 被当成一次无参调用（假红）；
+  4. UI node-lts 门禁命中了类型注释里列举的旧字段名。
+  **铁律：断言前必须同时剥离 `//`、`*`、`/*` 三类行；针脚尽量在运行时拼接。**
+
+另有 3 次**门禁太松/空转**：
+  · frpc 信任根用无锚点子串匹配 → 「镜像前缀 + 官方 URL」仍命中（假绿）；
+  · `defined_locally` 把「使用」误判为「本地定义」→ 反向断言失效；
+  · M-a 用全文件 find 命中了 `load()` 里的读取赋值（位置在 warmup 之前）。
+  **铁律：结构性判据要么按行定界，要么限定在目标函数体内；每条门禁都要有反向断言。**
+
+### 9.8 我自己的改动造成过回归（门禁及时拦下）
+  · 心跳兜底改写时把 `const iv` 落在 setInterval 回调内部、却在 `}, iv)` 处引用 →
+    ReferenceError → 定时器根本没建起来 → **smoke S1 全红**（基线 34/34 通过、改后立刻失败）。
+  · `main.rs` 端口释放的 owner 我写成 `'dsh-main'`，而 `ports.register` 写的是
+    `'system:dsh-main'` → 释放变 no-op → 旧端口残留，被既有
+    `test/main-port-rederive-test.js` **当场捕获**。
+  **教训：改「唯一周期驱动」与「按 owner 释放」这类关键路径时，先跑既有的行为级门禁。**
 
 ---
 
