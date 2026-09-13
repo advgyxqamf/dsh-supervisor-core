@@ -47,12 +47,29 @@ echo "=== [1/5] 前端门禁（typecheck + lint + vitest）+ 构建 UI 产物 ==
 #
 # 顺序理由：`npm run verify` 内部已含 build（typecheck → lint → test → build），
 #   故它成功即等价于原 build-ui 的效果；但 build-ui 还负责 `ui-react/` 镜像镜像化，
-#   故 verify 之后仍调用 build-ui（其内部在已装依赖时跳过 npm ci，开销很小）。
+#   故 verify 之后仍调用 build-ui。
+#
+# ⚠ 2026-09-13 修复（P1）：**必须先装依赖再跑门禁**。
+#   缺陷：原顺序是「先 verify、后 build-ui」，而 `npm ci` 在 build-ui 里 ——
+#     CI 是**全新检出**（无 ui/node_modules）→ tsc 对每个依赖报 TS2307
+#     （react / sonner / lucide-react / vitest …）→「前端门禁未通过」。
+#     本地一直绿，只是因为本机有现成的 node_modules。
+#     且注释所称「build-ui 内部在已装依赖时跳过 npm ci」**不成立** ——
+#     它只有设了 DSH_UI_SKIP_INSTALL=1 才跳过，故这里显式设置以避免重复安装。
+#   为什么长期不可见：本段是 2026-09-12（443eb70）才加进 ci-core 的，
+#     而上次 tag 构建是 09-11（v0.1.5-BETA.1）→ **本段从未在 CI 运行过**；
+#     首次运行（v0.1.5-BETA.2 的 tag run）即四平台同时红，日志里的 TS2307 成片。
+#   顺序保持原意（门禁不过就不该产出镜像）：装依赖 → 门禁 → 镜像。
 if [ -f ui/package.json ]; then
+  echo "[ui] 安装前端依赖（npm ci，可复现构建）..."
+  (cd ui && npm ci) || { echo "[ui] ERROR: 前端依赖安装失败（npm ci）"; exit 1; }
   echo "[ui] 前端门禁（verify = typecheck + lint + test + build）..."
   (cd ui && npm run verify) || { echo "[ui] ERROR: 前端门禁未通过（typecheck/lint/test/build）"; exit 1; }
+  # 依赖已装好 → 跳过 build-ui 自己的 npm ci，避免重复安装。
+  DSH_UI_SKIP_INSTALL=1 bash release/scripts/build-ui.sh
+else
+  bash release/scripts/build-ui.sh
 fi
-bash release/scripts/build-ui.sh
 
 echo "=== [2/5] 内核回归测试（npm test） ==="
 npm test
