@@ -173,12 +173,27 @@ function health(payload) {
   const p = payload || {};
   const dir = shellDir();
   fs.mkdirSync(dir, { recursive: true });
-  // 更新 identity.json 的 phase（壳自己也会写；这里兜底，确保内核观察到一致状态）
+  // 更新 identity.json 的 phase / version / lastSeenAt（壳自己也会写；这里兜底，
+  // 确保内核能观察到一致状态——本域 evaluate() 正依赖它们）。
+  //
+  // ⚠ P3/P2 修复（2026-09-13，失效模式 b+g，跨仓）：
+  //   **不再写 attempt**。壳仓在 D-3（update.rs::write_identity_for）已把 identity.json 的
+  //   护栏字段（attempt / pinned / pendingVersion）收敛为「壳本地 Guard 的**投影**，
+  //   调用方无法自行传入」，并声明该文件只有一个写入方。
+  //   而此处原会 `if (typeof p.attempt === 'number') id.attempt = p.attempt;` ——
+  //   即**内核可写入任意 attempt 数字**（不经壳的 Guard），构成第二个写入方，
+  //   且是读-改-写（无跨进程锁）→ 与壳的 write_identity_for 并发即 last-writer-wins。
+  //   为什么后果严重：evaluate() 用 id.attempt 作为「失败次数」的权威输入来做
+  //     should-rollback 判定（本文件 :120-128）——把 attempt 置 0 即让回滚判定失效；
+  //     写入 phase=ready 还可伪造「更新已确认」。
+  //   当前无触发路径（壳仓 grep /shell/health 零命中，已由 D-3 交接文档与跨仓门禁 R10 记录），
+  //   属**预置的第二写入方**；按 D-3 的单一写入点纪律必须移除。
+  //   保留 phase/version/lastSeenAt：它们是**运行时**字段（非 Guard 投影），
+  //   本域的运维排障端点正需要它们才能工作。
   const idp = path.join(dir, 'identity.json');
   const id = readJson(idp) || {};
   if (p.phase) id.phase = String(p.phase);
   if (p.version) id.version = String(p.version);
-  if (typeof p.attempt === 'number') id.attempt = p.attempt;
   id.lastSeenAt = new Date().toISOString();
   writeJson(idp, id);
 

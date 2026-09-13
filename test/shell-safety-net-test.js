@@ -218,6 +218,28 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     check('R10-b 反向：扫描确实读到壳仓源码（非空转）',
       shellCode.length > 5000 && /fn should_check|pub fn should_check/.test(shellCode),
       'len=' + shellCode.length);
+
+    // ── R10-c：identity.json 的**护栏字段**只由壳写（内核不得成为第二写入方）──
+    //   背景：壳仓 D-3（update.rs::write_identity_for）已把 identity.json 的
+    //   attempt/pinned/pendingVersion 收敛为「壳本地 Guard 的投影」，并声明单一写入点。
+    //   而内核 domains/shell/index.js::health() 原会写 attempt（不经 Guard）→
+    //   第二个写入方，且 evaluate() 用 id.attempt 做回滚判定 → 可被伪造成 0。
+    {
+      const shellDomain = fs.readFileSync(path.join(ROOTD, 'src', 'domains', 'shell', 'index.js'), 'utf8');
+      const codeOnly = shellDomain.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+      //   ⚠ 判据必须排除比较运算：`id.attempt === 'number'`（读取）也会被
+      //     `id\.attempt\s*=` 匹配到（=== 的首个 =）→ 假红。用 (?!==) 排除。
+      const writeAttempt = /id\.attempt\s*=(?!=)/;
+      check('R10-c 内核 health() 不再写 identity.json 的 attempt（D-3 单一写入点纪律）',
+        !writeAttempt.test(codeOnly), '已移除');
+      check('R10-c 内核仍保留 phase/version/lastSeenAt（运维端点可用）',
+        /id\.phase\s*=/.test(codeOnly) && /id\.lastSeenAt\s*=/.test(codeOnly), '有');
+      // 反向：确认 audit 的判据有效（对旧形态命中）
+      check('R10-c 反向：判据能识别「写 attempt」的形态',
+        writeAttempt.test("if (typeof p.attempt === 'number') id.attempt = p.attempt;"), 'hit');
+      check('R10-c 反向：判据不误报「读 attempt」（=== 比较）',
+        !writeAttempt.test("const attempt = (id && typeof id.attempt === 'number') ? id.attempt : 0;"), 'no-false-positive');
+    }
   }
 
   const failed = results.filter((r) => !r);
