@@ -158,7 +158,11 @@ console.log('== A5 自愈机制真实性 ==');
 {
   const asSrc = readOs('autostart.js');
   // 守卫 plist 的定义**归桌面壳**（所有权矩阵）—— 内核不再持有该模板，故跨仓读壳的 service.rs。
-  const shellSvc = shellRepoHelper.pathIn('src-tauri', 'src', 'service.rs');
+  // 2026-09-13 修正：平台重构（壳仓 67f4684「批 A」）后
+  //   src-tauri/src/service.rs 已移至 src-tauri/src/platform/service.rs，
+  //   而守卫 plist 的**内容模板**（KeepAlive/RunAtLoad）在 src-tauri/src/platform/macos.rs。
+  //   旧路径已失效 → 本断言此前**一直走 SKIP 分支**（本地与 CI 皆未真正执行）。
+  const shellSvc = shellRepoHelper.pathIn('src-tauri', 'src', 'platform', 'macos.rs');
   if (fs.existsSync(shellSvc)) {
     const svc = fs.readFileSync(shellSvc, 'utf8');
     check('A5 守卫 plist 含 KeepAlive（守卫崩溃自愈）', /KeepAlive/.test(svc), 'ok');
