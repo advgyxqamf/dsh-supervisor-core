@@ -203,6 +203,31 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'credgate-'));
   }
 }
 
+// ── 持久化断言（2026-09-13）：库必须在**实例目录之外** ──
+//   为什么单独锁：$HOME 被 DSH 重定向到 .../instances/<id>/data，
+//   若有人把库「改良」成 ~/.dsh/credentials，它就会落在**实例目录内** ——
+//   换会话即失效（正是历史事故的形态：凭据存在实例附件目录 → 下游会话找不到）。
+{
+  const homedir = os.homedir();
+  check('持久化-1 凭据库不在被重定向的 $HOME 之下（否则换会话即失效）',
+    !REAL_STORE.startsWith(homedir + path.sep) && REAL_STORE !== homedir,
+    'STORE=' + REAL_STORE + '  HOME=' + homedir);
+  check('持久化-2 凭据库路径不含 /instances/（实例目录是 ephemeral 的）',
+    REAL_STORE.indexOf('/instances/') < 0, REAL_STORE);
+  check('持久化-3 凭据库是绝对路径（禁止 ~ 依赖）',
+    REAL_STORE.startsWith('/') && REAL_STORE.indexOf('~') < 0, REAL_STORE);
+  if (fs.existsSync(REAL_STORE)) {
+    const pats = fs.readdirSync(REAL_STORE).filter((x) => x.endsWith('.pat'));
+    check('持久化-4 真机令牌文件非空且长度合理（未被清空/占位）',
+      pats.length > 0 && pats.every((x) => {
+        const sz = fs.statSync(path.join(REAL_STORE, x)).size;
+        return sz >= 40;
+      }), pats.map((x) => x + '=' + fs.statSync(path.join(REAL_STORE, x)).size + 'B').join(', '));
+  } else {
+    console.log('SKIP 持久化-4：本机无规范凭据库（CI/新机属正常）');
+  }
+}
+
 // ── 反向 ──
 {
   check('反向：令牌值判据能识别真实形态', TOKEN_RE.test('github_pat_' + 'A'.repeat(30)), 'hit');

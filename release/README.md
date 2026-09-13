@@ -1,5 +1,9 @@
 # release/ —— 发布工程（单一入口）
 
+> **流程以 `RELEASE-STANDARD.md` 为准。**
+> 本文件只讲发布工程的目录结构与脚本索引，**不再重复流程细节**（此前同一事实散落 5–8 处 → 已多次漂移）。
+
+
 > 本目录是 **dsh-supervisor 内核发布自动化**的唯一事实源：构建、版本、发布、CI、验收流程全部收拢于此。
 > 双仓：内核仓 **`advgyxqamf/dsh-supervisor-core`**（**公开**，本仓）只管内核 npm 子包；
 > 壳仓 `wasi7mglns/dsh-supervisor-launcher`（**公开** MIT）管桌面安装程序（见壳仓自身 workflow）。

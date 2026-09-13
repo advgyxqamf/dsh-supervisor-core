@@ -107,6 +107,31 @@ case "${1:-list}" in
     echo "已写入 $f（0600），status->active"
     ;;
 
+  backup)
+    # 持久化保障：把规范库整份复制到**操作者指定的**持久位置。
+    # ⚠ 默认**必须显式给目录**：不给默认值，避免又写进实例子目录（那正是本仓踩过的坑）。
+    # ⚠ 在 case 分支里 $1 是**子命令名**（"backup"），目标目录是 $2。
+    DEST="${2:-}"
+    [ -n "$DEST" ] || DEST="${DSH_CRED_BACKUP_DIR:-}"
+    [ -n "$DEST" ] || { echo "用法: cred.sh backup <目标目录>（或设 DSH_CRED_BACKUP_DIR）" >&2
+      echo "  拒绝用默认值：历史事故就是把凭据放进了**实例目录**（ephemeral，换会话即失效）。" >&2; exit 2; }
+    case "$DEST" in
+      */.dsh/supervisor/instances/*|*/instances/inst-*) 
+        echo "拒绝：目标在**实例目录**内（$DEST）—— 那是 ephemeral 的，备份无意义。" >&2; exit 2;;
+    esac
+    STAMP=$(date +%Y%m%d%H%M%S)
+    OUT="$DEST/dsh-credentials-$STAMP"
+    umask 077
+    mkdir -p "$OUT" && chmod 700 "$OUT"
+    cp "$INDEX" "$OUT/" && chmod 600 "$OUT/index.json"
+    n=0
+    for p in "$STORE"/*.pat; do
+      [ -e "$p" ] || continue
+      cp "$p" "$OUT/" && chmod 600 "$OUT/$(basename "$p")" && n=$((n + 1))
+    done
+    echo "已备份到 $OUT（目录 0700，$((n + 1)) 个文件均 0600）"
+    echo "  ⚠ 该副本含**明文令牌**：请置于加密卷/密码管理器，勿入版本库与聊天工具。"
+    ;;
   verify)
     want="${2:-}"
     node -e "

@@ -28,7 +28,7 @@ jobs:
   #
   # ⚠ 为什么必须单独加这个 job：
   #   此前 `npm test` **没有 Linux 执行点** —— 构建矩阵只有 win/mac（Linux 由本地生产），
-  #   而 `ci-core.sh`（内含 npm test）只在 tag + need_build 时、在 win/mac runner 上跑。
+  #   而 `ci-core.sh`（内含 npm test）在 need_build=true 时、在**四平台** runner 上跑（ubuntu/windows/macos×2）。
   #   于是「平台能力矩阵由可执行断言支撑」这条不变量在产线上不成立：
   #   改坏 platform/os/ 或版本映射，CI 依然全绿。
   #
