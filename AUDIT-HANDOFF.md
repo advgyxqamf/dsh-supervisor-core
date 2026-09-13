@@ -117,8 +117,10 @@
 
 ```
 内核  npm test      90 文件 / 1659 断言 / 0 失败  （任务起点 1098；第十三轮 78→90 文件，1460→1659 断言）
-壳    cargo test    129 项 / 0 失败                （任务起点 77；第十三轮 114 → 129）
+壳    cargo test    135 项 / 0 失败                （任务起点 77；第十三轮 114 → 135）
 壳    cargo check   0 警告
+壳    CI           github.com/wasi7mglns/dsh-supervisor-launcher run 34737470174 = success
+                   （push main → platform-check: macos + windows 双绿；build/publish 正确跳过）
 前端  npm run verify  tsc 0 / eslint 0 / vitest 15 / build 成功（任务起点：从未运行过）
 ```
 
@@ -426,6 +428,36 @@ reset_guard() / mark_pending() → **只写 update-guard.json，不回写 identi
   · `defined_locally` 把「使用」误判为「本地定义」→ 反向断言失效；
   · M-a 用全文件 find 命中了 `load()` 里的读取赋值（位置在 warmup 之前）。
   **铁律：结构性判据要么按行定界，要么限定在目标函数体内；每条门禁都要有反向断言。**
+
+### 9.9 「门禁存在」不等于「门禁在跑」——两层漏网（2026-09-13 新增）
+
+**第一层：CI 根本没执行这些门禁。**
+壳仓 CI 的「门禁测试」步骤**硬编码** `--test` 名单，于是新增的 `tests/*.rs` 被静默排除。
+实测漏了 4 个 —— 其中 `platform_shared_items_test` 正是我为「macOS E0425」建的那道门禁：
+**建了，却不在 CI 跑。** 而该步骤自己的注释就写着「60+ 个门禁此前从未在 CI 执行」。
+> 铁律：**门禁的清单必须自动派生**（枚举目录），任何硬编码名单都会随新增文件腐化。
+> 补一道「门禁的门禁」（`ci_gate_coverage_test.rs`）锁住「不得硬编码」。
+
+**第二层：cfg 屏蔽文件是编译盲区，本地全绿毫无意义。**
+`macos.rs` / `windows.rs` 被 `#[cfg(target_os)]` 整体排除 —— Linux 上**连解析都不做**。
+`macos.rs` 里**两个独立缺陷**因此在本地完全隐形：
+  · `SVC_QUICK` 使用了却未导入 → E0425（**名字解析**）；
+  · AppleScript 字符串里嵌套未转义双引号 → **纯语法错误**。
+两者都让 **macOS 根本无法出包**，而 Linux 上 130+ 项测试全绿。
+> 三层防线（按成本从低到高）：
+>   ① **Linux 侧语法门禁**：用 `rustfmt` 当独立文件解析器（不受 cfg 影响）解析每个平台文件 ——
+>      拦住「语法错误」整类，**在任何 CI runner 之前**；
+>   ② **Linux 侧导入门禁**：静态扫描「用了父模块的项却没导入」——拦住 E0425 那类；
+>   ③ **真机编译**：CI 的 mac/win runner 跑 `cargo check --all-targets` —— 唯一的最终判据。
+>   ① ② 都便宜但不能替代 ③：`cargo check` 在真机上才会做完整的名字解析与类型检查。
+
+**诊断技巧（无法看 CI 日志时）**：把 `platform/mod.rs` 的 cfg 临时改成让 macos 成为
+本平台实现，就能在 Linux 上得到与 macOS **同一批**编译错误。⚠ 该手法只对
+**不使用平台专有 API** 的文件有效：`macos.rs` 仅用 std + 本仓模块（有效）；
+`windows.rs` 用了 `std::os::windows::…`（无效，只会得到 `raw_arg` 找不到的假错误）。
+
+**教训**：修完一处「cfg 盲区」缺陷后，**不要假设同文件没有第二处** ——
+本轮就是先修了 E0425，CI 一跑又暴露出语法错误。
 
 ### 9.8 我自己的改动造成过回归（门禁及时拦下）
   · 心跳兜底改写时把 `const iv` 落在 setInterval 回调内部、却在 `}, iv)` 处引用 →
