@@ -18,7 +18,9 @@
 #
 set -u
 
-STORE=/home/bowen/.dsh/credentials
+# 凭据库根：默认**绝对路径**（$HOME 被 DSH 重定向，不可用 ~）；
+# 可用 DSH_CRED_DIR 覆盖（测试 / 换机 / 多套环境）。
+STORE=${DSH_CRED_DIR:-/home/bowen/.dsh/credentials}
 INDEX="$STORE/index.json"
 
 [ -f "$INDEX" ] || { echo "凭据清单缺失: $INDEX" >&2; exit 1; }
@@ -111,7 +113,8 @@ case "${1:-list}" in
       for (const e of j.entries) {
         if (e.kind!=='github-pat') continue;
         const fs=require('fs');
-        const ok = e.file && e.file.startsWith('/home/bowen/.dsh/credentials/');
+        // ⚠ 必须用 $STORE（DSH_CRED_DIR 可覆盖），不可硬编码库根 —— 否则换库根就误报
+        const ok = e.file && e.file.startsWith('$STORE/');
         console.log((ok?'  OK   ':'  FAIL ')+e.name+' -> '+(e.file||'(未设)'));
         if(!ok) process.exitCode=1;
       }
@@ -124,6 +127,16 @@ case "${1:-list}" in
       if(!bad) console.log('  OK   无缺项');
       if(bad) process.exitCode=1;
     " || rc=1
+    # ⚠ 第 4 项是**真机检查**：别名/散落副本都锚定在真实库根。
+    #   当 DSH_CRED_DIR 覆盖了库根（测试夹具）时，这些真机事实与本库无关，必须跳过 ——
+    #   否则夹具模式会因"别名指向另一个库根"而误报（已踩过）。
+    if [ "$STORE" != '/home/bowen/.dsh/credentials' ]; then
+      echo '== 4) 失效散落副本（真机检查）=='
+      echo '  SKIP  DSH_CRED_DIR 已覆盖库根 —— 该项只对真机库有意义'
+      echo '== 5) 清单内不得含令牌值 =='
+      if grep -qE 'github_pat_|ghp_' "$INDEX" 2>/dev/null; then echo '  FAIL 清单里出现了令牌值！'; rc=1; else echo '  OK   清单只有引用，无值'; fi
+      exit $rc
+    fi
     echo '== 4) 失效散落副本（已知的 ephemeral 位置）=='
     hits=0
     # 兼容别名为**符号链接**指向库内 -> 合规（单一副本）；普通文件 -> 散落副本
