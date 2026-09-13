@@ -112,17 +112,22 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 | 3 | 在 `src/platform/os/*` 补该平台 Provider 分支（`capabilityProfile` 显式档位）| `cross-platform-architecture-gate-test` CP-3 |
 | 4 | 在 `.github/workflows/build.yml` 的 build 矩阵加入 runner | `release-auth-test` R6-a2 |
 
-### 守住边界的三道门禁（**均已注入验证**）
+### 守住边界的四道门禁（**均已注入验证**）
 
 | 门禁 | 守什么 |
 |---|---|
 | `test/platform-matrix-single-source-test.js`（17 断言）| 矩阵与发布清单**逐项一致**；`src/` 中**除 matrix.js 外无第二份 os/arch 映射表**；标签取值正确（含 FRP 的第三方命名 `windows_amd64` ≠ npm 的 `win-x64`）|
 | `test/cross-platform-architecture-gate-test.js`（11 断言）| **平台事实只在 `src/platform/**`**；业务域无映射表；三平台档位齐备且与矩阵同集合；`engines.node` 单一声明 |
+| `test/four-platform-behavior-matrix-test.js`（43 断言）| **四平台逻辑一次穷举**（在 Linux 上）：标签映射 / 能力档位 / 模板替换 / 运行时与矩阵同源；**能力字段集合四平台必须一致**（防「新增能力只加一个平台」）|
 | `test/test-chain-completeness-test.js`（10 断言）| `test/*-test.js` **要么在链中、要么在显式排除表里写理由** —— 消灭「新增门禁静默不进 CI」|
 
-> 三道门禁都有**反向断言**（判据必须能识别违规形态），并已用真实注入验证：
+> **诚实边界**：这四道门禁证明的是**逻辑**（映射 / 档位 / 模板 / 同源），**不能**证明**平台原生行为**
+> （真能跑 systemd/launchctl/schtasks、真能 spawn Windows 可执行、真能出 MSI）——后者仍必须由**真实四平台 CI 构建**裁决。两者互补，不可互相替代。
+>
+> 四道门禁都有**反向断言**（判据必须能识别违规形态），并已用真实注入验证：
 > 业务域写回 `process.platform` → CP-1 失败；写回 os 映射表 → M-c / CP-2 失败；
-> 新增一个不在链中的测试 → N-a 失败；矩阵与发布清单不一致 → M-a 失败。
+> 新增一个不在链中的测试 → N-a 失败；矩阵与发布清单不一致 → M-a 失败；
+> 删掉某平台的 shellSelfHeal 声明 → P-4/P-5 失败；标签写错 → P-1/P-6/P-7 全链路失败。
 
 ### 为什么这能「防止业务开发破坏跨平台构建」
 
