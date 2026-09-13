@@ -195,8 +195,21 @@ jobs:
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       DSH_ARCH_OVERRIDE: ${{ matrix.arch_override }}
+      # ⚠ 2026-09-13：**跨仓门禁**需要真实读取壳仓源码 ——
+      #   ci-core.sh 的 npm test 含 R10 / A5 / P2 / W5 / V2 五条**跨仓**断言，
+      #   它们经 test/_shell-repo.js 解析壳仓路径：优先本变量，未设则回退「两仓同级」。
+      #   构建矩阵原先只检出内核仓 → R10 的**反向断言**（扫描非空转）失败：len=0，
+      #   其余跨仓断言则静默 SKIP。故此处与 test job 保持同一纪律。
+      DSH_SHELL_REPO: ${{ github.workspace }}/shell-repo
     steps:
       - uses: actions/checkout@v4
+
+      # 壳仓是公开仓，无需凭据。放在工作区内（actions/checkout 不允许 ../）。
+      - name: 检出壳仓（跨仓门禁需要**真实**读取壳仓源码）
+        uses: actions/checkout@v4
+        with:
+          repository: wasi7mglns/dsh-supervisor-launcher
+          path: shell-repo
 
       - name: Install Node
         uses: actions/setup-node@v4
