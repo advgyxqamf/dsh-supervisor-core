@@ -189,11 +189,16 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'platport-'));
     ].join(String.fromCharCode(10)), { home: '/H' });
     cmds[p] = out;
   }
+  // ⚠ 2026-09-14：原断言把**期望路径硬编码**为 path.join('/H', ...)，依赖 underFake 的 home 注入。
+  //   但 Windows 宿主上产品用的是真实 home（fake 的 home 未覆盖 Windows 的 env 变量），
+  //   故在 Windows CI 恒失败 —— 该门禁长期只在 ubuntu 跑（build 矩阵被 need_build 跳过），无人发现。
+  //   断言应当表达**平台差异这一不变量**（win 带 .exe / posix 不带），而非某个绝对前缀。
+  const base = (x) => path.basename(String(x));
   check('X-4 win32 daemonCommand 带 .exe（否则 Windows 上守卫永不起）',
-    cmds.win32 === path.join('/H', '.local', 'bin', 'dsh-supervisor.exe'), cmds.win32);
+    /^dsh-supervisor[.]exe$/i.test(base(cmds.win32)) && path.isAbsolute(cmds.win32), cmds.win32);
   check('X-4 posix daemonCommand 不带扩展名',
-    cmds.linux === path.join('/H', '.local', 'bin', 'dsh-supervisor')
-    && cmds.darwin === path.join('/H', '.local', 'bin', 'dsh-supervisor'),
+    base(cmds.linux) === 'dsh-supervisor' && base(cmds.darwin) === 'dsh-supervisor'
+    && path.isAbsolute(cmds.linux) && path.isAbsolute(cmds.darwin),
     cmds.linux + ' | ' + cmds.darwin);
 
   // status().kind 必须与 capabilityProfile().hostService 表达**同一事实**

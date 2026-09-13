@@ -104,9 +104,14 @@ function cred(args, env) {
   }));
   fs.chmodSync(path.join(fakeReal, 'index.json'), 0o600);
   // 复制并改写「真机库」常量 -> 指向 fakeReal
+  //
+  // ⚠ 注入前必须 **POSIX 化**：Windows 路径含反斜杠，写进 shell 脚本后在双引号串里
+  //   被当作转义（\U \A 被吃）→ 路径变成 C:UsersRUNNER~1...，清单找不到、put 返回 1 而非 2。
+  //   该缺陷只在 Windows CI 暴露。Git Bash / MSYS 接受正斜杠，故统一转 /。
   const sim = path.join(T, 'cred-sim.sh');
+  const fakeRealSh = fakeReal.split(path.sep).join('/');
   fs.writeFileSync(sim, fs.readFileSync(CRED_SH, 'utf8')
-    .split(REAL_STORE).join(fakeReal));
+    .split(REAL_STORE).join(fakeRealSh));
   const runSim = (args, env) => {
     try {
       const out = execFileSync('bash', [sim].concat(args), {

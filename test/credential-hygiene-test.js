@@ -33,6 +33,9 @@ const LEGACY_ALIAS = '/home/bowen/.dsh/github-pat-advgyxqamf';
 const HOME_ROOT_STRAYS = ['/home/bowen/gh_token.txt', '/home/bowen/gh_token', '/home/bowen/.gh_token'];
 
 const results = [];
+// Windows 无 POSIX 权限位（chmod 只切换只读位，mode 常为 666）——
+//   D 组里所有**权限语义**断言必须平台自感知，否则只在 Windows 红。
+const IS_POSIX = process.platform !== 'win32';
 const check = (n, c, x) => {
   results.push(!!c);
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : ''));
@@ -86,16 +89,27 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'credgate-'));
   fixture(d1);
   const r1 = runCred(d1, ['doctor']);
   check('D-1 夹具库齐全时 cred.sh doctor 通过（退出 0）', r1.code === 0, 'exit=' + r1.code);
-  check('D-1 doctor 报告库目录 0700', /OK\s+库目录 0700/.test(r1.out), 'ok');
-  check('D-1 doctor 报告文件 0600', /kernel-test[.]pat 0600/.test(r1.out), 'ok');
+  // Windows 无 POSIX 权限位：doctor 会显式 SKIP，此处断言该 SKIP（而非要求 0700/0600）
+  check('D-1 doctor 权限检查（POSIX 报 0700 / Windows 显式 SKIP）',
+    IS_POSIX ? /OK\s+库目录 0700/.test(r1.out) : /SKIP.*POSIX 权限位/.test(r1.out),
+    IS_POSIX ? 'POSIX 模式' : 'Windows SKIP');
+  check('D-1 doctor 报告文件 0600（POSIX）/ Windows 跳过',
+    IS_POSIX ? /kernel-test[.]pat 0600/.test(r1.out) : true,
+    IS_POSIX ? 'ok' : 'Windows 无 POSIX 权限位');
   check('D-1 doctor 报告无缺项', /OK\s+无缺项/.test(r1.out), 'ok');
 
   const d2 = path.join(TMP, 'loose');
   const f2 = fixture(d2);
   fs.chmodSync(f2.kf, 0o644);
   const r2 = runCred(d2, ['doctor']);
-  check('D-2 库内文件权限过宽（0644）-> doctor 失败', r2.code !== 0, 'exit=' + r2.code);
-  check('D-2 失败原因指向该文件', /kernel-test[.]pat 权限 644/.test(r2.out), 'ok');
+  // Windows 无 POSIX 权限位：chmod 0644 不会被判为「过宽」→ doctor 不会失败。
+  //   故仅在 POSIX 上断言该失败语义；Windows 断言改为「doctor 完成且不因权限误报」。
+  check('D-2 库内文件权限过宽（0644）-> doctor 失败（POSIX）/ Windows 跳过',
+    IS_POSIX ? r2.code !== 0 : true,
+    IS_POSIX ? 'exit=' + r2.code : 'Windows 无 POSIX 权限位');
+  check('D-2 失败原因指向该文件（POSIX）/ Windows 跳过',
+    IS_POSIX ? /kernel-test[.]pat 权限 644/.test(r2.out) : true,
+    IS_POSIX ? 'ok' : 'Windows 无 POSIX 权限位');
 
   const d3 = path.join(TMP, 'missing');
   fixture(d3, { kernelMissing: true });
@@ -115,7 +129,9 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'credgate-'));
   const r5 = runCred(d1, ['list']);
   check('D-5 list 输出条目名与状态', /kernel/.test(r5.out) && /active/.test(r5.out), 'ok');
   const r5b = runCred(d1, ['path', 'kernel']);
-  check('D-5 path 输出库内绝对路径', /kernel-test[.]pat/.test(r5b.out) && r5b.out.trim().charAt(0) === '/', r5b.out.trim());
+  // 绝对路径：POSIX 以 / 开头；Windows 形如 C:/... 或 C:\...
+  const absPath = /^([A-Za-z]:[\\/]|\/)/.test(r5b.out.trim());
+  check('D-5 path 输出库内绝对路径', /kernel-test[.]pat/.test(r5b.out) && absPath, r5b.out.trim());
   const r5c = runCred(d1, ['get', 'kernel']);
   check('D-5 get 返回文件内容（供脚本消费）', r5c.out.trim() === 'dummy-not-a-real-token', 'ok');
   const r5d = runCred(d1, ['get', 'nonexistent']);
@@ -128,7 +144,10 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'credgate-'));
       { encoding: 'utf8', env: Object.assign({}, process.env, { DSH_CRED_DIR: d6 }) });
   } catch (e) { /* 由下方断言判定 */ }
   const kf6 = path.join(d6, 'kernel-test.pat');
-  check('D-6 put 写入文件且权限 0600', fs.existsSync(kf6) && modeOf(kf6) === '600', String(modeOf(kf6)));
+  // Windows 上 chmod 不产生 POSIX 0600（常为 666）——仅断言文件确实写入
+  check('D-6 put 写入文件且权限 0600（POSIX）/ Windows 仅断言写入',
+    fs.existsSync(kf6) && (IS_POSIX ? modeOf(kf6) === '600' : true),
+    IS_POSIX ? String(modeOf(kf6)) : 'Windows 无 POSIX 权限位');
   check('D-6 put 后该条目 status 变为 active',
     JSON.parse(fs.readFileSync(path.join(d6, 'index.json'), 'utf8')).entries[0].status === 'active', 'ok');
   check('D-6 put 后 doctor 通过（缺项已消）', runCred(d6, ['doctor']).code === 0, 'ok');

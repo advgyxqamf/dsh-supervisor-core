@@ -21,13 +21,21 @@ set -u
 # 凭据库根：默认**绝对路径**（$HOME 被 DSH 重定向，不可用 ~）；
 # 可用 DSH_CRED_DIR 覆盖（测试 / 换机 / 多套环境）。
 STORE=${DSH_CRED_DIR:-/home/bowen/.dsh/credentials}
+#  2026-09-14 跨平台归一：Windows 传入路径可能含反斜杠，而本脚本多处把
+#   $STORE / $INDEX 放进**双引号 shell 串**（反斜杠=转义，会被吃）；
+#   node 在 Windows 上同样接受正斜杠。故统一归一为 /。
+STORE=$(printf '%s' "$STORE" | tr '\\' '/')
 INDEX="$STORE/index.json"
+# ⚠ 导出供 node 子进程读取：**禁止**把路径插进 JS 源码字符串 ——
+#   Windows 路径含反斜杠，在 JS 单引号串里是**无效转义**（\U \A 等被吃），
+#   会导致 require 失败 / 行为错乱（本仓已在 arch-validation 踩过同类）。
+export INDEX STORE
 
 [ -f "$INDEX" ] || { echo "凭据清单缺失: $INDEX" >&2; exit 1; }
 
 # 用 node 读清单（无 jq 依赖；内核对运行时依赖为 0 的纪律一致）
 idx() { node -e "
-  const j=require('$INDEX');
+  const j=require(process.env.INDEX);
   $1
 "; }
 
@@ -37,7 +45,7 @@ entry_field() { # <name> <field>
   #   · e["$2"] → bash 在双引号串内遇到未转义的 " 会**提前结束字符串**，
   #               到 node 手里退化成 e[file] —— 同样是未定义变量。
   #   单引号在 bash 双引号串内是字面量，故 e['$2'] 是唯一正确形态。
-  node -e "const j=require('$INDEX');const e=j.entries.find(x=>x.name==='$1');
+  node -e "const j=require(process.env.INDEX);const e=j.entries.find(x=>x.name==='$1');
     process.stdout.write(e && e['$2']!=null ? String(e['$2']) : '');"
 }
 
@@ -46,7 +54,7 @@ file_of() { entry_field "$1" file; }
 case "${1:-list}" in
   list)
     node -e "
-      const j=require('$INDEX');
+      const j=require(process.env.INDEX);
       const pad=(s,n)=>String(s).padEnd(n);
       console.log(pad('名称',15)+pad('类型',12)+pad('账号',14)+pad('状态',10)+'文件');
       for (const e of j.entries) console.log(pad(e.name,15)+pad(e.kind,12)+pad(e.account,14)+pad(e.status,10)+(e.file||''));
@@ -60,7 +68,7 @@ case "${1:-list}" in
   get)
     f=$(file_of "$2");
     [ -n "$f" ] || { echo "未知条目: $2" >&2; exit 1; }
-    [ -f "$f" ] || { echo "凭据文件不存在: $f（状态可能为 missing）" >&2; exit 1; }
+    [ -f "$f" ] || { echo "凭据文件不存在: ${f}（状态可能为 missing）" >&2; exit 1; }
     cat "$f"
     ;;
 
@@ -99,12 +107,12 @@ case "${1:-list}" in
     fi
     umask 077; mkdir -p "$(dirname "$f")"; cat > "$f"; chmod 600 "$f";
     node -e "
-      const fs=require('fs'),p='$INDEX';
+      const fs=require('fs'),p=process.env.INDEX;
       const j=JSON.parse(fs.readFileSync(p,'utf8'));
       const e=j.entries.find(x=>x.name==='$2'); if(e){e.status='active';}
       fs.writeFileSync(p, JSON.stringify(j,null,2)+String.fromCharCode(10));
     "
-    echo "已写入 $f（0600），status->active"
+    echo "已写入 ${f}（0600），status->active"
     ;;
 
   backup)
@@ -117,7 +125,7 @@ case "${1:-list}" in
       echo "  拒绝用默认值：历史事故就是把凭据放进了**实例目录**（ephemeral，换会话即失效）。" >&2; exit 2; }
     case "$DEST" in
       */.dsh/supervisor/instances/*|*/instances/inst-*) 
-        echo "拒绝：目标在**实例目录**内（$DEST）—— 那是 ephemeral 的，备份无意义。" >&2; exit 2;;
+        echo "拒绝：目标在**实例目录**内（${DEST}）—— 那是 ephemeral 的，备份无意义。" >&2; exit 2;;
     esac
     STAMP=$(date +%Y%m%d%H%M%S)
     OUT="$DEST/dsh-credentials-$STAMP"
@@ -129,13 +137,13 @@ case "${1:-list}" in
       [ -e "$p" ] || continue
       cp "$p" "$OUT/" && chmod 600 "$OUT/$(basename "$p")" && n=$((n + 1))
     done
-    echo "已备份到 $OUT（目录 0700，$((n + 1)) 个文件均 0600）"
+    echo "已备份到 ${OUT}（目录 0700，$((n + 1)) 个文件均 0600）"
     echo "  ⚠ 该副本含**明文令牌**：请置于加密卷/密码管理器，勿入版本库与聊天工具。"
     ;;
   verify)
     want="${2:-}"
     node -e "
-      const j=require('$INDEX');
+      const j=require(process.env.INDEX);
       for (const e of j.entries) {
         if ('$want' && e.name !== '$want') continue;
         console.log([e.name, e.status, (e.verify&&e.verify.url)||'', String((e.verify&&e.verify.expect)||'')].join('|'));
@@ -144,7 +152,7 @@ case "${1:-list}" in
       [ -n "$url" ] || { printf '  %-13s %s（无 API 打点）\n' "$name" "$status"; continue; }
       # ⚠ 必须在此**重新解析**：循环体在管道右侧的子 shell 中，file_of 可用但
       #   entry_field 依赖的 $INDEX 在子 shell 里仍可用；此处显式再取一次以确保非空。
-      f=$(node -e "const j=require('$INDEX');const e=j.entries.find(x=>x.name==='$name');process.stdout.write(e&&e.file?e.file:'')")
+      f=$(node -e "const j=require(process.env.INDEX);const e=j.entries.find(x=>x.name==='$name');process.stdout.write(e&&e.file?e.file:'')")
       if [ ! -f "$f" ]; then printf '  %-13s **缺凭据文件** %s\n' "$name" "$f"; continue; fi
       code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(cat "$f")" "$url" 2>/dev/null || echo 000)
       if [ "$code" = "$expect" ]; then printf '  %-13s OK  (HTTP %s)\n' "$name" "$code";
@@ -155,28 +163,41 @@ case "${1:-list}" in
   doctor)
     rc=0
     echo '== 1) 目录与文件权限 =='
-    dm=$(stat -c %a "$STORE" 2>/dev/null || echo '?')
-    if [ "$dm" = '700' ]; then echo "  OK   库目录 0700"; else echo "  FAIL 库目录权限 $dm（应为 700）"; rc=1; fi
-    for f in "$STORE"/*.pat "$STORE"/*.json; do
-      [ -e "$f" ] || continue
-      m=$(stat -c %a "$f" 2>/dev/null || echo '?')
-      if [ "$m" = '600' ]; then echo "  OK   $(basename "$f") 0600"; else echo "  FAIL $(basename "$f") 权限 $m（应为 600）"; rc=1; fi
-    done
+    # ⚠ 2026-09-14 跨平台修复：原实现用 `stat -c %a`（**GNU 专有**）——
+    #   macOS 的 BSD stat 不支持 -c，Windows 根本没有 stat → 权限判定在这些平台必然失效。
+    #   该缺陷长期隐藏，因为**四平台构建矩阵此前被 need_build 跳过**（只在 ubuntu 上跑过）。
+    #   现改用 node（脚本已依赖 node 读清单）—— 三平台通用；并用 IS_WIN 判定跳过 POSIX 权限断言。
+    IS_WIN=$(node -e "process.stdout.write(process.platform==='win32'?'1':'0')")
+    perm_of() { node -e "try{process.stdout.write((require('fs').statSync(process.argv[1]).mode & 0o777).toString(8).padStart(3,'0'))}catch(e){process.stdout.write('?')}" "$1"; }
+    if [ "$IS_WIN" = '1' ]; then
+      echo '  SKIP  Windows 无 POSIX 权限位（chmod 仅切换只读位）—— 权限断言不适用'
+    else
+      dm=$(perm_of "$STORE")
+      if [ "$dm" = '700' ]; then echo "  OK   库目录 0700"; else echo "  FAIL 库目录权限 ${dm}（应为 700）"; rc=1; fi
+      for f in "$STORE"/*.pat "$STORE"/*.json; do
+        [ -e "$f" ] || continue
+        m=$(perm_of "$f")
+        if [ "$m" = '600' ]; then echo "  OK   $(basename "$f") 0600"; else echo "  FAIL $(basename "$f") 权限 ${m}（应为 600）"; rc=1; fi
+      done
+    fi
     echo '== 2) 清单内的文件是否都在库内 =='
     node -e "
-      const j=require('$INDEX');
+      const j=require(process.env.INDEX);
       for (const e of j.entries) {
         if (e.kind!=='github-pat') continue;
         const fs=require('fs');
-        // ⚠ 必须用 $STORE（DSH_CRED_DIR 可覆盖），不可硬编码库根 —— 否则换库根就误报
-        const ok = e.file && e.file.startsWith('$STORE/');
+        // ⚠ 必须用 ${STORE}（DSH_CRED_DIR 可覆盖），不可硬编码库根 —— 否则换库根就误报
+        // 两侧都归一为 / 再比：Windows 的 e.file 可能是反斜杠形式，
+        // 而 STORE 已被启动时归一为 /（否则恒不匹配 -> doctor 误报缺项，exit 1）。
+        const norm = (x) => String(x).split(String.fromCharCode(92)).join('/');
+        const ok = e.file && norm(e.file).startsWith(norm(process.env.STORE) + '/');
         console.log((ok?'  OK   ':'  FAIL ')+e.name+' -> '+(e.file||'(未设)'));
         if(!ok) process.exitCode=1;
       }
     " || rc=1
     echo '== 3) 缺项（状态非 active）=='
     node -e "
-      const j=require('$INDEX');
+      const j=require(process.env.INDEX);
       let bad=0;
       for (const e of j.entries) if (e.status!=='active' && e.status!=='external') { console.log('  **缺** '+e.name+' ('+e.kind+', '+e.account+') status='+e.status); bad++; }
       if(!bad) console.log('  OK   无缺项');

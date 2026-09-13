@@ -51,7 +51,7 @@ write_npmrc() {
 check() {
   echo "=== 凭据自检（不含值） ==="
   echo "真实 home: $REAL_HOME"
-  if [ "$HOME" != "$REAL_HOME" ]; then echo "当前 \$HOME: $HOME（沙箱覆盖，不影响发布：解析以真实 home 为准）"; fi
+  if [ "$HOME" != "$REAL_HOME" ]; then echo "当前 \$HOME: ${HOME}（沙箱覆盖，不影响发布：解析以真实 home 为准）"; fi
   # 用与 publish-core 完全相同的解析器判定，避免「自检说没配、发布却成功」的错位
   if dsh_npm_auth_setup; then
     echo "NPM: ✅ 命中认证来源 → $(dsh_npm_auth_describe)"
@@ -60,7 +60,7 @@ check() {
     echo "NPM: ❌ 无任何可用认证（需 configure-credentials.sh --npm 或 npm login）"
   fi
   if [ -f "$NPMRC" ]; then
-    echo "NPM: 规范文件 $NPMRC（权限 $(stat -c %a "$NPMRC" 2>/dev/null || stat -f %Lp "$NPMRC")）"
+    echo "NPM: 规范文件 ${NPMRC}（权限 $(stat -c %a "$NPMRC" 2>/dev/null || stat -f %Lp "$NPMRC")）"
   else
     echo "NPM: 规范文件 $NPMRC 不存在"
   fi

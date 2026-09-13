@@ -13,7 +13,7 @@
 //   T2 三个脚本都接入了 --all-platforms，且 release/ci 逐层传递
 //   T3 npm scripts 已接线（用户入口存在）
 //   T4 构建脚本内含「四平台 core.cjs 逐字节一致」断言（防未来改动破坏同源保证）
-//   T5 workflow 的 precheck：已全部发布时跳过 mac/win 矩阵（省额度）
+//   T5 workflow：**四平台完整构建不得被 need_build 跳过**（2026-09-14 硬标准）
 //   T6 「纯 JS 产物」这一前提本身（0 依赖 / esbuild 无平台参数 / 产物无原生二进制）
 
 const fs = require('node:fs');
@@ -117,10 +117,26 @@ console.log('== T5 workflow precheck ==');
   check('T5-a 存在 precheck job', /^\s{2}precheck:/m.test(code), 'ok');
   check('T5-b precheck 输出 need_build', /need_build:\s*\$\{\{\s*steps\.probe\.outputs\.need_build\s*\}\}/.test(code), 'ok');
   check('T5-c build 依赖 precheck', /needs:\s*precheck/.test(code), 'ok');
-  check('T5-d build 仅在 need_build=true 时运行', /if:\s*needs\.precheck\.outputs\.need_build\s*==\s*.true./.test(code), 'ok');
+  // ⭐ 2026-09-14 反转：build 段内**不得**有 job 级 if:（不得被 need_build 跳过）。
+  //   旧断言「build 仅在 need_build=true 时运行」是**省额度时代**的规则，
+  //   它锁住了「矩阵被跳过」这一隐藏问题的成因；硬标准（构建/发布一律经 CI）下必须反转。
+  {
+    const _l = code.split(String.fromCharCode(10));
+    const _bs = _l.findIndex((l) => l === '  build:');
+    let _be = _bs + 1;
+    while (_be < _l.length && !/^  [a-z][a-z-]*:$/.test(_l[_be])) _be++;
+    const _seg = _l.slice(_bs, _be).join(String.fromCharCode(10));
+    check('T5-d build **不得**被 need_build 门控（四平台完整构建每次都跑）',
+      _bs >= 0 && !/^    if:/m.test(_seg),
+      (_seg.match(/^    if:.*$/m) || ['(无 if)'])[0]);
+    check('T5-d2 反向：判据能识别被门控的 build',
+      /^    if:/m.test('  build:' + String.fromCharCode(10) + '    if: needs.precheck.outputs.need_build'), 'hit');
+    check('T5-g 发布仍受 need_build 一次性闸保护（防同版本重发）',
+      /needs\.precheck\.outputs\.need_build/.test(_seg), 'ok');
+  }
   check('T5-e precheck 判据来自 npmPublish.packages（不硬编码平台）', /npmPublish/.test(code) && /packages/.test(code), 'ok');
   check('T5-f precheck 用 npm view 探测', /npm view/.test(code), 'ok');
-  check('T5-g release 同时依赖 precheck 与 build', /needs:\s*\[precheck,\s*build\]/.test(code), 'ok');
+  check('T5-h release 同时依赖 precheck 与 build', /needs:\s*\[precheck,\s*build\]/.test(code), 'ok');
 }
 
 // ── T6 「纯 JS 产物」前提（全平台本地构建的成立条件）──
