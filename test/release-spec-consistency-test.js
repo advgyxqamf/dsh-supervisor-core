@@ -138,6 +138,33 @@ if (spec) {
     specTxt.indexOf('npmPublish.packages') >= 0, 'ok');
 }
 
+
+// ── P-8：完整构建不得被条件跳过（2026-09-14 硬标准）──
+//
+//   原实现 build 受 `need_build == true` 门控 —— 版本已全平台发布时整块跳过，
+//   于是「已发布版本之后的改动」**从未经过四平台构建验证**（PR 也照样能合）。
+//   硬标准要求：**四平台完整构建在每次 push / PR 都跑**。发布才需要一次性闸。
+{
+  const wf = fs.readFileSync(path.join(ROOT, spec.ciWorkflow), "utf8");
+  // 取 build job 段（到下一个顶层 job 为止）
+  const lines = wf.split(String.fromCharCode(10));
+  const bs = lines.findIndex((l) => l === "  build:");
+  let be = bs + 1;
+  while (be < lines.length && !/^  [a-z][a-z-]*:$/.test(lines[be])) be++;
+  const seg = lines.slice(bs, be).join(String.fromCharCode(10));
+  check("P-8 build job 存在", bs >= 0, "line " + (bs + 1));
+  check("P-8 四平台完整构建**不得**被 need_build 之类条件跳过",
+    !/^    if:/m.test(seg), (seg.match(/^    if:.*$/m) || ["(无 if)"])[0]);
+  check("P-8 矩阵仍为四平台", (seg.match(/- os: /g) || []).length === 4,
+    ((seg.match(/- os: /g) || []).length) + " 个 os");
+  // 发布必须仍受一次性闸保护（否则会重复发布 → npm 409）
+  check("P-8 发布步骤仍受 need_build 一次性闸保护",
+    /needs.precheck.outputs.need_build/.test(seg), "ok");
+  // 反向：判据能识别被门控的 build（构造一段带 if 的 build job）
+  const probe = "  build:" + String.fromCharCode(10) + "    needs: precheck" + String.fromCharCode(10) + "    if: needs.precheck.outputs.need_build == 'true'";
+  check("P-8 反向：判据能识别被条件门控的 build", /^    if:/m.test(probe), "hit");
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

@@ -28,7 +28,8 @@ jobs:
   #
   # ⚠ 为什么必须单独加这个 job：
   #   此前 `npm test` **没有 Linux 执行点** —— 构建矩阵只有 win/mac（Linux 由本地生产），
-  #   而 `ci-core.sh`（内含 npm test）在 need_build=true 时、在**四平台** runner 上跑（ubuntu/windows/macos×2）。
+  #   而 `ci-core.sh`（内含 npm test）在**每次 push / PR** 都于**四平台** runner 上跑（ubuntu/windows/macos×2）——
+#   四平台完整构建是硬标准，不受 need_build 门控（那只看发布是否需要）。
   #   于是「平台能力矩阵由可执行断言支撑」这条不变量在产线上不成立：
   #   改坏 platform/os/ 或版本映射，CI 依然全绿。
   #
@@ -159,8 +160,11 @@ jobs:
 
   build:
     needs: precheck
-    # 已全部发布则无需再构建（本地已用同一份代码产出，幂等）。
-    if: needs.precheck.outputs.need_build == 'true'
+    # 硬标准（2026-09-14）：**四平台完整构建在每次 push / PR 都跑**，不得被条件跳过。
+    #   原条件为 needs.precheck.outputs.need_build == 'true'，理由是「已全发布则无需再构建
+    #   （本地已用同一份代码产出，幂等）」—— 那是**本地构建时代**的理由；硬标准既已禁止本地构建，
+    #   该条件会让「已发布版本之后的改动」**从未经过四平台构建验证**（PR 也照样能合）。
+    #   故移除条件。**发布**仍保留一次性闸：见下方产线步骤里的 need_build 判定（npm 同版本不可重发）。
     # 本 job 只负责构建与发布 npm 子包（不再直接挂 Release，见文件末尾 release job 的说明）。
     permissions:
       contents: read
@@ -238,7 +242,9 @@ jobs:
       - name: 内核发布产线（verify + build:launcher + 子包发布 / dry-run）
         shell: bash
         run: |
-          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ] && [ -n "$NPM_TOKEN" ]; then
+          # 发布（唯一入口）需同时满足：tag + 有 NPM_TOKEN + 该版本尚未全平台发布。
+          # need_build=false 表示四平台已齐备 —— 构建照跑（**验证**），但不再重复发布。
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ] && [ -n "$NPM_TOKEN" ] && [ "${{ needs.precheck.outputs.need_build }}" = "true" ]; then
             bash release/scripts/ci-core.sh --publish
           else
             bash release/scripts/ci-core.sh

@@ -106,11 +106,16 @@
 |---|---|---|
 | `precheck` | 总是 | 探测「该版本是否已在 npm 全平台发布」→ 输出 `need_build` |
 | `test` | 总是 | 前端产物 + Xvfb + 壳仓检出 + `npm test`（全部门禁）|
-| `build` | `need_build == true` | 四平台矩阵各自 `ci-core.sh`（构建 + 上传制品）|
+| `build` | **总是**（**不受** need_build 门控）| 四平台矩阵各自 `ci-core.sh`：**完整构建 + 验证**（上传制品）；**发布**仅当 tag + NPM_TOKEN + need_build 才执行 |
 | `release` | tag `v*` **且** `need_build` | 挂 GitHub Release 附件 |
 
-**`need_build` 门控的已知边界**：一旦某版本四平台齐备，再推同版本 tag 时 `build`/`release` **不会运行**
-（这是**有意的防重发**：npm 同版本不可重发）。故「矩阵是否仍健康」只在**新版本**上被验证。
+**`need_build` 只作用于「发布」，不作用于「构建」**（2026-09-14 修正）：
+
+- `need_build` 是「该版本是否尚未在 npm 全平台发布」的探测，**仅**用于决定是否执行 `--publish`（npm 同版本不可重发）；
+- **四平台完整构建在每次 push / PR 都跑**（硬标准），不再被它跳过；
+- 故「已发布版本之后的改动」也会经过四平台构建验证 —— 这是删掉原门控的原因。
+
+**唯一仍受 `need_build` 影响的是 `release` job**（挂 Release 附件，避免对同一版本重复挂载）。
 
 分支保护（服务器端放行条件）：
 
