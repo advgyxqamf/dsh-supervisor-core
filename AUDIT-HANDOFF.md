@@ -116,7 +116,7 @@
 ### 测试基线（全部 0 失败）
 
 ```
-内核  npm test      89 文件 / 1650 断言 / 0 失败  （任务起点 1098；第十三轮 78→89 文件，1460→1650 断言）
+内核  npm test      90 文件 / 1659 断言 / 0 失败  （任务起点 1098；第十三轮 78→90 文件，1460→1659 断言）
 壳    cargo test    129 项 / 0 失败                （任务起点 77；第十三轮 114 → 129）
 壳    cargo check   0 警告
 前端  npm run verify  tsc 0 / eslint 0 / vitest 15 / build 成功（任务起点：从未运行过）
@@ -249,7 +249,7 @@
 
 | 位置 | 结论 |
 |---|---|
-| `src/guard/lifecycle/managed.js` 深部 | 已审；`objects.js` 修复：心跳逐对象超时、`_nextTickAt` 复位、节流按实际执行时刻前推、`ports.release` 空值顺序 |
+| `src/guard/lifecycle/managed.js` 深部 | 已审；修 `stop()` 失败硬编码回 running（把已知失败显示成运行中）；`objects.js` 修复：心跳逐对象超时、`_nextTickAt` 复位、节流按实际执行时刻前推；`ports.release` 空值顺序 + 三处调用方补 ownerId |
 | `heartbeat` / `adapter` 调度节流 | 已修 **P1**：心跳是唯一周期驱动，任一 adapter 卡死即永久停摆（加逐对象超时 + 兜底释放 + 可观测字段）|
 | managed-objects 与实例相位一致性 | 已核：实例相位词表（STOPPED/INSTALLING/STARTING/RUNNING/BACKOFF/FAILED）与 registry 映射**完整对应**，无缺口 |
 | `registry.json` 在内核其余消费点 | 已核并修 **P1**：契约只在构造期读一次 → 加 60s TTL 重载（主进程与 router-daemon 共用同一实现）|
