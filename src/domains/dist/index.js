@@ -22,6 +22,9 @@ const { npmBin } = require('../../platform/os/exec-path');
 // 用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
 // 故内核**消费壳投放的契约**，而不是自己再持一份硬编码副本。
 const registryContract = require('../../platform/registry-contract');
+
+/** 壳投放契约的重载 TTL（ms）。见 DistributionManager._reloadContractIfStale。 */
+const CONTRACT_TTL_MS = 60 * 1000;
 // 服务管理器抽象（跨平台审计 §7.1）：分发域不直接调用 systemctl。
 const service = require('../../platform/os/service').current();
 
@@ -125,7 +128,10 @@ class DistributionManager {
     // 全局镜像配置：mode auto|manual，origins 候选，manualOrigin 手动固定。从 registryFile 加载。
     this.registryConfig = { mode: 'auto', origins: [...this.defaultRegistries], manualOrigin: this.defaultRegistries[0] || '' };
     this.selectedRegistry = null; // { origin, latencyMs, checkedAt, manual, source }
+    // ⚠ 必须同时记下「刚载入」的时刻，否则首次 _reloadContractIfStale 会把
+    //   undefined 当成「从未载入」而立刻再读一次（构造期白读一遍，且破坏 TTL 语义）。
     this._loadRegistryConfig();
+    this._contractLoadedAt = Date.now();
   }
 
   // ---- 全局镜像配置持久化 ----
@@ -141,6 +147,22 @@ class DistributionManager {
    * 契约不可用（缺失/坏 JSON/schema 更新/空目录）时**不阻断**：
    * 记录 reason 供诊断，选择路径自动回退到 ③/④（不变量 C2）。
    */
+  /** 契约重载 TTL（ms）：壳会在运行中重写 registry.json，内核必须能看到。 */
+  /** 若距上次载入超过 CONTRACT_TTL_MS 则重载壳投放的镜像契约。
+   *
+   *  ⚠ 为什么必须有（2026-09-13 P1）：`registryContract.read` 原先只在本类构造器调用一次，
+   *    而壳在运行中会重写 registry.json（见 selectRegistry 处说明）→
+   *    内核整个生命周期都用启动瞬间的 catalog/probe/selected/mode。
+   *  为什么是 TTL 而非 fs.watch：契约读取在多个函数入口被调用，TTL 实现简单、
+   *    无句柄泄漏、跨平台一致；60s 对「镜像选择」这种低频事实足够新。
+   */
+  _reloadContractIfStale() {
+    const now = Date.now();
+    if (this._contractLoadedAt && (now - this._contractLoadedAt) < CONTRACT_TTL_MS) return;
+    this._loadRegistryConfig();
+    this._contractLoadedAt = now;
+  }
+
   _loadRegistryConfig() {
     // ① 先读契约（即使下面是 manual，也要拿到 probe 规格用于复测）
     this.contract = registryContract.read(this.registryFile);
@@ -274,6 +296,19 @@ class DistributionManager {
 
   /** 选一个可达且最快的 registry。mode=manual 时锁定 manualOrigin。TTL 缓存 30min。返回 origin。 */
   async selectRegistry(force) {
+    // ⚠ P1 修复（2026-09-13，失效模式 b+f+i）：**契约必须能重载**。
+    //
+    //   缺陷：`registryContract.read()` 与 `_loadRegistryConfig()` 全仓只在**构造器**
+    //     各调用一次，无任何 reload/watch。而壳会在**运行中**重写 registry.json
+    //     （真实触发点：mirror.rs::export_on_boot 每次壳启动、commands/mod.rs:514 mirror_set、
+    //       node.rs:146 选中镜像后落盘）。
+    //   后果：内核进程生命周期内永远看不到壳的新 catalog / probe 规格 / selected / mode ——
+    //     · 用**旧探测方法**自己重测 → 正是 registry-contract.js:23-28 声称已修复的
+    //       「两侧选源不一致」；
+    //     · 面板手动设 manual 后，内核仍按 auto 走（若内核先启动）。
+    //   修法：在**读入口**加 TTL 重载（60s）。主进程与 router-daemon 共用同一实现 →
+    //     两侧自动一致；TTL 保证不会每次请求都读盘。
+    this._reloadContractIfStale();
     const rc = this.registryConfig || {};
     if (rc.mode === 'manual' && rc.manualOrigin) {
       const origin = rc.manualOrigin.replace(/\/+$/, '');
@@ -322,6 +357,7 @@ class DistributionManager {
 
   /** 镜像源信息（供 UI/API 展示）。 */
   async registryInfo() {
+    this._reloadContractIfStale();
     const origin = await this.selectRegistry(false);
     const rc = this.registryConfig || {};
     return {
