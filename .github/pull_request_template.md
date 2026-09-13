@@ -1,6 +1,6 @@
 <!--
   提交前请逐项确认。这些不是形式 —— 每一项都对应一个会失败的门禁。
-  流程规范见 docs/DEVELOPMENT-TRACK.md
+  流程规范见 DEVELOPMENT-TRACK.md
 -->
 
 ## 变更类型（勾选，决定你需要补哪些测试）
