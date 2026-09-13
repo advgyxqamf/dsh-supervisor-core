@@ -1,11 +1,114 @@
 # release/ —— 发布工程（单一入口）
 
 > 本目录是 **dsh-supervisor 内核发布自动化**的唯一事实源：构建、版本、发布、CI、验收流程全部收拢于此。
-> 双仓：内核仓 **`advgyxqamf/dsh-supervisor-core`**（私有，本仓）只管内核 npm 子包；
-> 壳仓 `wasi7mglns/dsh-supervisor-launcher`（公开 MIT）管桌面安装程序（见壳仓自身 workflow）。
+> 双仓：内核仓 **`advgyxqamf/dsh-supervisor-core`**（**公开**，本仓）只管内核 npm 子包；
+> 壳仓 `wasi7mglns/dsh-supervisor-launcher`（**公开** MIT）管桌面安装程序（见壳仓自身 workflow）。
 > （2026-09-11：内核仓由 `wasi7mglns` 迁至 `advgyxqamf` —— 原账号私有仓 Actions 额度耗尽；
->   迁移动机与事故处置见 `CHANGELOG.md` 的「仓库迁移至新账号」一节。）
+>   迁移动机与事故处置见 `CHANGELOG.md` 的「仓库迁移至新账号」一节。
+>   **2026-09-13：内核仓转为公开** —— 公开仓 Actions 免额度（含 macOS），原「私有仓倍数计费」
+>   约束随之解除；本文中以额度为动因的段落已改写。转公开前已做安全审计：
+>   工作树与全历史均无密钥模式命中，仓库 14M、最大跟踪文件 212K。）
 > 命令**统一在仓库根执行**；所有脚本以仓库根为基准定位产物（绝对 ROOT 解析），可任意 cwd 调用。
+
+---
+
+## 0. 两仓构建决策（**为什么必须分两个仓**）
+
+这不是历史包袱，是**刻意的架构决策**，后期多项决策都依赖它：
+
+| | 内核仓 `dsh-supervisor-core` | 壳仓 `dsh-supervisor-launcher` |
+|---|---|---|
+| 职责 | 产品逻辑 + 守护：API/路由/relay/实例/插件/端口/更新编排 | **仅**桌面体验：引导页、托盘、安装程序、原生能力（systemd/launchctl/schtasks） |
+| 技术栈 | JS（CommonJS），运行时依赖 **0**、原生扩展 **0** | Rust（Tauri 2）+ TS/React 前端 |
+| 产物 | npm 平台子包 `@dsh-sup/dsh-core-{linux-x64,darwin-arm64,darwin-x64,win-x64}` | 安装程序 `deb/rpm`、`dmg/app`、`msi/nsis` + 壳 npm 包 `@dsh-sup/shell-*` |
+| 分发通道 | **npm registry** | **GitHub Release**（安装包）+ npm（自更新产物） |
+| 节奏 | **高频**（小步快跑，可单独 hotfix） | **低频**（安装程序，用户不常更新） |
+| 构建负担 | 轻（纯 JS，一次构建派生四平台） | 重（Rust 编译 + 各平台系统库） |
+| 门禁侧重 | 行为/契约/跨进程 | 平台分支编译 + 引导流程 + 签名/清单 |
+
+**分离带来的四个具体好处**（也是「不合并」的理由）：
+1. **更新节奏解耦**：内核可单独热修，不必为改一行逻辑重发一遍安装程序。
+2. **用户更新成本**：内核走 npm 子包（小、增量、可静默）；壳走安装程序（大、需重启）。
+3. **构建负担隔离**：壳的 Rust/Tauri 依赖不会拖累内核「零依赖纯 JS」这一特性。
+4. **为后期决策留空间**：两仓可独立决定开源策略、发布节奏、乃至商业形态。
+
+**代价与对策**：两仓**不共享代码**，契约只能靠**文件**传递 —— 见 §0.1。
+
+### 0.1 跨仓契约（唯一的耦合面）
+
+| 文件 | 方向 | 内容 |
+|---|---|---|
+| `registry.json` | 壳 → 内核 | 镜像源偏好与测速结果（内核「优先采用壳投放的 selected」） |
+| `identity.json` | 壳写 | 壳自身身份；其护栏字段（`attempt`/`pinned`/`pendingVersion`）是壳本地 Guard 的**投影** |
+| `update-guard.json` | 壳写 | 自更新护栏（冷却/抑制/pinnedVersions） |
+| `update-journal.json` | 内核写 | 更新日志（`pinnedVersions` **声明无接收方**，壳不消费） |
+
+**约束**：契约字段的**新增**必须向后兼容（读方在字段缺失时降级）；
+契约字段的**移除或语义变更**必须**内核先行**，并允许两侧版本错配运行一个发布周期。
+
+### 0.2 跨仓发布时序（规范）
+
+```text
+1) 内核发布（先）
+     · 新增/变更契约字段 → 内核先发（读方降级兼容）
+     · 验收：npm 四平台子包齐备 + GitHub Release 附件
+2) 壳发布（后）
+     · 依赖内核契约的壳改动，至少在「内核那一版已发布」之后再发
+     · 验收：四平台安装包 + shell-manifest + 验签
+3) 交叉验证
+     · 「壳=最新、内核=上一版」跑一遍引导（验证降级路径）
+     · 「壳=上一版、内核=最新」跑一遍引导（验证向后兼容）
+```
+
+---
+
+## 1. 产线实证与已知边界（2026-09-13）
+
+### 1.1 本地全平台真实构建（已跑通）
+
+`npm run release:core:all`（dry-run）**完整跑通**：
+
+```text
+[1/6] 前端构建 ui/ → ui-react/ 镜像
+[2/6] esbuild 打包 → dist/launcher/core.cjs  965.7kb（仅 --platform=node + 版本注入）
+[3/6] 派生四平台目录 + **一致性断言**：四份 core.cjs 逐字节相同（sha256=fc1e8abdaad23c8e…）
+[4/6] 冒烟：launcher self-check OK / --version = v0.1.5-BETA.1 / fresh-HOME daemon 自举 OK / UI 服务断言 OK
+[5/6] 产物清单（四平台各 966K）
+[6/6] 完成
+[4/5] 四平台子包组装 + npm publish --dry-run → 4/4 全部成功
+```
+
+**该步骤同时是「内核能否正常工作」的端到端自证**（self-check + daemon 自举 + UI 服务）。
+
+### 1.2 CI 侧（公开仓，免额度）
+
+| run | 事件 | 结果 |
+|---|---|---|
+| `v0.1.5-BETA.1`（34581179425）| tag | **四 job 全绿**：precheck + build(macos-14/macos-latest/windows) + **release** |
+| `v0.1.4-BETA.1`（34574857317）| tag | windows `build` **failure**，mac 两平台 success（该故障在 BETA.5 已修） |
+| `workflow_dispatch`（34741509837）| 手动 | precheck success，**build skipped**，release skipped |
+
+**已知边界（重要）**：
+
+> `build` 矩阵的判据是 `precheck.need_build == 'true'`，即「package.json 的版本尚有平台子包未发布」。
+> 因此**当版本四平台齐备后，CI 构建矩阵不再运行** —— 想在 CI 里重跑一次完整构建，
+> 必须存在一个**未发布的新版本**。这是**有意的防重发设计**，不是故障。
+> 验证 CI 构建路径的手段：① 发新版本时自然触发；② 需要时临时用未发布版本号 dispatch（会改版本，须谨慎）。
+
+### 1.3 推送即回归（push master）
+
+`test` job 在每次 push 时运行，且已修正三处「从未真正执行」的问题：
+
+| 修复 | 原因 |
+|---|---|
+| 先 `build-ui.sh` 再 `npm test` | `core-test` 的面板 CSP / nosniff 断言需要**构建产物**，否则 503 → 2 条失败 |
+| `xvfb-run -a npm test` | 看护 E2E 需要**图形会话**；无头 runner 里看护按设计拒绝拉起 GUI 壳 |
+| 检出公开壳仓 + `DSH_SHELL_REPO` | 5 条**跨仓门禁**原先在 CI 中静默 `SKIP`（壳仓不在同级目录）→ 假门禁 |
+
+> 跨仓门禁的定位统一走 `test/_shell-repo.js`：`DSH_SHELL_REPO` 优先；
+> **一旦声明了壳仓却缺失即硬失败**，禁止静默跳过。
+
+---
 
 ## 目录结构
 
@@ -56,7 +159,7 @@ release/
 > 壳文档 → `docs/`。本仓仅保留**内核侧**的壳对接代码（`src/domains/shell/`、`src/api/shell.js`
 > —— 内核需要展示桌面版本并观测壳健康，属内核职责）。
 
-## 内核生产模式：全平台本地构建（推荐，零 GitHub 额度）
+## 内核生产模式：全平台本地构建（可离线 / 可复现；额度动因已解除）
 
 ### 为什么可行
 
@@ -85,11 +188,27 @@ npm run release:core:all:publish   # 真发：4 平台全部直推 npm
 npm run release:core:publish
 ```
 
-### 为什么需要模式 A（真实动因）
+### 模式 A 的定位（2026-09-13 改写：额度动因已解除）
 
-私有仓 Actions 按**倍率**计费：Linux 1x、Windows 2x、**macOS 10x**。
-本仓 mac/win 矩阵约 **110 分钟/次**，免费额度 2000 分钟/月仅够约 **18 次** —— 已实测耗尽
-（run #25 起 job 拿不到 runner、`steps=0`、秒级失败）。模式 A 把额度消耗降为 **0**。
+**历史动因（已消失）**：内核仓原为**私有**，Actions 按倍率计费（Linux 1x、Windows 2x、
+**macOS 10x**），mac/win 矩阵约 110 分钟/次，2000 分钟/月额度实测耗尽
+（run #25 起 job 拿不到 runner、`steps=0`、秒级失败）—— 这曾是模式 A 的**被迫**理由。
+
+**2026-09-13 起**：内核仓转为**公开**，Actions 免额度（含 macOS）。
+因此模式 A 不再是「省额度」的手段，其价值改为：
+
+| 价值 | 说明 |
+|---|---|
+| **可离线/可复现** | 不依赖 GitHub 可用性；一台 Linux 即可产出四平台正确产物（纯 JS，零平台差异） |
+| **发布前本地自证** | 门禁 + 构建 + 冒烟 + 子包 dry-run 全在本地跑完，再决定是否发 |
+| **CI 的对照物** | 与 CI 产物**逐字节比对**，任何「平台相关」代码混入都会当场暴露 |
+
+**模式 B（tag 触发 CI 构建 mac/win）在公开仓下同样免费**，两条路径可自由选择：
+- 想最快、最省事 → 模式 B（push tag，CI 全自动）。
+- 想在发布前本地跑完整套件、或需要离线 → 模式 A。
+
+**当前工作流仍保留 `precheck`**：不是为省额度，而是**防重复发布**
+（npm 同版本不可重发），并让「四平台齐备」成为可验证的收敛条件。
 
 ### 模式的自动收敛（workflow `precheck`）
 
@@ -132,7 +251,11 @@ npm run release:core
 npm run release:core:publish
 ```
 
-### 平台分工（2026-09 定案：GitHub 额度优化）
+> **与壳发布的先后**：若本次内核改动涉及**跨仓契约**（新增/移除/改语义的字段），
+> 必须遵守 §0.2 的时序 —— **内核先发**，壳随后；并做一次两侧版本错配的交叉验证。
+> 不涉及契约时可与壳完全独立。
+
+### 平台分工（2026-09 定案；2026-09-13 注：额度动因已随转公开解除，见本节末尾「备注（待决策）」）
 
 | 平台 | 生产位置 | 子包 |
 |---|---|---|
@@ -141,10 +264,14 @@ npm run release:core:publish
 | darwin-arm64 | GitHub CI | @dsh-sup/dsh-core-darwin-arm64 |
 | darwin-x64 | GitHub CI | @dsh-sup/dsh-core-darwin-x64 |
 
-**Linux 不经 GitHub**：本地跑完整门禁后直推 npm，省 Actions 额度。因此 .github/workflows/build.yml
-的矩阵**只含 mac/win 三平台**，且原常驻 ubuntu-latest 的前端门禁作业（ui-verify）已并入本地
-release-core.sh（每次发布都会跑，不会漏跑）。Linux 的 launcher 构建物**不再挂 GitHub Release**
-（npm 即其分发通道）。
+**Linux 不经 GitHub**：本地跑完整门禁后直推 npm。因此 .github/workflows/build.yml
+的矩阵**只含 mac/win 三平台**，且前端门禁作业已并入本地 release-core.sh（每次发布都会跑，不会漏跑）。
+Linux 的 launcher 构建物**不挂 GitHub Release**（npm 即其分发通道）。
+
+> ⚠ **2026-09-13 备注（待决策）**：上述「Linux 本地 / mac+win CI」的分工**起源于私有仓的额度限制**，
+> 该限制已随转公开消失。若要进一步统一，可把 `ubuntu-22.04` 加回 CI 矩阵，让**四平台全部由 CI 产出**，
+> 本地 `--all-platforms` 退化为「发布前自证 / 离线兜底」。**这是流程决策，尚未执行**——
+> 现有分工仍然有效且可用（`v0.1.5-BETA.1` 的 CI 四 job 全绿即为实证）。
 
 **真发布有平台闸**：release-core.sh --publish 在非 Linux 机器上直接拒绝（exit 2）并提示走 tag 触发 CI，
 避免与 CI 形成同平台二次发布（npm 同版本不可重发）。
