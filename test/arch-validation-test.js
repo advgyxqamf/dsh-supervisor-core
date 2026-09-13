@@ -44,10 +44,18 @@ check('A-b 未知架构会抛错', /不支持的平台组合/.test(src), '有');
 // 注：_platformTag 读 process.platform/arch（全局），故用子进程改这两个全局再断言。
 const { execFileSync } = require('node:child_process');
 function tag(platform, arch) {
+  // 2026-09-13 修复（P1）：必须对插值做 JS 字符串转义（用 JSON.stringify）。
+  //   缺陷：原实现把 path.join(...) 的结果直接拼进单引号字面量 ——
+  //     Windows 路径是反斜杠（D:\a\dsh-supervisor-core\...），
+  //     拼进 JS 源码后 \a、\d、\s 等成了无效转义（被吃掉），路径损坏 →
+  //     require 抛 MODULE_NOT_FOUND → 子进程非 0 退出 → 本文件 6 条断言在 Windows 上全红：
+  //       FAIL A-a linux/x64 → linux-x64  <- EXECFAIL:Command failed: ...node.exe -e ...
+  //   （Linux/macOS 路径是正斜杠，恰好无此问题 —— 典型的「只在 Windows 暴露」。）
+  //   JSON.stringify 产出的是已正确转义的双引号字符串，四平台一致。
   const code = [
-    "Object.defineProperty(process, 'platform', { value: '" + platform + "' });",
-    "Object.defineProperty(process, 'arch', { value: '" + arch + "' });",
-    "const { DistributionManager } = require('" + path.join(ROOT, 'src', 'domains', 'dist', 'index.js') + "');",
+    "Object.defineProperty(process, 'platform', { value: " + JSON.stringify(platform) + " });",
+    "Object.defineProperty(process, 'arch', { value: " + JSON.stringify(arch) + " });",
+    "const { DistributionManager } = require(" + JSON.stringify(path.join(ROOT, 'src', 'domains', 'dist', 'index.js')) + ");",
     "const d = Object.create(DistributionManager.prototype);",
     "try { process.stdout.write(d._platformTag()); } catch (e) { process.stdout.write('ERR:' + e.message); }",
   ].join(String.fromCharCode(10));
