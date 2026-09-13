@@ -24,6 +24,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
+// ⚠ 凡按行解析 workflow **必须**经 _workflow.js（行尾归一）—— 参见该文件头的事故记录。
+const { readWorkflow, jobSection } = require(path.join(__dirname, '_workflow.js'));
 const SPEC = path.join(ROOT, 'RELEASE-STANDARD.md');
 
 const results = [];
@@ -145,14 +147,11 @@ if (spec) {
 //   于是「已发布版本之后的改动」**从未经过四平台构建验证**（PR 也照样能合）。
 //   硬标准要求：**四平台完整构建在每次 push / PR 都跑**。发布才需要一次性闸。
 {
-  const wf = fs.readFileSync(path.join(ROOT, spec.ciWorkflow), "utf8");
-  // 取 build job 段（到下一个顶层 job 为止）
-  const lines = wf.split(String.fromCharCode(10));
-  const bs = lines.findIndex((l) => l === "  build:");
-  let be = bs + 1;
-  while (be < lines.length && !/^  [a-z][a-z-]*:$/.test(lines[be])) be++;
-  const seg = lines.slice(bs, be).join(String.fromCharCode(10));
-  check("P-8 build job 存在", bs >= 0, "line " + (bs + 1));
+  // ⚠ 必须经 _workflow.js 读取（CRLF 归一）—— 本门禁首版用 fs.readFileSync + 逐行等值比较，
+  //   在 Windows 检出（CRLF）下 "  build:" 恒不命中 → **只在 Windows CI 红**（本仓既有该事故记录）。
+  const wf = readWorkflow(spec.ciWorkflow.split("/").pop());
+  const seg = jobSection(wf, "build");
+  check("P-8 build job 存在（jobSection 取到体）", seg.length > 0, seg.length + " 字符");
   check("P-8 四平台完整构建**不得**被 need_build 之类条件跳过",
     !/^    if:/m.test(seg), (seg.match(/^    if:.*$/m) || ["(无 if)"])[0]);
   check("P-8 矩阵仍为四平台", (seg.match(/- os: /g) || []).length === 4,
@@ -163,6 +162,11 @@ if (spec) {
   // 反向：判据能识别被门控的 build（构造一段带 if 的 build job）
   const probe = "  build:" + String.fromCharCode(10) + "    needs: precheck" + String.fromCharCode(10) + "    if: needs.precheck.outputs.need_build == 'true'";
   check("P-8 反向：判据能识别被条件门控的 build", /^    if:/m.test(probe), "hit");
+  // 反向：CRLF 夹具 —— 经 jobSection 归一后仍能取到（防再次退化为裸 fs.readFileSync）
+  // 夹具须含**前导换行**：jobSection 的正则要求 `\n  <name>:\n`（顶层 job 前必有其它行）
+  const crlf = "name: x" + String.fromCharCode(13, 10) + "  build:" + String.fromCharCode(13, 10) + "    needs: precheck" + String.fromCharCode(13, 10) + "    runs-on: x";
+  check("P-8 反向：CRLF 夹具经 jobSection 仍取到 build 段",
+    jobSection(crlf, "build").includes("needs: precheck"), "hit");
 }
 
 const failed = results.filter((r) => !r);

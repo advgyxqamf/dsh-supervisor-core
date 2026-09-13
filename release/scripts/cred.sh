@@ -155,13 +155,23 @@ case "${1:-list}" in
   doctor)
     rc=0
     echo '== 1) 目录与文件权限 =='
-    dm=$(stat -c %a "$STORE" 2>/dev/null || echo '?')
-    if [ "$dm" = '700' ]; then echo "  OK   库目录 0700"; else echo "  FAIL 库目录权限 $dm（应为 700）"; rc=1; fi
-    for f in "$STORE"/*.pat "$STORE"/*.json; do
-      [ -e "$f" ] || continue
-      m=$(stat -c %a "$f" 2>/dev/null || echo '?')
-      if [ "$m" = '600' ]; then echo "  OK   $(basename "$f") 0600"; else echo "  FAIL $(basename "$f") 权限 $m（应为 600）"; rc=1; fi
-    done
+    # ⚠ 2026-09-14 跨平台修复：原实现用 `stat -c %a`（**GNU 专有**）——
+    #   macOS 的 BSD stat 不支持 -c，Windows 根本没有 stat → 权限判定在这些平台必然失效。
+    #   该缺陷长期隐藏，因为**四平台构建矩阵此前被 need_build 跳过**（只在 ubuntu 上跑过）。
+    #   现改用 node（脚本已依赖 node 读清单）—— 三平台通用；并用 IS_WIN 判定跳过 POSIX 权限断言。
+    IS_WIN=$(node -e "process.stdout.write(process.platform==='win32'?'1':'0')")
+    perm_of() { node -e "try{process.stdout.write((require('fs').statSync(process.argv[1]).mode & 0o777).toString(8).padStart(3,'0'))}catch(e){process.stdout.write('?')}" "$1"; }
+    if [ "$IS_WIN" = '1' ]; then
+      echo '  SKIP  Windows 无 POSIX 权限位（chmod 仅切换只读位）—— 权限断言不适用'
+    else
+      dm=$(perm_of "$STORE")
+      if [ "$dm" = '700' ]; then echo "  OK   库目录 0700"; else echo "  FAIL 库目录权限 $dm（应为 700）"; rc=1; fi
+      for f in "$STORE"/*.pat "$STORE"/*.json; do
+        [ -e "$f" ] || continue
+        m=$(perm_of "$f")
+        if [ "$m" = '600' ]; then echo "  OK   $(basename "$f") 0600"; else echo "  FAIL $(basename "$f") 权限 $m（应为 600）"; rc=1; fi
+      done
+    fi
     echo '== 2) 清单内的文件是否都在库内 =='
     node -e "
       const j=require('$INDEX');
