@@ -9,14 +9,19 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 
 | 文档 | 性质 | 说明 |
 |---|---|---|
-| [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md) | **规范（权威）** | 阶段 0 契约：会话生命周期 · 所有权矩阵 · 状态机 · 时序 |
-| [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划 | 会话生命周期与所有权重构的根因级计划 |
-| [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) | **规范（权威）** | 跨平台能力矩阵（14 项 × 3 平台）+ 证据 + 缺口；配套 `test/platform-capability-audit-test.js` |
-| [AUDIT-CROSS-PLATFORM.md](AUDIT-CROSS-PLATFORM.md) | 审计 | 跨平台规范审计；§五.a 含 2026-09-11 复核更正 |
-| [RELEASE-AND-UPDATE-MECHANISM.md](RELEASE-AND-UPDATE-MECHANISM.md) | 规范 | 发布与更新机制总纲 |
-| [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 规范 | 跨平台构建与自更新完整方案 |
+| **`RELEASE-STANDARD.md`** | **规范（唯一事实源）** | **发布/构建流程**：硬标准（构建/发布一律经 CI）、8 阶段、平台矩阵、CI 放行、验证、回滚、红线。由 `test/release-spec-consistency-test.js` 机器校验 |
+| **`CREDENTIALS-STANDARD.md`** | **规范（唯一事实源）** | **凭据管理**：规范库、四铁律、轮换步骤。由 `test/credential-hygiene-test.js` 校验 |
+| **`DEVELOPMENT-TRACK.md`** | **规范（唯一事实源）** | **改代码规则**：分层边界、跨层依赖登记、测试补齐、注入验证、不可逆操作纪律 |
+| [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md) | 规范（契约） | 阶段 0 契约：会话生命周期 · 所有权矩阵 · 状态机 · 时序 |
+| [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) | 规范（能力矩阵） | 跨平台能力矩阵（14 项 × 3 平台）+ 证据 + 缺口；配套 `test/platform-capability-audit-test.js` |
+| [RELEASE-AND-UPDATE-MECHANISM.md](RELEASE-AND-UPDATE-MECHANISM.md) | 论证（原理） | 发布与更新机制**为何这样设计**（流程见 RELEASE-STANDARD） |
+| [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 论证（方案） | 跨平台构建与自更新方案论证（流程见 RELEASE-STANDARD） |
+| [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划（历史） | 会话生命周期重构的根因级计划（已完成） |
+| [AUDIT-CROSS-PLATFORM.md](AUDIT-CROSS-PLATFORM.md) | 审计（历史） | 跨平台规范审计；§五.a 含 2026-09-11 复核更正 |
+| [AUDIT-HANDOFF.md](AUDIT-HANDOFF.md) | 审计（历史） | 两仓审计与修复交接 |
+| [INCIDENT-2026-09-13-credential-overwrite.md](INCIDENT-2026-09-13-credential-overwrite.md) | 事故复盘 | 凭据被覆盖事故：时间线 / 根因四层 / 加固与重放验证 |
 | [CHANGELOG.md](CHANGELOG.md) | 记录 | 版本变更 |
-| [archive/](archive/) | 归档 | 已完成/被取代的历史文档（见 [archive/README.md](archive/README.md)） |
+| [archive/](archive/) | 归档 | 已完成/被取代的历史文档（见 [archive/README.md](archive/README.md)）|
 
 > **文档可信度不变量**（2026-09-11 确立）：能力声明必须由**可执行断言**支撑；
 > 本仓的文字（注释/审计/文档）**不构成证据**。新增能力请同步 `test/platform-capability-audit-test.js`。
