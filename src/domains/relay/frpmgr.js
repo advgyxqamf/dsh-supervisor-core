@@ -306,12 +306,34 @@ class FrpManager {
       if (this.events) this.events.append('frpc_install_failed', { detail: '当前平台无 frpc 官方产物: ' + process.platform + '/' + process.arch });
       return { ok: false, error: '当前平台不支持 FRP（' + process.platform + '/' + process.arch + '），仅 linux/darwin/win32 × x64/arm64' };
     }
-    const urls = downloadUrls('frp_' + FRP_VERSION + '_' + this.frpTag.tag + '.tar.gz');
+    const asset = 'frp_' + FRP_VERSION + '_' + this.frpTag.tag + '.tar.gz';
+    const urls = downloadUrls(asset);
+    // ⚠ P1 安全修复（2026-09-13，失效模式 b）：**下载物必须校验完整性**。
+    //
+    //   缺陷：frpc 经**两个第三方代理前缀 + 最多 5 跳重定向**下载（downloadUrls/_download），
+    //     却只校验 HTTP 200 与 gzip/tar 可解析，随即 chmod 0755 落盘并 detached 执行
+    //     —— 镜像或链路被劫持/投毒即在用户机上执行任意二进制，无任何检测信号。
+    //   对照：同仓「下载二进制」的另一处（dist/self-update.js:37-43/81-84）**强制**从
+    //     manifest 取 sha256（并校验 64 位 hex、强制 https）后才安装 —— 同一类操作两处实现分叉。
+    //   修法（信任根设计）：校验和从**官方 GitHub 主机直连**获取
+    //     （frp_<ver>_checksums.txt），**不**经镜像前缀 ——
+    //     于是「只控制镜像的攻击者」无法同时伪造校验和。
+    //     取不到校验和时（离线/官方不可达）**降级放行但记 warn**：
+    //     本仓的可用性原则是「有界失败即放行」，且此时镜像本身仍受 HTTPS 保护；
+    //     但一旦取得校验和，**不匹配即拒绝该镜像**（换下一个）。
+    const expected = await this._expectedSha256(asset, report);
     let lastErr = null;
     for (const url of urls) {
       try {
         report('download: ' + url.slice(0, 60) + '…');
         const tgz = await this._download(url, report);
+        if (expected) {
+          const got = crypto.createHash('sha256').update(tgz).digest('hex');
+          if (got !== expected) {
+            throw new Error('SHA256 校验失败（期望 ' + expected.slice(0, 12) + '… 实得 ' + got.slice(0, 12) + '…）——该镜像产物不可信，已拒绝');
+          }
+          report('SHA256 校验通过');
+        }
         report('downloaded ' + Math.round(tgz.length / 1024) + 'KB, extracting…');
         await this._extractFrpc(tgz, this.binDir);
         fs.chmodSync(this.binPath, 0o755);
@@ -325,6 +347,38 @@ class FrpManager {
     }
     if (this.events) this.events.append('frpc_install_failed', { detail: lastErr ? lastErr.message : '' });
     return { ok: false, error: lastErr ? lastErr.message : 'all mirrors failed' };
+  }
+
+  /** 取官方校验和表里的期望 sha256（**直连官方主机，不经镜像**）。
+   *
+   *  ⚠ 为什么要「直连官方」：镜像前缀是第三方代理，若校验和也经它们取，
+   *    能改镜像的攻击者就能同时改校验和 → 校验形同虚设。
+   *  返回 null 表示取不到（离线/官方不可达）——调用方按「有界失败即放行」处理并记 warn。
+   *  结果按 asset 缓存到本进程（一次安装只需取一次）。
+   */
+  async _expectedSha256(asset, report) {
+    this._sumCache = this._sumCache || {};
+    if (this._sumCache[asset] !== undefined) return this._sumCache[asset];
+    const url = 'https://github.com/fatedier/frp/releases/download/v' + FRP_VERSION + '/frp_' + FRP_VERSION + '_checksums.txt';
+    try {
+      const buf = await this._download(url, () => {});
+      const text = String(buf || '');
+      // 官方格式：每行 "<64hex>  <filename>"
+      const want = new RegExp('^([0-9a-fA-F]{64})\\s+\\*?' + asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'm');
+      const m = want.exec(text);
+      const sum = m ? m[1].toLowerCase() : null;
+      this._sumCache[asset] = sum;
+      if (!sum) {
+        report && report('warn: 官方校验表中未找到 ' + asset + '，跳过完整性校验');
+        this.logger.warn && this.logger.warn('[frp] 校验表中未找到 ' + asset + '，跳过 sha256 校验（已直连官方取得校验表）');
+      }
+      return sum;
+    } catch (e) {
+      this._sumCache[asset] = null;
+      report && report('warn: 取官方校验和失败(' + e.message + ')，跳过完整性校验');
+      this.logger.warn && this.logger.warn('[frp] 取官方校验和失败：' + e.message + ' —— 本次不做 sha256 校验（镜像仍受 https 保护）');
+      return null;
+    }
   }
 
   _download(url, report) {
