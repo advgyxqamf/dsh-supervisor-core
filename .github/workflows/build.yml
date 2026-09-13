@@ -203,6 +203,17 @@ jobs:
         with:
           node-version: '24'
 
+      # ⚠ 2026-09-13：Linux leg 需要 Xvfb ——
+      #   ci-core.sh 的 npm test 含看护 E2E（「壳缺失 → 真的被拉起」），而看护在拉起 GUI 壳前
+      #   会先判定图形会话；无头 runner 判定为 false → 按设计拒绝拉起 → 该 E2E 四条失败。
+      #   darwin / win32 的判定恒为真（守卫本就只在图形会话内存活），故只有 Linux 需要装。
+      - name: 安装 Xvfb（图形会话前置条件 · 仅 Linux）
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+
       # 发布产线核心逻辑单源：release/scripts/ci-core.sh（本机亦可复跑）。
       # 内核 launcher 为纯 JS（Node ≥18 运行时），无需 Rust/系统库依赖。
       # tag v<内核> 触发器 + 存有 NPM_TOKEN 时方 --publish 真发（无 token 一律仅验证）。

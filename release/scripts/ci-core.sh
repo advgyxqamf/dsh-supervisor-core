@@ -72,7 +72,21 @@ else
 fi
 
 echo "=== [2/5] 内核回归测试（npm test） ==="
-npm test
+# ⚠ 2026-09-13 修复（P1）：**看护 E2E 需要图形会话**。
+#   缺陷：shell-watchdog-e2e-test 验证「壳缺失 → 真的被拉起」，而看护在拉起 GUI 壳前
+#   会先判定图形会话（src/platform/os/desktop.js::sessionAvailable —— 这是刻意设计，
+#   防「无显示时拉起必失败 → 重启风暴」）。无头 runner 上判定为 false →
+#   看护按设计拒绝拉起 → E2E-1/3/4/5 四条失败，日志给出确切原因：
+#       [shell-watchdog] 不拉起桌面壳：无图形会话（注销/纯终端），拉起 GUI 必失败
+#   linux 需要 Xvfb 提供 DISPLAY；darwin/win32 的判定恒为真（守卫本就只在图形会话内存活），
+#   故这里「有 xvfb-run 就用、没有就直跑」即可三平台通用（也是单源修复的原因：
+#   test job 与 build 矩阵都调本脚本，修在这里两处同时生效）。
+if command -v xvfb-run >/dev/null 2>&1; then
+  echo "[test] 经 xvfb-run 提供图形会话（看护 E2E 需要）..."
+  xvfb-run -a npm test
+else
+  npm test
+fi
 
 echo "=== [3/5] 构建内核 launcher（build:launcher：esbuild bundle + node 启动脚本，全平台统一） ==="
 npm run build:launcher -- ${PLAT_ARGS[@]+"${PLAT_ARGS[@]}"}
