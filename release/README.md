@@ -131,6 +131,20 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
    不必等到 mac/win runner 才发现。
 3. **新增测试自动有归属** → 不会出现「写了门禁但没接进 CI」。
 4. **新增平台是清单化流程** → 四步各有门禁，跳步即失败。
+### 两仓对称：壳仓的等价门禁
+
+同一套纪律在壳仓由既有门禁承担（**不必新增**）：
+
+| 壳仓门禁 | 对应内核侧铁律 |
+|---|---|
+| `bootstrap_flow.rs` **G1-a**：平台分支（`#[cfg(target_os)]`）只出现在 `platform/` 内 | 铁律一（平台知识只在 `src/platform/**`）|
+| `bootstrap_flow.rs` **G2**：`commands/` 只做校验与委托，不得直接执行外部命令/不得有平台分支 | 铁律二（业务域不得持平台知识）|
+| `bootstrap_flow.rs` **G3**：`main.rs` 只做组装（行数上限 550、零 IPC 命令） | 分层纪律 |
+| `platform_shared_items_test.rs` | 平台文件必须导入所用共享项（E0425 防线）|
+| `ci_gate_coverage_test.rs` C-a/C-b + CI `ls tests/*.rs` 自动枚举 | 内核 `test-chain-completeness-test` **N-a**（同一目标）|
+
+> 即：**两仓各有一套「边界门禁」，目标一致、实现按各自语言惯例**
+> （内核用 JS 静态扫描 + 行为断言；壳仓用 Rust 结构断言 + 真实平台编译）。
 
 ---
 
