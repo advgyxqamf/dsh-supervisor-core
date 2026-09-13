@@ -233,8 +233,19 @@ git switch master && git pull --ff-only
 
 ### 壳仓
 
-壳仓 CI 此前只由 `push: tags/main` 触发，**PR 不跑 CI** → 直接设 required 会让 PR 永远等不到状态。
-故须**先补 `pull_request:` 触发器**，再设 required；其 `build` 是无条件 4 平台矩阵，可作为 required 语境。
+壳仓属**另一账号**（`wasi7mglns`），自动化令牌对其**无 admin 权限**
+（`Resource not accessible by personal access token`）→ 分支保护须由该仓 admin 设置。
+
+已完成的准备工作（本仓已推）：
+
+- **补 `pull_request` 触发器**（壳仓 `fd0287c`）：壳仓 CI 此前只由 `push: tags/main` 触发，
+  **PR 完全不跑 CI**；若不补而直接设 required，GitHub 会等一个**永不出现的状态** → 所有 PR 永久阻塞。
+- 其 `build` 是**无条件 4 平台矩阵**（每次必跑）→ **可以且应该**设为 required（与内核仓相反）。
+- 完整 required 配置、精确 contexts、可直接执行的 API 调用与**矩阵变更陷阱**：
+  见壳仓 `docs/RELEASE-AND-BUILD-DECISION.md` 的「把 CI 设为合并门禁」附录。
+
+> ⚠ 陷阱：壳仓 required context **内嵌矩阵参数**（如 `build (ubuntu-22.04, linux-x64, deb,rpm, 2.35)`），
+> 增删平台或改 arch 组合后旧语境变为「预期但永不出现」→ 所有 PR 合不进去。改矩阵时必须同步更新保护配置。
 
 ### 本次启用的完整设置（内核仓 `master`）
 
