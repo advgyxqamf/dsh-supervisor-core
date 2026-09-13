@@ -67,6 +67,36 @@ case "${1:-list}" in
   put)
     f=$(file_of "$2");
     [ -n "$f" ] || { echo "未知条目: $2" >&2; exit 1; }
+    # ══════════════════════════════════════════════════════════════════════════
+    # ⚠⚠ 覆盖保护（2026-09-13，**事后加固** —— 起因是一次真实事故）
+    #
+    # 事故：做门禁的注入验证时，先注入了「移除 DSH_CRED_DIR」以破坏夹具模式，
+    #   然后脚本里的 put 步骤**回落到真机库根**执行，把测试串写进了
+    #   **真实的内核令牌文件** —— 93B 真令牌被 16B 的 'new-secret-value' 覆盖。
+    #   又因为迁移时把旧路径改成了**符号链接**，覆盖立刻生效、**无第二份副本可恢复**。
+    #
+    # 两条加固：
+    #   ① 默认（真机库）下 put 必须显式确认：--yes 或 DSH_CRED_ALLOW_OVERWRITE=1；
+    #      若目标文件已存在，再要求 DSH_CRED_FORCE=1。测试用 DSH_CRED_DIR 不受此限。
+    #   ② 旧值先备份到 <file>.bak-<时间戳>（0600），使覆盖**不再不可逆**。
+    # ══════════════════════════════════════════════════════════════════════════
+    IS_REAL=0
+    [ "$STORE" = '/home/bowen/.dsh/credentials' ] && IS_REAL=1
+    if [ "$IS_REAL" = '1' ] && [ "${DSH_CRED_ALLOW_OVERWRITE:-}" != '1' ] && [ "${3:-}" != '--yes' ]; then
+      echo "拒绝写入真机凭据库：put 会**覆盖**已有凭据，必须显式确认。" >&2
+      echo "  · 真机写入：DSH_CRED_ALLOW_OVERWRITE=1 bash $0 put $2" >&2
+      echo "  · 测试/夹具：DSH_CRED_DIR=<tmpdir> bash $0 put $2" >&2
+      echo "（本保护来自一次真实事故：注入验证中 put 回落真机库，覆盖了内核令牌。）" >&2
+      exit 2
+    fi
+    if [ "$IS_REAL" = '1' ] && [ -f "$f" ] && [ "${DSH_CRED_FORCE:-}" != '1' ]; then
+      echo "拒绝覆盖已存在的真机凭据：$f" >&2
+      echo "  如确需轮换，设 DSH_CRED_FORCE=1（会自动备份旧值到 .bak-<时间戳>）。" >&2
+      exit 2
+    fi
+    if [ -f "$f" ]; then
+      cp -p "$f" "$f.bak-$(date +%Y%m%d%H%M%S)" && chmod 600 "$f".bak-* 2>/dev/null
+    fi
     umask 077; mkdir -p "$(dirname "$f")"; cat > "$f"; chmod 600 "$f";
     node -e "
       const fs=require('fs'),p='$INDEX';
