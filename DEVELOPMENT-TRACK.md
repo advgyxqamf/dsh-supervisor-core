@@ -155,6 +155,16 @@ bash release/scripts/ci-core.sh   # CI 等价预演（需 DSH_SHELL_REPO）
 
 ---
 
+---
+
+## 5.1 凭据管理
+
+改动涉及**令牌 / 密钥 / CI Secrets / 分支保护**时，**必须**先读 `CREDENTIALS-STANDARD.md`。
+
+- 凭据只允许在规范库 `/home/bowen/.dsh/credentials/`（**禁止**实例子目录 / 附件目录 —— 那是 ephemeral 的）；
+- 用 `bash release/scripts/cred.sh list|doctor|verify` 查看与管理；
+- ⚠ `$HOME` 被重定向到实例数据目录，**一律用绝对路径**，禁止 `~`；
+- 新增 / 轮换后必须 `npm test`（`credential-hygiene-test`，18 断言）。
 ## 6. 提交规范
 
 - 中文 commit message；
