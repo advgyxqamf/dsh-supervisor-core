@@ -93,6 +93,15 @@ const cfg = {
 };
 
 process.env.HOME = HOME;
+// ⚠ 2026-09-13 修复（P1）：**必须同时设 USERPROFILE**。
+//   本仓既有约定（见 test/shell-safety-net-test.js:27 与 test/guard-update-test.js:172-180）：
+//   Node 的 os.homedir() 在 **Windows 上优先读 USERPROFILE**（Windows 没有 HOME）。
+//   而 shell.identity() 经 shellDir() = path.join(os.homedir(), '.dsh', 'shell') 定位 identity.json ——
+//   只设 HOME 时 Windows 读不到本夹具写入的 identity.json →
+//   watchdog 的 hasExe=false → 「无法定位壳可执行文件（identity.json 未记录 exe）」→
+//   **不拉起** → E2E-1/3/4/5 在 Windows 必红（CI 日志给出了该确切原因）。
+//   这是夹具未遵循本仓既有约定，不是产品问题（产品用 os.homedir() 是正确的三平台来源）。
+process.env.USERPROFILE = HOME;
 
 (async () => {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
