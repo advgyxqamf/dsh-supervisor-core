@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 内核发布产线（CI 核心逻辑单源）——供 .github/workflows/build.yml 的 mac/win 矩阵调用，
+# 内核发布产线（CI 核心逻辑单源）——供 .github/workflows/build.yml 的 **四平台** build 矩阵调用
 # 同时是**本地 Linux 生产**的实际构建+发布体（由 release-core.sh 编排调用）。
 # 用法: release/scripts/ci-core.sh [--publish] [--all-platforms]
 #   - 无 --publish      = 只验证（verify:versions → build-ui → npm test → build:launcher → 子包 dry-run）
