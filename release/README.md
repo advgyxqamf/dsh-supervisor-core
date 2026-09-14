@@ -43,9 +43,8 @@
 | 文件 | 方向 | 内容 |
 |---|---|---|
 | `registry.json` | 壳 → 内核 | 镜像源偏好与测速结果（内核「优先采用壳投放的 selected」） |
-| `identity.json` | 壳写 | 壳自身身份；其护栏字段（`attempt`/`pinned`/`pendingVersion`）是壳本地 Guard 的**投影** |
-| `update-guard.json` | 壳写 | 自更新护栏（冷却/抑制/pinnedVersions） |
-| `update-journal.json` | 内核写 | 更新日志（`pinnedVersions` **声明无接收方**，壳不消费） |
+| `identity.json` | 壳写 | 壳自身身份（`version`/`phase`/`exe`/`lastSeenAt` 等运行时字段）；护栏/回退字段已废除 |
+| `update-journal.json` | 内核写 | 壳更新账本（`to`/`confirmed`）；强制更新，**不含回退/拉黑** |
 
 **约束**：契约字段的**新增**必须向后兼容（读方在字段缺失时降级）；
 契约字段的**移除或语义变更**必须**内核先行**，并允许两侧版本错配运行一个发布周期。

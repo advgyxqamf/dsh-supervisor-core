@@ -43,8 +43,7 @@ function writeJson(p, v) {
 }
 
 // ── 壳身份（壳在启动最早期写入；内核只读）──
-// 关键字段 `attempt`：壳每次启动自增，使内核能在**壳完全起不来（连日志都没有）**时
-// 也判断出「该版本反复失败」——这是回退决策的核心输入。
+// 读取 version / phase / exe / lastSeenAt 等运行时字段；护栏/回退字段已废除。
 function identity() {
   return readJson(path.join(shellDir(), 'identity.json'));
 }
@@ -53,8 +52,7 @@ function identity() {
 function journalPath() { return path.join(shellDir(), 'update-journal.json'); }
 function readJournal() {
   return readJson(journalPath()) || {
-    from: null, to: null, attempts: 0, maxAttempts: 2,
-    confirmed: false, rolledBack: false, pinnedVersions: [],
+    from: null, to: null, confirmed: false,
     startedAt: null, lastAttemptAt: null,
   };
 }
@@ -65,38 +63,20 @@ function markPending(from, to) {
   const j = readJournal();
   j.from = from || j.from;
   j.to = to;
-  j.attempts = 0;
   j.confirmed = false;
-  j.rolledBack = false;
   j.startedAt = new Date().toISOString();
   writeJournal(j);
   return j;
 }
 
-/** 核心决策：根据壳身份与账本，判断当前壳的更新状态。
- *  返回 { state, action, reason, ... }：
- *    'idle'          无进行中的更新
- *    'pending'       更新已安装，等待壳下次启动确认
- *    'confirmed'     壳已成功运行新版本（健康确认）
- *    'should-rollback' 判定为坏版本，应回退（内核据此动作）
+/** 核心判定：根据壳身份与账本，汇总当前壳的更新状态。
+ *  返回 { state, reason, ... }：
+ *    'idle'       无进行中的更新
+ *    'pending'    更新已安装，等待壳下次启动确认
+ *    'confirmed'  壳已成功运行新版本（健康确认）
  *
- *  ⚠ 2026-09-12 事实说明（审计 P0，**未修改逻辑，仅如实记录现状**）：
- *
- *    本判定链的**输入**在当前双仓实现下无法被填充，故 `evaluate()` 实际恒返回 `idle`：
- *      · `journal.to` 只能由 `markPending()` 设置；其唯一非测试调用方是
- *        `POST /shell/update-pending`（api/shell.js）；
- *      · 而壳仓（Tauri）**从不 POST 该端点**（grep 零命中）—— 壳用自己的一套：
- *        本地命令 `shell_set_phase`（update.rs::set_phase）+ 独立账本
- *        `~/.dsh/shell/update-guard.json`，与内核的 `update-journal.json` **不是同一份**；
- *      · 同理壳也从不 POST `/shell/health`，故 `id.phase === 'ready'` 的确认路径也不会被触发。
- *
- *    即：`should-rollback` / `confirmed` 两个状态在当前实现下**不可达**，
- *    回退能力实际由**壳自己的护栏**（update-guard + 冷却）承担。
- *
- *    ⚠ 刻意**不删除**本模块：它是「内核侧安全网」的设计落点，
- *      且 `watchdog.expectedAbsence()` 会读 `journal.to`（`markPending` 一旦被接线即生效）；
- *      删除会连带移除既有的状态机与测试。但**必须**让读者知道现状 ——
- *      否则会像 `api/surface.js` 那样把「壳(阶段上报/健康确认)」写成既成事实。
+ *  约定：**没有**回退判定 —— 壳的更新强制且不可回退（不得回退、不得跳过）。
+ *  本判定只描述事实，不产生任何回退动作；回退功能已整体移除。
  */
 function evaluate() {
   const id = identity();
@@ -109,62 +89,22 @@ function evaluate() {
   if (cur && cur === j.to && id && id.phase === 'ready') {
     if (!j.confirmed) {
       j.confirmed = true;
-      j.attempts = 0;
       writeJournal(j);
     }
     return { state: 'confirmed', version: cur, reason: '壳已健康运行新版本', journal: j, identity: id };
   }
 
-  // 情形 2：壳在跑，但不是目标版本 → 更新未生效（回退过 / 安装未替换）
-  // 用壳的 attempt 计数（壳每次启动自增）作为「失败次数」的权威来源。
-  const attempt = (id && typeof id.attempt === 'number') ? id.attempt : 0;
-  if (cur && cur !== j.to && attempt >= (j.maxAttempts || 2)) {
-    return {
-      state: 'should-rollback',
-      target: j.to, current: cur, attempts: attempt,
-      reason: `壳 ${attempt} 次未能在 ${j.to} 上就绪（当前 ${cur}）`,
-      journal: j, identity: id,
-    };
-  }
-
+  // 其余情况：等待壳重启到目标版本并就绪。
+  //  壳的更新**强制且不可回退**，此处只描述事实，不产生任何回退动作。
   return {
     state: 'pending',
-    target: j.to, current: cur, attempts: attempt,
+    target: j.to, current: cur,
     reason: cur === j.to ? '等待壳上报就绪' : '等待壳重启到新版本',
     journal: j, identity: id,
   };
 }
 
-/** 回退：把坏版本拉黑，并记录回退意图。
- *  ⚠ 内核**不直接替换壳二进制**（那是壳/平台安装器的职责），而是：
- *    1) 把坏版本加入 pinnedVersions；
- *    2) 清空待确认账本，避免反复判定；
- *    3) 写事件供审计与面板展示。
- *
- *  ⚠ 2026-09-13（P3 跨仓契约，**修正一处与事实不符的声明**）：
- *    原文写「pinnedVersions（**壳门 0 读取**后不会再用它）」—— 该声明**无接收方**。
- *    实测壳仓（Tauri）grep update-journal / pinnedVersions **零命中**（仅注释与文档），
- *    壳自更新用的是**自己的** ~/.dsh/shell/update-guard.json（门 0 = tauri-plugin-updater）。
- *    故本字段目前**只写不读**（失效模式 f + i）。
- *
- *  ⛔ **不得为了让声明成真而贸然接线**：内核 pinnedVersions **没有过期机制**，
- *    而壳 should_check() 的 pinned 分支**不查冷却** ——
- *    一旦壳真去读它，就会重新引入第十轮刚修掉的「永久拉黑、收不到任何更新（含安全修复）」。
- *    真要接线，必须**同时**给内核 pinnedVersions 加时间戳 + 让壳侧查冷却；
- *    这是跨仓契约变更，需两侧协调发版。
- */
-function rollback(reason) {
-  const j = readJournal();
-  const bad = j.to;
-  if (bad && !j.pinnedVersions.includes(bad)) j.pinnedVersions.push(bad);
-  j.rolledBack = true;
-  j.confirmed = false;
-  j.attempts = 0;
-  j.to = null;
-  j.lastAttemptAt = new Date().toISOString();
-  writeJournal(j);
-  return { ok: true, pinned: bad, reason: reason || null, journal: j };
-}
+// 回退功能已按硬规则整体移除：壳的更新强制且不可回退、不得跳过。
 
 /** 仅回环可用的健康上报（壳调用）。
  *  phase=ready 即「壳已健康启动」= 更新确认信号。
@@ -176,20 +116,8 @@ function health(payload) {
   // 更新 identity.json 的 phase / version / lastSeenAt（壳自己也会写；这里兜底，
   // 确保内核能观察到一致状态——本域 evaluate() 正依赖它们）。
   //
-  // ⚠ P3/P2 修复（2026-09-13，失效模式 b+g，跨仓）：
-  //   **不再写 attempt**。壳仓在 D-3（update.rs::write_identity_for）已把 identity.json 的
-  //   护栏字段（attempt / pinned / pendingVersion）收敛为「壳本地 Guard 的**投影**，
-  //   调用方无法自行传入」，并声明该文件只有一个写入方。
-  //   而此处原会 `if (typeof p.attempt === 'number') id.attempt = p.attempt;` ——
-  //   即**内核可写入任意 attempt 数字**（不经壳的 Guard），构成第二个写入方，
-  //   且是读-改-写（无跨进程锁）→ 与壳的 write_identity_for 并发即 last-writer-wins。
-  //   为什么后果严重：evaluate() 用 id.attempt 作为「失败次数」的权威输入来做
-  //     should-rollback 判定（本文件 :120-128）——把 attempt 置 0 即让回滚判定失效；
-  //     写入 phase=ready 还可伪造「更新已确认」。
-  //   当前无触发路径（壳仓 grep /shell/health 零命中，已由 D-3 交接文档与跨仓门禁 R10 记录），
-  //   属**预置的第二写入方**；按 D-3 的单一写入点纪律必须移除。
-  //   保留 phase/version/lastSeenAt：它们是**运行时**字段（非 Guard 投影），
-  //   本域的运维排障端点正需要它们才能工作。
+  // 本函数只写**运行时**字段（phase/version/lastSeenAt），供内核侧观察与排障；
+  //   identity.json 的护栏/回退字段已废除，写入方只有壳（单一写入点）。
   const idp = path.join(dir, 'identity.json');
   const id = readJson(idp) || {};
   if (p.phase) id.phase = String(p.phase);
@@ -211,7 +139,6 @@ function status() {
     journal: j,
     state: ev.state,
     reason: ev.reason || null,
-    pinned: j.pinnedVersions || [],
     dir: shellDir(),
   };
 }
@@ -358,4 +285,4 @@ async function restartShell(opts) {
     return { ok: false, error: '拉起新壳失败: ' + ((e && e.message) || e), killed };
   }
 }
-module.exports = { status, evaluate, health, markPending, rollback, identity, readJournal, shellDir, checkUpdate, restartShell, SHELL_RELEASE_PKG };
+module.exports = { status, evaluate, health, markPending, identity, readJournal, shellDir, checkUpdate, restartShell, SHELL_RELEASE_PKG };

@@ -52,7 +52,7 @@ const mk = (opts) => {
   const deps = {
     shell: {
       identity: () => identity,
-      readJournal: () => (o.journal || { to: null, confirmed: false, rolledBack: false }),
+      readJournal: () => (o.journal || { to: null, confirmed: false }),
       restartShell: async (a) => { calls.restarts.push(a); return { ok: true, pid: 4321, exe: a.exePath }; },
     },
     pidlookup: { pgrepList: () => (o.alive ? [{ pid: 999, cmdline: '/usr/bin/dsh-supervisor-gui' }] : []) },
@@ -106,7 +106,7 @@ const GUI = '/usr/bin/dsh-supervisor-gui';
     const m = mk({
       alive: false,
       identity: { phase: 'ready', exe: GUI },
-      journal: { to: '9.9.9', confirmed: false, rolledBack: false },
+      journal: { to: '9.9.9', confirmed: false },
     });
     await m.w.tick(); m.adv(1200); await m.w.tick();
     check('N-d 未确认账本 → expectedAbsence=true（语义保留）', m.w.status().expectedAbsence === true, 'true');

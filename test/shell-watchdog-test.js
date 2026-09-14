@@ -60,7 +60,7 @@ const mk = (opts) => {
   const deps = {
     shell: {
       identity: () => (o.identity === undefined ? { exe: '/usr/bin/dsh-supervisor-gui', phase: o.phase || 'ready' } : o.identity),
-      readJournal: () => (o.journal || { to: null, confirmed: false, rolledBack: false }),
+      readJournal: () => (o.journal || { to: null, confirmed: false }),
       restartShell: async (a) => { calls.restarts.push(a); return o.restartResult || { ok: true, pid: 4321, exe: a.exePath }; },
     },
     pidlookup: { pgrepList: () => (o.alive ? [{ pid: 999, cmdline: '/usr/bin/dsh-supervisor-gui' }] : []) },

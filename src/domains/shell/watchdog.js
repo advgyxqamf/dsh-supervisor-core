@@ -183,7 +183,7 @@ function createShellWatchdog(deps) {
     if (inUpdate && !phaseStale) return true;
     try {
       const j = shell.readJournal && shell.readJournal();
-      if (j && j.to && !j.confirmed && !j.rolledBack) return true;
+      if (j && j.to && !j.confirmed) return true;
     } catch {}
     return false;
   }

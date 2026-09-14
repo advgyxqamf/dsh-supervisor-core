@@ -8,6 +8,27 @@
 
 （下一版本待记）
 
+## [0.1.5-BETA.4]（2026-09-14）
+
+### 强制更新收敛：壳回退机构整体移除
+
+产品规则：壳与内核同一套升级逻辑 —— 有新版必须强制更新；**不得回退、不得跳过、
+不得按版本拉黑、不得冷却抑制**。唯一保留回退的是 **DSH 自身升级**
+（`guard/native/manager.js` / `domains/dist/`，本次未触碰）。
+
+| 位置 | 内容 |
+|---|---|
+| `domains/shell/index.js` | 删除 `rollback()`、`should-rollback` 分支、`pinnedVersions`、`attempts/maxAttempts`；`evaluate()` 仅剩 idle/pending/confirmed |
+| `domains/shell/watchdog.js` | 去掉已删账本字段 `rolledBack` 的读取 |
+| `api/shell.js` | 删除 `POST /shell/rollback` 处理分支 |
+| `api/surface.js` | 删除 `/shell/rollback` 登记与 `pinnedVersions` 相关说明 |
+| `release/README.md` | 跨仓契约表：删除 `update-guard.json` 行，`identity.json` 改注运行时字段 |
+| `test/shell-safety-net-test.js` | R3 改断言「永不回退」；R4/R10 增反回归门禁 |
+
+### 验证
+
+`npm test` 全绿（CI `test` job）；`shell-safety-net-test` 57 passed / 0 failed。
+
 ## [0.1.5-BETA.3]（2026-09-14）
 
 > 本轮确立**硬标准**并据此修正 CI 门控；修正后立刻暴露出 5 类只在 macOS/Windows
