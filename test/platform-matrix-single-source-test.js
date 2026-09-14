@@ -76,6 +76,8 @@ const check = (n, c, x) => {
   check('M-b isSupported 对四平台为真、对未知为假',
     matrix.SUPPORTED.every((x) => matrix.isSupported(x.platform, x.arch) === true)
     && matrix.isSupported('freebsd', 'x64') === false, 'ok');
+  check('M-b isSupported 与 SUPPORTED 同集合（linux-arm64 / win32-arm64 为 false）',
+    matrix.isSupported('linux', 'arm64') === false && matrix.isSupported('win32', 'arm64') === false, 'ok');
 }
 
 // ── M-c：唯一性（src/ 中不得再有第二份 os/arch 映射表）──
