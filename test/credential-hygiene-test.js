@@ -27,10 +27,27 @@ const { execFileSync } = require('node:child_process');
 const ROOT = path.join(__dirname, '..');
 const CRED_SH = path.join(ROOT, 'release', 'scripts', 'cred.sh');
 
-// 真实库用绝对路径：$HOME 被 DSH 重定向到实例数据目录，~/.dsh 不是这个目录。
-const REAL_STORE = '/home/bowen/.dsh/credentials';
-const LEGACY_ALIAS = '/home/bowen/.dsh/github-pat-advgyxqamf';
-const HOME_ROOT_STRAYS = ['/home/bowen/gh_token.txt', '/home/bowen/gh_token', '/home/bowen/.gh_token'];
+// 真实用户 home：$HOME 被 DSH 重定向到实例数据目录，~/.dsh 不是它 ——
+//   故与 cred.sh 同源解析（getent/dscl/USERPROFILE），**不得硬编码机器路径**。
+function realHome() {
+  if (process.env.DSH_REAL_HOME) return process.env.DSH_REAL_HOME;
+  if (process.platform === 'win32') return process.env.USERPROFILE || os.homedir();
+  try {
+    const u = os.userInfo().username;
+    if (process.platform === 'darwin') {
+      const h = execFileSync('dscl', ['.', '-read', '/Users/' + u, 'NFSHomeDirectory'], { encoding: 'utf8' }).trim().split(/s+/).pop();
+      if (h && fs.existsSync(h)) return h;
+    } else {
+      const h = execFileSync('getent', ['passwd', u], { encoding: 'utf8' }).trim().split(':')[5];
+      if (h && fs.existsSync(h)) return h;
+    }
+  } catch { /* 回退到 os.homedir() */ }
+  return os.homedir();
+}
+const REAL_HOME = realHome();
+const REAL_STORE = process.env.DSH_CRED_DIR || path.join(REAL_HOME, '.dsh', 'credentials');
+const LEGACY_ALIAS = path.join(REAL_HOME, '.dsh', 'github-pat-advgyxqamf');
+const HOME_ROOT_STRAYS = ['gh_token.txt', 'gh_token', '.gh_token'].map((n) => path.join(REAL_HOME, n));
 
 const results = [];
 // Windows 无 POSIX 权限位（chmod 只切换只读位，mode 常为 666）——
@@ -120,7 +137,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'credgate-'));
   const d4 = path.join(TMP, 'outside');
   const f4 = fixture(d4);
   const j4 = JSON.parse(fs.readFileSync(f4.idxPath, 'utf8'));
-  j4.entries[0].file = '/home/bowen/.dsh/supervisor/instances/inst-1/data/.dsh/attachments/x/gh_token.txt';
+  j4.entries[0].file = path.join(REAL_HOME, '.dsh', 'supervisor', 'instances', 'inst-1', 'data', '.dsh', 'attachments', 'x', 'gh_token.txt');
   fs.writeFileSync(f4.idxPath, JSON.stringify(j4, null, 2));
   const r4 = runCred(d4, ['doctor']);
   check('D-4 条目指向 ephemeral 附件路径 -> doctor 失败', r4.code !== 0, 'exit=' + r4.code);
@@ -227,14 +244,16 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'credgate-'));
 //   若有人把库「改良」成 ~/.dsh/credentials，它就会落在**实例目录内** ——
 //   换会话即失效（正是历史事故的形态：凭据存在实例附件目录 → 下游会话找不到）。
 {
-  const homedir = os.homedir();
-  check('持久化-1 凭据库不在被重定向的 $HOME 之下（否则换会话即失效）',
-    !REAL_STORE.startsWith(homedir + path.sep) && REAL_STORE !== homedir,
-    'STORE=' + REAL_STORE + '  HOME=' + homedir);
-  check('持久化-2 凭据库路径不含 /instances/（实例目录是 ephemeral 的）',
-    REAL_STORE.indexOf('/instances/') < 0, REAL_STORE);
+  const sandboxHome = os.homedir();
+  // 仅当 $HOME 确实被重定向到实例数据目录时该断言才适用；CI/新机 HOME 未重定向 -> 不适用。
+  const redirected = /[\\/]instances[\\/]/.test(sandboxHome);
+  check('持久化-1 凭据库不在被重定向的实例 $HOME 之下（否则换会话即失效）',
+    !redirected || (!REAL_STORE.startsWith(sandboxHome + path.sep) && REAL_STORE !== sandboxHome),
+    'STORE=' + REAL_STORE + '  HOME=' + sandboxHome + (redirected ? '' : '（HOME 未重定向，不适用）'));
+  check('持久化-2 凭据库路径不含 instances 段（实例目录是 ephemeral 的）',
+    !/[\\/]instances[\\/]/.test(REAL_STORE), REAL_STORE);
   check('持久化-3 凭据库是绝对路径（禁止 ~ 依赖）',
-    REAL_STORE.startsWith('/') && REAL_STORE.indexOf('~') < 0, REAL_STORE);
+    /^([A-Za-z]:[\\/]|\/)/.test(REAL_STORE) && REAL_STORE.indexOf('~') < 0, REAL_STORE);
   if (fs.existsSync(REAL_STORE)) {
     const pats = fs.readdirSync(REAL_STORE).filter((x) => x.endsWith('.pat'));
     check('持久化-4 真机令牌文件非空且长度合理（未被清空/占位）',

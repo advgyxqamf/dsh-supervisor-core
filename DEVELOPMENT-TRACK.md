@@ -99,7 +99,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 
 ```bash
 npm test                          # 全量；新门禁会拦住越界
-bash release/scripts/ci-core.sh   # CI 等价预演（需 DSH_SHELL_REPO）
+bash release/scripts/ci-core.sh   # CI 等价预演（本仓自包含，无需壳仓）
 ```
 
 ---
@@ -161,10 +161,10 @@ bash release/scripts/ci-core.sh   # CI 等价预演（需 DSH_SHELL_REPO）
 
 改动涉及**令牌 / 密钥 / CI Secrets / 分支保护**时，**必须**先读 `CREDENTIALS-STANDARD.md`。
 
-- 凭据只允许在规范库 `/home/bowen/.dsh/credentials/`（**禁止**实例子目录 / 附件目录 —— 那是 ephemeral 的）；
+- 凭据只允许在规范库（**真实用户 home** 下的 `.dsh/credentials/`；**禁止**实例子目录 / 附件目录 —— 那是 ephemeral 的）；
 - 用 `bash release/scripts/cred.sh list|doctor|verify` 查看与管理；
 - ⚠ `$HOME` 被重定向到实例数据目录，**一律用绝对路径**，禁止 `~`；
-- 新增 / 轮换后必须 `npm test`（`credential-hygiene-test`，18 断言）。
+- 新增 / 轮换后必须 `npm test`（`credential-hygiene-test`）。
 ### 5.2 不可逆操作（破坏性操作）
 
 **任何不可逆操作**（覆盖凭据 / 发 npm 包 / force push / 删分支 / 覆盖文件）执行前必须自问三问：

@@ -1,17 +1,12 @@
 name: build-release
 
-# 私有内核仓产线（DESIGN §16.4 + 2026-09 双仓拆分：壳已剥离至公开仓 dsh-supervisor-launcher，本仓只管内核 npm 子包）。
-# tag v<内核版本> → verify + build:launcher + npm 子包发布；壳的构建/冒烟/安装程序归壳仓 launcher-build.yml。
+# 内核仓产线（2026-09 双仓拆分：壳已剥离至公开仓，本仓只管内核 npm 子包）。
+# tag v<内核版本> → verify + build:launcher + npm 子包发布；壳的构建/冒烟/安装程序归壳仓。
 #
-# 平台分工（2026-09-11 定案，GitHub 额度优化）：
-#   - **推荐路径：全平台本地生产** `npm run release:core:all:publish`
-#     launcher 是纯 JS 产物（内核 0 依赖 / 产物 0 个 .node），平台差异仅在 npm 元数据，
-#     故一台 Linux 即可产出四个平台的正确产物，**完全不消耗 GitHub 额度**。
-#     本地发布后本 workflow 仍会因 tag 而触发，但 `precheck` 会发现「本版已全部发布」
-#     并**跳过整个 mac/win 矩阵**（约 1 分钟 ubuntu prep vs 约 110 分钟含 macOS 10x 计费）。
-#   - **兜底路径：CI 产 mac/win**。若本地只发了部分平台（或不发），precheck 判定需要构建，
-#     则由本矩阵补齐。因此 tag 推送在任何情况下都能收敛到「四平台齐备」。
-#   本矩阵**不含 ubuntu**——linux-x64 由本地生产；若加回会形成同平台二次发布（npm 拒绝）。
+# 硬标准（2026-09-13，不可协商）：**所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。**
+#   四平台全部由 CI 产出（ubuntu-22.04 / windows-latest / macos-latest / macos-14）。
+#   本仓 **不检出、不读取壳仓源码** —— 两仓按账号与仓库隔离；
+#   跨语言契约只能经「已发布产物 / schema / 测试向量」消费（见 RELEASE-STANDARD.md §0）。
 on:
   push:
     tags:
@@ -27,14 +22,10 @@ jobs:
   # test：内核回归测试（P1-B 接线，2026-09-12）
   #
   # ⚠ 为什么必须单独加这个 job：
-  #   此前 `npm test` **没有 Linux 执行点** —— 构建矩阵只有 win/mac（Linux 由本地生产），
-  #   而 `ci-core.sh`（内含 npm test）在**每次 push / PR** 都于**四平台** runner 上跑（ubuntu/windows/macos×2）——
-#   四平台完整构建是硬标准，不受 need_build 门控（那只看发布是否需要）。
-  #   于是「平台能力矩阵由可执行断言支撑」这条不变量在产线上不成立：
-  #   改坏 platform/os/ 或版本映射，CI 依然全绿。
-  #
-  #   本 job 只做测试，**不构建、不发布** —— 纯 JS 项目，ubuntu-latest 约 1 分钟（1x 计费），
-  #   不触碰「Linux 不在 CI 生产」的既有额度决策（那条针对的是**发布**）。
+  #   本 job 是**专用快速回归执行点**：先备齐前端产物与 dist/launcher（四平台），
+  #   再跑完整 `npm test`，并声明 DSH_LAUNCHER_REQUIRED=1，使 T6-d/T6-e 真执行。
+  #   纯 JS 项目，ubuntu-latest 约 1 分钟；四平台完整构建/发布由 `build` 矩阵承担。
+  #   两者职责分野，均在本仓内自包含（不检出壳仓）。
   # ══════════════════════════════════════════════════════════════════════════
   test:
     runs-on: ubuntu-latest
@@ -81,29 +72,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
 
-      - name: 检出壳仓（跨仓门禁需要**真实**读取壳仓源码）
-        uses: actions/checkout@v4
-        with:
-          # 壳仓是公开仓，无需凭据。放工作区内（actions/checkout 不允许 ../）。
-          repository: wasi7mglns/dsh-supervisor-launcher
-          path: shell-repo
-
       - name: 内核回归测试（npm test · 经 Xvfb 提供图形会话）
         shell: bash
-        # ⚠ 2026-09-13 修复（P1）：**必须指定壳仓路径**，否则跨仓门禁静默跳过。
-        #   缺陷：本仓有多条门禁读**壳仓**源码验证跨仓契约（服务定义模板 KeepAlive/
-        #   RunAtLoad、identity.json 的 exe 字段、版本向量逐字节一致、
-        #   update-journal/pinnedVersions 未被消费……），它们原先一律写死
-        #   `path.join(ROOT, '..', 'dsh-supervisor-launcher')`（假定两仓同级）。
-        #   而 CI **只检出内核仓** → 这些断言全部走 `SKIP（壳仓不在同级目录）` 分支
-        #   **静默通过** → 跨仓契约在产线上从未被检查（典型假门禁）。
-        #   实证：内核 CI 首次运行 master push 时，唯有 R10 的**反向断言**（扫描非空转）
-        #   失败把问题顶了出来，其余 4 处跨仓断言全部静默 SKIP 通过。
-        #   修法：检出壳仓 + `DSH_SHELL_REPO` 指定路径；且 test/_shell-repo.js 在
-        #   「声明了壳仓却缺失」时**硬失败**而不是跳过，防止检出失败再度退化。
+        # 本仓测试**自包含**：不检出、不读取壳仓源码（两仓按账号/仓库隔离）。
+        #   跨语言契约（版本向量、identity.json、服务定义）经「已发布产物 / schema / 测试向量」
+        #   消费，绝不再跨仓读源码 —— 见 RELEASE-STANDARD.md §0 与 test/no-cross-repo-test.js。
         env:
-          DSH_SHELL_REPO: ${{ github.workspace }}/shell-repo
-          # ⚠ 2026-09-13：声明「launcher 产物必须存在」——
+          # ⚠ 声明「launcher 产物必须存在」——
           #   all-platforms-test 的 T6-d（产物无 .node）/ T6-e（四平台 core.cjs 哈希一致）
           #   需要真实产物。原先无产物时静默 SKIP → 该断言在 CI 中永不检查。
           #   这里先构建，再声明需要；若构建失败或产物缺失，T6 **硬失败**而不是跳过。
@@ -204,21 +179,8 @@ jobs:
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       DSH_ARCH_OVERRIDE: ${{ matrix.arch_override }}
-      # ⚠ 2026-09-13：**跨仓门禁**需要真实读取壳仓源码 ——
-      #   ci-core.sh 的 npm test 含 R10 / A5 / P2 / W5 / V2 五条**跨仓**断言，
-      #   它们经 test/_shell-repo.js 解析壳仓路径：优先本变量，未设则回退「两仓同级」。
-      #   构建矩阵原先只检出内核仓 → R10 的**反向断言**（扫描非空转）失败：len=0，
-      #   其余跨仓断言则静默 SKIP。故此处与 test job 保持同一纪律。
-      DSH_SHELL_REPO: ${{ github.workspace }}/shell-repo
     steps:
       - uses: actions/checkout@v4
-
-      # 壳仓是公开仓，无需凭据。放在工作区内（actions/checkout 不允许 ../）。
-      - name: 检出壳仓（跨仓门禁需要**真实**读取壳仓源码）
-        uses: actions/checkout@v4
-        with:
-          repository: wasi7mglns/dsh-supervisor-launcher
-          path: shell-repo
 
       - name: Install Node
         uses: actions/setup-node@v4

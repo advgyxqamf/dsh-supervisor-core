@@ -17,7 +17,7 @@ let failures = 0;
 //   而文件里实际有 **40** 个 check()。后果：
 //     · 汇总的「断言数」与真实执行数脱钩（内核聚合断言计数因此**少算 14**）；
 //     · 更危险的是它伪装成一道门禁：**删掉 14 个既有 check**，汇总仍打印「26 passed」，
-//       看不出覆盖缩水 —— 正是 AUDIT-HANDOFF 第 9.2 节「假门禁」的形状。
+//       看不出覆盖缩水 —— 正是历史审计记录的「假门禁」形状。
 //   修法：由 check() 自己累加真实总数，汇总恒等于实执行数（不可能是常量）。
 let checks = 0;
 const check = (name, cond, extra) => { checks++; if (!cond) failures++; console.log((cond ? 'PASS' : 'FAIL') + ' ' + name + (extra !== undefined ? '  ← ' + JSON.stringify(extra) : '')); };

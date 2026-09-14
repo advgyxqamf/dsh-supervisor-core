@@ -2,7 +2,7 @@
 screenshots/
 **/screenshots/
 
-# build 产物（内核 SEA + npm 子包组装，全部可重新生成，绝不入库）
+# build 产物（launcher + npm 子包组装，全部可重新生成，绝不入库）
 # 注：src-tauri/* 与 dist/export-shell 条目已于 2026-09-11 清理 —— 前者属壳仓（本仓不得存在
 #     src-tauri 目录），后者的 export-shell.sh 脚本已随双仓隔离删除。
 dist/release

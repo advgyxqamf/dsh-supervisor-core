@@ -11,7 +11,7 @@
 //     · 注释声称「mac 由 LaunchAgent 一并代管」（macPlist 从奠基至今逐字节未变、只含守卫）
 //     · status() 硬编码 `gui: on`（把守卫自启当成壳自启）
 //     · setGuiAutostart 对非 Linux **静默 `return { ok: true }`**
-//     · AUDIT-CROSS-PLATFORM.md 给这项打了「三端齐全」
+//     · 早期审计曾给这项打了「三端齐全」（现行矩阵见 PLATFORM-CAPABILITY-MATRIX.md）
 //   四层互相背书，**没有一层验证行为**。
 //
 // 本测试即是「验证行为」这一层。
@@ -26,7 +26,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
-const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const POS = path.join(ROOT, 'src', 'platform', 'os');
@@ -157,25 +156,9 @@ console.log('== A2 声明能力必须有实现产物 ==');
 console.log('== A5 自愈机制真实性 ==');
 {
   const asSrc = readOs('autostart.js');
-  // 守卫 plist 的定义**归桌面壳**（所有权矩阵）—— 内核不再持有该模板，故跨仓读壳的 service.rs。
-  // 2026-09-13 修正：平台重构（壳仓 67f4684「批 A」）后
-  //   src-tauri/src/service.rs 已移至 src-tauri/src/platform/service.rs，
-  //   而守卫 plist 的**内容模板**（KeepAlive/RunAtLoad）在 src-tauri/src/platform/macos.rs。
-  //   旧路径已失效 → 本断言此前**一直走 SKIP 分支**（本地与 CI 皆未真正执行）。
-  const shellSvc = shellRepoHelper.pathIn('src-tauri', 'src', 'platform', 'macos.rs');
-  if (fs.existsSync(shellSvc)) {
-    const svc = fs.readFileSync(shellSvc, 'utf8');
-    check('A5 守卫 plist 含 KeepAlive（守卫崩溃自愈）', /KeepAlive/.test(svc), 'ok');
-    check('A5 守卫 plist 含 RunAtLoad（登录即启动）', /RunAtLoad/.test(svc), 'ok');
-    // ⚠ 所有权不变量：内核**不得**再写守卫 plist（双写会让两模板漂移 + 关闭自启不生效）
-    check('A5 内核不再持有守卫 plist 模板（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
-  } else {
-    console.log('SKIP A5 守卫 plist 断言（壳仓不在同级目录）');
-    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
-    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
-    const whyMissing = shellRepoHelper.skipReason('A5');
-    if (whyMissing) check('A5 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
-  }
+  // 守卫 plist 的**内容模板**归桌面壳（所有权矩阵）—— 由壳仓测试负责，
+  //   内核**不读壳仓源码**。内核侧只保留所有权不变量：不得再持有该模板。
+  check('A5 内核不再持有守卫 plist 模板（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
   // 壳自愈 Windows：shell 检查必须**独立于** `if (-not $up)` 块
   const ps = asSrc.match(/const ps = \[[\s\S]*?\]\.join/);
   check('A5 Windows watchdog 脚本存在', !!ps, 'ok');
@@ -232,18 +215,9 @@ console.log('== A7 壳自愈：声明 ↔ 实现 ==');
     check('A7 看护有宽限期（避让壳自更新空窗）', /graceMs/.test(wd) && /updateGraceMs/.test(wd), 'ok');
     check('A7 看护不假成功（失败如实上报）', /restart_failed/.test(wd), 'ok');
   }
-  // 跨仓契约：壳必须记录自身 exe（看护的路径来源）
-  const shellUpd = shellRepoHelper.pathIn('src-tauri', 'src', 'update.rs');
-  if (fs.existsSync(shellUpd)) {
-    check('A7 壳 identity.json 记录 exe（看护定位依据）',
-      /"exe"\s*:\s*std::env::current_exe\(\)/.test(fs.readFileSync(shellUpd, 'utf8')), 'ok');
-  } else {
-    console.log('SKIP A7 跨仓 exe 断言（壳仓不在同级目录）');
-    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
-    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
-    const whyMissing = shellRepoHelper.skipReason('A7');
-    if (whyMissing) check('A7 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
-  }
+  // 「壳写 identity.json 的 exe」是壳仓自身产出契约，由壳仓测试负责
+  //   （src-tauri/src/update.rs::t1）。内核不读壳仓源码；内核侧只验证消费行为
+  //   （shell-watchdog-test 的 W1-i / W3-c / W3-f）。
 }
 
 // ── A8 自启所有权：内核不越权 + GUI 产物与守卫分离 ──

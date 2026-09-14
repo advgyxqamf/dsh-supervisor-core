@@ -101,7 +101,7 @@ class SettingsView {
 
   /** 守卫自更新「重启生效」衔接：仅当配置 guardRestartAllowed=true 且存在 systemd 用户单元才执行；
    *  否则返回明确指引（避免误杀/误起守卫）。 */
-  /** 自更新后的守卫重启（A2）：能力按部署形态自动判定（SEA=systemd 重启闭环；源码形态=拒绝），
+  /** 自更新后的守卫重启（A2）：能力按部署形态自动判定（打包态=systemd 重启闭环；源码形态=拒绝），
    *  去掉 guardRestartAllowed 人工配置门槛。重启前落盘「预期版本」，重启后 /status 校验自报版本
    *  达标才算更新成功——闭环可观测，不再出现"装了没生效"的静默失败。 */
   guardSelfUpdateRestart() {
@@ -155,7 +155,7 @@ class SettingsView {
     const pkg = this.guardCorePkg();
     if (!pkg) return { ok: false, error: '未配置内核自更新包（corePackageName）' };
     if (!this.dist || typeof this.dist.fetchLatestVersion !== 'function') return { ok: false, error: '发布服务未初始化' };
-    // 部署形态判定（A1）：npm 自更新仅适用于标准产品形态（SEA 单文件二进制）。
+    // 部署形态判定（A1）：npm 自更新仅适用于标准产品形态（npm 分发的 launcher）。
     // 源码开发形态（bin 壳 require 源码目录）装新二进制永远不生效——显式拒绝，面板不再假装成功。
     const dep = deploy.detect();
     if (!dep.updatable) {
@@ -182,7 +182,7 @@ class SettingsView {
     if (!pkg) return { ok: false, error: '未配置内核自更新包（corePackageName）' };
     if (!this.dist || typeof this.dist.runNpmInstall !== 'function') return { ok: false, error: '发布服务未初始化' };
     if (!this.config.installCommandTemplate || !Array.isArray(this.config.installCommandTemplate)) return { ok: false, error: '未配置安装命令模板（installCommandTemplate）' };
-    // 部署形态门槛（A1）：status 已含判定；updatable=false 直接拒绝（源码形态装 SEA 永不生效）
+    // 部署形态门槛（A1）：status 已含判定；updatable=false 直接拒绝（源码形态走 npm 自更新永不生效）
     const latest = await this.guardSelfUpdateStatus();
     if (!latest.ok || !latest.latest) return { ok: false, error: (latest && latest.error) || '版本查询失败' };
     if (latest.updatable === false) return { ok: false, error: latest.error || '当前部署形态不支持自更新', form: latest.form };
@@ -313,7 +313,7 @@ class SettingsView {
       const up = (ex.runOut('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}']) || '').trim();
       if (up) upstream = 'git-repo';
     } catch {}
-    // version = 进程运行版本（启动时固化，SEA 为编译期常量）——语义明确标注（A3）。
+    // version = 进程运行版本（启动时固化，打包态为编译期常量）——语义明确标注（A3）。
     // 磁盘实况版本（runningVersion vs diskVersion 的 updatePending 判定）在 async guardVersionCheck。
     return { version: this.guardVersion, runningVersion: this.guardVersion, commit, updateAvailable: false, upstream, latest: this.guardVersion };
   }

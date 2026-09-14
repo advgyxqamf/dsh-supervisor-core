@@ -2,7 +2,7 @@
 
 > 本文件是**凭据管理的唯一规范**。每一条都对应一个会失败的门禁
 > （`test/credential-hygiene-test.js`，18 断言，已注入验证）。
-> 工具：仓库 `release/scripts/cred.sh`；库：本机 `/home/bowen/.dsh/credentials/`。
+> 工具：仓库 `release/scripts/cred.sh`；库：**真实用户 home** 下的 `.dsh/credentials/`（经 getent/dscl/USERPROFILE 解析；可用 `DSH_CRED_DIR` 覆盖）。
 
 ---
 
@@ -13,7 +13,7 @@
 **根因**（已查证）：壳仓令牌被存放在**实例附件目录**：
 
 ```
-/home/bowen/.dsh/supervisor/instances/inst-1788823804493-427/data/.dsh/attachments/.../gh_token.txt
+<REAL_HOME>/.dsh/supervisor/instances/inst-<id>/data/.dsh/attachments/.../gh_token.txt
 ```
 
 那是 **ephemeral** 的 —— 每个会话/实例一个目录，换会话就没了。另有一份副本以 **0664（全局可读）**
@@ -29,18 +29,18 @@
 
 | # | 铁律 | 门禁 |
 |---|---|---|
-| 1 | 凭据**只允许**存放在规范库 `/home/bowen/.dsh/credentials/`（SSH 密钥可留 `~/.ssh`）。**禁止**放在实例子目录或附件目录 | C-3 |
+| 1 | 凭据**只允许**存放在规范库 `<REAL_HOME>/.dsh/credentials/`（SSH 密钥可留 `~/.ssh`）。**禁止**放在实例子目录或附件目录 | C-3 |
 | 2 | 库目录 **0700**、库内文件 **0600**；禁止令牌内嵌进 git remote URL；仓库文件里不得出现令牌值 | C-1 / C-4 / C-6 / C-7 |
 | 3 | 令牌**必须有清单条目**（`index.json`），只存引用不存值；缺失要显式标 `missing` | C-2 / C-5 |
 
 ### 关键陷阱：`$HOME` 被重定向
 
 ```
-$HOME = /home/bowen/.dsh/supervisor/instances/<id>/data      # 不是 /home/bowen！
+$HOME = <REAL_HOME>/.dsh/supervisor/instances/<id>/data      # 不是 <REAL_HOME>！
 os.homedir() 同值。
 ```
 
-所以 `~/.dsh` **不等于** `/home/bowen/.dsh`。
+所以沙箱 `~/.dsh` **不等于** `<REAL_HOME>/.dsh`。
 **一切凭据路径必须写绝对路径**，禁止用 `~` —— 清单里也写明了（`homeNote`）。
 
 ---
@@ -95,22 +95,18 @@ echo -n TOKEN | bash release/scripts/cred.sh put 名   # 写入并置 active
 | 名称 | 类型 | 账号 | 状态 |
 |---|---|---|---|
 | `kernel` | GitHub PAT | `advgyxqamf` | **active** |
-| `shell` | GitHub PAT | `wasi7mglns` | **missing** —— 需重新签发 |
+| `shell` | GitHub PAT | `wasi7mglns` | active |
 | `push-kernel` | SSH 部署密钥 | `advgyxqamf` | active |
 | `push-shell` | SSH 部署密钥 | `wasi7mglns` | active |
 | `npm` | npm automation | `lob.bowen` | external（CI 用 repo secret）|
 
-### 壳仓令牌补发（唯一未完成项）
-
-需要账号 `wasi7mglns` 签发一枚 fine-grained PAT：
-
-- Repository access：`wasi7mglns/dsh-supervisor-launcher`
-- Permissions：**Administration: Read and write**（分支保护必需）、`Contents: Read`、`Actions: Read`、`Metadata: Read`；
-- 签发后：`bash release/scripts/cred.sh put shell`，再 `verify shell` 应 OK。
+> 壳仓令牌已于后续会话补发并验证为 active（`cred.sh verify shell` 应为 OK）。
 
 ---
 
-## 6. 门禁（test/credential-hygiene-test.js，18 断言）
+## 6. 门禁（test/credential-hygiene-test.js）
+
+> 断言数以脚本实际输出为准（不在此固化数字，避免与实现漂移）。
 
 | 组 | 内容 |
 |---|---|
@@ -137,7 +133,7 @@ echo -n TOKEN | bash release/scripts/cred.sh put 名   # 写入并置 active
 ## 7. 与发布工程的关系
 
 - 仓库内保存**规范 + 工具 + 门禁**，**不含任何值**（值只在本机库或 CI Secrets）；
-- `release/runbooks/credentials.md` 是面向人的 runbook（含历史与最小权限说明）；
+- 不再单独维护凭据 runbook；面向人的步骤已并入本文件 §3/§4；
 - 本文件是**标准**（含门禁与步骤）；两者互补，改一处须同步另一处；
 - CI 侧凭据走仓库 Secrets（`NPM_TOKEN` / `GITHUB_TOKEN`），不依赖本机库。
 
@@ -165,7 +161,7 @@ echo -n TOKEN | bash release/scripts/cred.sh put 名   # 写入并置 active
 |---|---|---|
 | 破坏性子命令（`put`）在真机库上**默认拒绝** | 需 `DSH_CRED_ALLOW_OVERWRITE=1`；目标已存在时再需 `DSH_CRED_FORCE=1` | W-1 / W-2 |
 | 覆盖前**必须**留旧值备份 | `<file>.bak-<时间戳>`（0600）| W-3 |
-| 测试夹具与真机**结构隔离**；隔离失效要**失败**而非降级 | 门禁用 `DSH_CRED_DIR`；真机保护本身用「改写副本常量」的 fakeReal 模拟来验证 | W-1..W-4 |
+| 测试夹具与真机**结构隔离**；隔离失效要**失败**而非降级 | 门禁用 `DSH_CRED_DIR`；真机保护用 `DSH_REAL_HOME=<tmp>` 把「真机库」指向临时目录来验证 | W-1..W-4 |
 | 仓库内不得存在未隔离的 `put` 调用 | 静态扫描（跳过注释）| W-5 |
 
 ### 可推广的规律（写进 DEVELOPMENT-TRACK 的假绿清单）
@@ -179,5 +175,6 @@ echo -n TOKEN | bash release/scripts/cred.sh put 名   # 写入并置 active
 ### 因此「显式 SKIP」也可能是缺口
 
 本门禁首版在「真机无 PAT 文件」时会 **SKIP** W-1..W-4 —— 那意味着**保护是否生效根本没被验证**。
-已改为 **fakeReal 模拟法**：复制 `cred.sh`、把真机库常量改写为临时路径，
-在**任意宿主**上确定性验证保护逻辑，且**完全不动真机凭据**。
+现已改为 **`DSH_REAL_HOME` 模拟法**：把「真机库」解析根指向临时目录（`cred.sh` 经
+`_npm-auth.sh::dsh_real_home()` 读取该变量），在**任意宿主**上确定性验证保护逻辑，
+且**完全不动真机凭据**；不再复制/改写脚本源码。

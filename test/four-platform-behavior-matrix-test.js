@@ -84,6 +84,8 @@ function underFake(platform, arch, body) {
     !!threw && /不支持的平台组合/.test(threw), threw || '(未抛)');
   check('P-2 不支持的组合：frpTag 返回 null（不猜）', matrix.frpTag('freebsd', 'x64') === null, 'null');
   check('P-1 不支持的架构：isSupported=false', matrix.isSupported('linux', 'ppc64') === false, 'false');
+  check('P-1 未发布组合：linux-arm64 / win32-arm64 isSupported=false',
+    matrix.isSupported('linux', 'arm64') === false && matrix.isSupported('win32', 'arm64') === false, 'false');
 }
 
 // ── P-4：capabilityProfile 键集合四平台一致（防"某平台少声明一项能力"）──

@@ -32,7 +32,25 @@ const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const ROOT = path.join(__dirname, '..');
 const CRED_SH = path.join(ROOT, 'release', 'scripts', 'cred.sh');
-const REAL_STORE = '/home/bowen/.dsh/credentials';
+
+// 真实用户 home：$HOME 被 DSH 重定向到实例数据目录，故与 cred.sh 同源解析 ——
+//   不得硬编码机器路径。仅用于「真机库是否存在」的提示，不参与任何写入。
+function realHome() {
+  if (process.env.DSH_REAL_HOME) return process.env.DSH_REAL_HOME;
+  if (process.platform === 'win32') return process.env.USERPROFILE || os.homedir();
+  try {
+    const u = os.userInfo().username;
+    if (process.platform === 'darwin') {
+      const h = execFileSync('dscl', ['.', '-read', '/Users/' + u, 'NFSHomeDirectory'], { encoding: 'utf8' }).trim().split(/s+/).pop();
+      if (h && fs.existsSync(h)) return h;
+    } else {
+      const h = execFileSync('getent', ['passwd', u], { encoding: 'utf8' }).trim().split(':')[5];
+      if (h && fs.existsSync(h)) return h;
+    }
+  } catch { /* 回退到 os.homedir() */ }
+  return os.homedir();
+}
+const REAL_STORE = process.env.DSH_CRED_DIR || path.join(realHome(), '.dsh', 'credentials');
 
 const results = [];
 const check = (n, c, x) => {
@@ -84,16 +102,16 @@ function cred(args, env) {
     offenders.length === 0, offenders.length ? offenders.slice(0, 3).join(' | ') : '未发现');
 }
 
-// ── W-1/W-2/W-3：真机库保护（真机存在才测）──
-// ⚠ 关键设计：**不依赖真机库的状态**。
-//   真机令牌可能缺失（条目 missing）—— 那样「保护是否生效」就没被验证到（首版即如此 SKIP）。
-//   改为：复制 cred.sh 到临时目录，把其中的真机库常量**改写**为临时路径，
-//   于是「真机保护」逻辑在**任意宿主**上都能确定性验证，且**完全不动真机凭据**。
+// ── W-1/W-2/W-3：真机库保护（用 DSH_REAL_HOME 把「真机库」指向临时目录）──
+// ⚠ 关键设计：**不依赖真机库的状态，也不复制/改写脚本**。
+//   cred.sh 的「真机库」= dsh_real_home()/.dsh/credentials；_npm-auth.sh 支持 DSH_REAL_HOME 覆盖。
+//   故设 DSH_REAL_HOME=<tmp> 即可在任意宿主确定性验证真机保护，且**完全不动真实凭据**。
 {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'realsim-'));
   fs.chmodSync(T, 0o700);
-  const fakeReal = path.join(T, 'fakereal');
-  fs.mkdirSync(fakeReal, { mode: 0o700 });
+  const fakeHome = path.join(T, 'fakehome');
+  const fakeReal = path.join(fakeHome, '.dsh', 'credentials');
+  fs.mkdirSync(fakeReal, { recursive: true, mode: 0o700 });
   const kf = path.join(fakeReal, 'k.pat');
   fs.writeFileSync(kf, 'original-secret-value');
   fs.chmodSync(kf, 0o600);
@@ -103,20 +121,12 @@ function cred(args, env) {
     history: [],
   }));
   fs.chmodSync(path.join(fakeReal, 'index.json'), 0o600);
-  // 复制并改写「真机库」常量 -> 指向 fakeReal
-  //
-  // ⚠ 注入前必须 **POSIX 化**：Windows 路径含反斜杠，写进 shell 脚本后在双引号串里
-  //   被当作转义（\U \A 被吃）→ 路径变成 C:UsersRUNNER~1...，清单找不到、put 返回 1 而非 2。
-  //   该缺陷只在 Windows CI 暴露。Git Bash / MSYS 接受正斜杠，故统一转 /。
-  const sim = path.join(T, 'cred-sim.sh');
-  const fakeRealSh = fakeReal.split(path.sep).join('/');
-  fs.writeFileSync(sim, fs.readFileSync(CRED_SH, 'utf8')
-    .split(REAL_STORE).join(fakeRealSh));
-  const runSim = (args, env) => {
+
+  const runReal = (args, env) => {
     try {
-      const out = execFileSync('bash', [sim].concat(args), {
+      const out = execFileSync('bash', [CRED_SH].concat(args), {
         encoding: 'utf8', timeout: 60000,
-        env: Object.assign({}, process.env, env || {}),
+        env: Object.assign({}, process.env, { DSH_REAL_HOME: fakeHome }, env || {}),
       });
       return { code: 0, out: String(out) };
     } catch (e2) {
@@ -124,7 +134,7 @@ function cred(args, env) {
     }
   };
   const before = sha(kf);
-  const rDeny = runSim(['put', 'kernel']);        // 无确认 —— 必须被拒
+  const rDeny = runReal(['put', 'kernel']);        // 无确认 —— 必须被拒
   const afterDeny = sha(kf);
   check('W-1 「真机库」上 put 无确认时被拒绝（exit 2）', rDeny.code === 2, 'exit=' + rDeny.code);
   check('W-2 被拒绝时凭据文件**字节未变**', before !== null && before === afterDeny, before + ' vs ' + afterDeny);
@@ -133,10 +143,11 @@ function cred(args, env) {
   // 带确认 -> 应成功且**自动备份旧值**
   let rAllow = { code: -1, out: '' };
   try {
-    rAllow = execFileSync('bash', ['-c', 'printf %s rotated-value | bash "$0" put kernel', sim], {
+    const out = execFileSync('bash', ['-c', 'printf %s rotated-value | bash "$0" put kernel', CRED_SH], {
       encoding: 'utf8', timeout: 60000,
-      env: Object.assign({}, process.env, { DSH_CRED_ALLOW_OVERWRITE: '1', DSH_CRED_FORCE: '1' }),
-    }) ? { code: 0, out: '' } : { code: 0, out: '' };
+      env: Object.assign({}, process.env, { DSH_REAL_HOME: fakeHome, DSH_CRED_ALLOW_OVERWRITE: '1', DSH_CRED_FORCE: '1' }),
+    });
+    rAllow = { code: 0, out: String(out) };
   } catch (e3) { rAllow = { code: (e3 && e3.status) || 1, out: String((e3 && e3.stderr) || '') }; }
   const baks = fs.readdirSync(fakeReal).filter((f) => f.includes('.bak-'));
   check('W-3 覆盖前自动备份旧值（.bak-<时间戳>）', baks.length >= 1, baks.join(', ') || '(无备份)');

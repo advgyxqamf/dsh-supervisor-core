@@ -8,6 +8,73 @@
 
 （下一版本待记）
 
+## [0.1.5-BETA.4]（2026-09-14）
+
+### 设计修正：内核仓与壳仓彻底解耦（移除跨仓源码依赖）
+
+**问题（实证）**：内核测试经 `test/_shell-repo.js` 读取**壳仓源码**，CI 又 `actions/checkout`
+壳仓默认分支 `main`。于是同一内核提交 `4eae7371`：本地（同级壳仓工作树在 `release/shell-1.1.0`）
+全绿，CI（壳仓 `main` 仍含 `attempt`/`pendingVersion`）在 `shell-safety-net R10-b` 失败。
+一个与内核无关的壳仓提交即可翻转内核 CI 结论 —— 两仓账号/仓库隔离被测试层穿透。
+
+**修正**：内核**不检出、不读取壳仓源码**；跨语言契约只经「已发布产物 / schema / 测试向量」消费。
+
+| 位置 | 处置 |
+|---|---|
+| `.github/workflows/build.yml` | 删除两处壳仓 `actions/checkout` 与 `DSH_SHELL_REPO` |
+| `test/_shell-repo.js` | 删除 |
+| `test/version-vectors-test.js` V2 | 去掉两仓逐字节比对，改为本仓向量 schema/结构自洽 |
+| `test/shell-safety-net-test.js` R10-b | 删除扫描壳源码；保留内核侧 R10-a/R10-c |
+| `test/shell-watchdog-test.js` W5 | 删除读壳 `update.rs`；消费行为由 W1-i/W3-c/W3-f 覆盖 |
+| `test/autostart-ownership-test.js` P2-f/P2-g | 删除读壳 `macos.rs`；所有权内核侧断言保留 |
+| `test/platform-capability-audit-test.js` A5/A7 | 删除读壳源码；保留内核侧所有权断言 |
+| `test/no-cross-repo-test.js`（新增） | X-1..X-5：代码/workflow 不得再出现壳仓耦合，含反向判据 |
+
+壳侧反回归（不得重新引入 `attempt`/`pendingVersion`/`update-journal`）归**壳仓自身测试**。
+
+### 规范立住：封死本地发布 + 清除机器绑定与过时声明
+
+**本地单平台真发布封死**：此前只拒绝了 `--all-platforms`，单平台 `publish-core.sh --publish`
+/ `ci-core.sh --publish` 仍可在开发机直发 npm。现两者均要求 `GITHUB_ACTIONS=true`（本地 exit 2）；
+`all-platforms-test` T2-b2/T2-d2 锁定。`RELEASE-STANDARD.md` §0 增两条硬标准。
+
+**清除机器绑定（`/home/bowen`）**：
+- `release/scripts/cred.sh`：库根改由 `_npm-auth.sh::dsh_real_home()` 解析（getent/dscl/USERPROFILE），
+  可用 `DSH_CRED_DIR` 覆盖；旧别名/散落副本路径同源派生；
+- `test/credential-hygiene-test.js` / `test/destructive-op-safety-test.js`：同源派生真实 home；
+  后者改用 `DSH_REAL_HOME=<tmp>` 模拟真机库（不再复制/改写脚本）；
+- `ui/src/features/supervisor/InstancesPage.tsx` placeholder 与 `README.md` 示例路径改通用；
+- `CREDENTIALS-STANDARD.md` / `DEVELOPMENT-TRACK.md` / `release/README.md` 改 `<REAL_HOME>`；
+- 新增 `test/no-dev-path-test.js`（X-1..X-3，含反向判据）。
+
+**清除过时/分歧声明**：
+- 脚本头：`ci-core.sh` / `publish-core.sh`（SEA、`--all-platforms` 可用、linux 本地生产）；
+- `release/README.md`：删「本地全平台构建已跑通」与「build 被 need_build 跳过」的过时章节/边界；
+- `release/runbooks/publish-and-verify.md`：本地生产与 `launcher-build.yml`（幽灵产线）改指真实 CI；
+- `RELEASE-STANDARD.md` §3：`publish:core:all`（不存在）→ `publish:core` / `--publish`；新增 P-2c 门禁
+  （规范正文里每个 `npm run X` 必须在 package.json 存在）；
+- `LICENSE` / `.gitignore` / `_npm-auth.sh` / `build-ui.sh` SEA 遗留措辞；
+- **删除过时根级文档** `AUDIT-HANDOFF.md`、`AUDIT-CROSS-PLATFORM.md`，并同步 README 索引与引用。
+
+### 强制更新收敛：壳回退机构整体移除
+
+产品规则：壳与内核同一套升级逻辑 —— 有新版必须强制更新；**不得回退、不得跳过、
+不得按版本拉黑、不得冷却抑制**。唯一保留回退的是 **DSH 自身升级**
+（`guard/native/manager.js` / `domains/dist/`，本次未触碰）。
+
+| 位置 | 内容 |
+|---|---|
+| `domains/shell/index.js` | 删除 `rollback()`、`should-rollback` 分支、`pinnedVersions`、`attempts/maxAttempts`；`evaluate()` 仅剩 idle/pending/confirmed |
+| `domains/shell/watchdog.js` | 去掉已删账本字段 `rolledBack` 的读取 |
+| `api/shell.js` | 删除 `POST /shell/rollback` 处理分支 |
+| `api/surface.js` | 删除 `/shell/rollback` 登记与 `pinnedVersions` 相关说明 |
+| `release/README.md` | 跨仓契约表：删除 `update-guard.json` 行，`identity.json` 改注运行时字段 |
+| `test/shell-safety-net-test.js` | R3 改断言「永不回退」；R4/R10 增反回归门禁 |
+
+### 验证
+
+`npm test` 全绿（CI `test` job）；`shell-safety-net-test` 57 passed / 0 failed。
+
 ## [0.1.5-BETA.3]（2026-09-14）
 
 > 本轮确立**硬标准**并据此修正 CI 门控；修正后立刻暴露出 5 类只在 macOS/Windows

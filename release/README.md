@@ -43,9 +43,8 @@
 | 文件 | 方向 | 内容 |
 |---|---|---|
 | `registry.json` | 壳 → 内核 | 镜像源偏好与测速结果（内核「优先采用壳投放的 selected」） |
-| `identity.json` | 壳写 | 壳自身身份；其护栏字段（`attempt`/`pinned`/`pendingVersion`）是壳本地 Guard 的**投影** |
-| `update-guard.json` | 壳写 | 自更新护栏（冷却/抑制/pinnedVersions） |
-| `update-journal.json` | 内核写 | 更新日志（`pinnedVersions` **声明无接收方**，壳不消费） |
+| `identity.json` | 壳写 | 壳自身身份（`version`/`phase`/`exe`/`lastSeenAt` 等运行时字段）；护栏/回退字段已废除 |
+| `update-journal.json` | 内核写 | 壳更新账本（`to`/`confirmed`）；强制更新，**不含回退/拉黑** |
 
 **约束**：契约字段的**新增**必须向后兼容（读方在字段缺失时降级）；
 契约字段的**移除或语义变更**必须**内核先行**，并允许两侧版本错配运行一个发布周期。
@@ -164,40 +163,24 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 
 ---
 
-## 1. 产线实证与已知边界（2026-09-13）
+## 1. 产线现状（2026-09-14，硬标准）
 
-### 1.1 本地全平台真实构建（已跑通）
+### 1.1 构建与发布一律在 CI
 
-`CI（tag 触发）`（dry-run）**完整跑通**：
+- **四平台完整构建**：`.github/workflows/build.yml` 的 `build` job，4 runner 矩阵
+  （`ubuntu-22.04` / `windows-latest` / `macos-latest` / `macos-14`），各 runner 只构建**自己**的平台；
+  `build` **不受 `need_build` 门控**（2026-09-14 硬标准）—— 每次 push / PR 都跑。
+- **验证内容**：`ci-core.sh` 内 `verify:versions` → 前端 `verify` → `npm test` → `build:launcher` →
+  子包组装 + `npm publish --dry-run`；构建期断言四平台 `core.cjs` 逐字节一致，并做
+  self-check + fresh-HOME daemon 自举 + UI 服务端到端冒烟。
+- **发布**：tag `v*` + 有 `NPM_TOKEN` + `need_build=true` 时，各平台 runner 执行
+  `ci-core.sh --publish`。`need_build`（`precheck` 探测「四平台是否已全部发布」）**只作用于发布**，
+  用于防同版本重发（npm 409）；它**不再跳过构建**。
+- **本地**：只允许门禁（S0–S4）与 `--dry-run`；任何真发布都要求 `GITHUB_ACTIONS=true`（见「内核构建模式」）。
 
-```text
-[1/6] 前端构建 ui/ → ui-react/ 镜像
-[2/6] esbuild 打包 → dist/launcher/core.cjs  965.7kb（仅 --platform=node + 版本注入）
-[3/6] 派生四平台目录 + **一致性断言**：四份 core.cjs 逐字节相同（sha256=fc1e8abdaad23c8e…）
-[4/6] 冒烟：launcher self-check OK / --version = v0.1.5-BETA.1 / fresh-HOME daemon 自举 OK / UI 服务断言 OK
-[5/6] 产物清单（四平台各 966K）
-[6/6] 完成
-[4/5] 四平台子包组装 + npm publish --dry-run → 4/4 全部成功
-```
+> 产线结论看 GitHub Actions 的 run 列表即可 —— 文档不再固化 run 号（必然漂移）。
 
-**该步骤同时是「内核能否正常工作」的端到端自证**（self-check + daemon 自举 + UI 服务）。
-
-### 1.2 CI 侧（公开仓，免额度）
-
-| run | 事件 | 结果 |
-|---|---|---|
-| `v0.1.5-BETA.1`（34581179425）| tag | **四 job 全绿**：precheck + build(macos-14/macos-latest/windows) + **release** |
-| `v0.1.4-BETA.1`（34574857317）| tag | windows `build` **failure**，mac 两平台 success（该故障在 BETA.5 已修） |
-| `workflow_dispatch`（34741509837）| 手动 | precheck success，**build skipped**，release skipped |
-
-**已知边界（重要）**：
-
-> `build` 矩阵的判据是 `precheck.need_build == 'true'`，即「package.json 的版本尚有平台子包未发布」。
-> 因此**当版本四平台齐备后，CI 构建矩阵不再运行** —— 想在 CI 里重跑一次完整构建，
-> 必须存在一个**未发布的新版本**。这是**有意的防重发设计**，不是故障。
-> 验证 CI 构建路径的手段：① 发新版本时自然触发；② 需要时临时用未发布版本号 dispatch（会改版本，须谨慎）。
-
-### 1.3 推送即回归（push master）
+### 1.2 推送即回归（push master）
 
 `test` job 在每次 push 时运行，且已修正三处「从未真正执行」的问题：
 
@@ -205,10 +188,11 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 |---|---|
 | 先 `build-ui.sh` 再 `npm test` | `core-test` 的面板 CSP / nosniff 断言需要**构建产物**，否则 503 → 2 条失败 |
 | `xvfb-run -a npm test` | 看护 E2E 需要**图形会话**；无头 runner 里看护按设计拒绝拉起 GUI 壳 |
-| 检出公开壳仓 + `DSH_SHELL_REPO` | 5 条**跨仓门禁**原先在 CI 中静默 `SKIP`（壳仓不在同级目录）→ 假门禁 |
+| **内核仓不再检出/读取壳仓源码** | 两仓按账号/仓库隔离；跨语言契约只经「已发布产物 / schema / 测试向量」消费，由 `test/no-cross-repo-test.js` 锁定 |
 
-> 跨仓门禁的定位统一走 `test/_shell-repo.js`：`DSH_SHELL_REPO` 优先；
-> **一旦声明了壳仓却缺失即硬失败**，禁止静默跳过。
+> 曾经的 `test/_shell-repo.js` / `DSH_SHELL_REPO` / 壳仓 checkout 已整体删除：
+> 它把「跨语言行为一致性」错误实现成了「跨仓库源码读取」，会让内核 CI 读壳仓 `main`
+> 的浮动版本 → **本地绿、CI 红**，且两仓隔离被穿透。
 
 ---
 
@@ -225,11 +209,11 @@ release/
     ├── bump.sh                ← 版本提升（**--core 内核单源**；壳版本提升见壳仓 scripts/bump-shell.sh）
     ├── build-ui.sh            ← 前端统一构建（ui/ → ui-react/ 镜像；npm test 与 launcher 携带依赖）
     ├── build-launcher.sh      ← 内核统一发布物（esbuild bundle core.cjs + node 启动脚本 + ui-react）
-    │                             `--all-platforms`：一次构建 → 派生 4 平台（零 GitHub 额度）
+    │                             `--all-platforms` 仅 CI 内放行（本地 exit 2）
     ├── _platforms.sh          ← 平台矩阵**单一事实源**（读取 package.json#npmPublish.packages）
     ├── _npm-auth.sh           ← npm 认证解析共享库（**单源**；publish-core/configure-credentials 共用）
-    ├── ci-core.sh             ← 发布产线核心逻辑（**单源**：CI 与本地 Linux 生产都跑它）
-    ├── publish-core.sh        ← 内核 npm 平台子包发布（dry-run/--publish；self-check 版本核对）
+    ├── ci-core.sh             ← 发布产线核心逻辑（**单源**：CI 的 test job 与四平台 build 矩阵都跑它）
+    ├── publish-core.sh        ← 内核 npm 平台子包发布（本地 dry-run；`--publish` 仅 CI 内）
     ├── release.sh             ← 源码打包出口（tar.gz，非发布通道）
     ├── （release-core.sh 已于 2026-09-13 删除 —— 硬标准：构建/发布均经 GitHub CI）
     ├── configure-credentials.sh ← 本机凭据安全配置（环境变量 → 0600 配置，值不入库）
@@ -241,11 +225,10 @@ release/
 | npm 命令 | 对应脚本 | 用途 |
 |---|---|---|
 | `npm run verify:versions` | verify-versions.js --core | 内核版本自洽校验 |
-| `npm run build:launcher` | build-launcher.sh | 构建内核 launcher（唯一构建入口） |
-| `npm run publish:core` | publish-core.sh | 内核子包发布（默认 dry-run） |
-| `npm run publish:core -- --publish` | publish-core.sh | 真发布（本机平台） |
-| `npm run build:launcher:all` | build-launcher.sh --all-platforms | 一次构建 → 派生 4 平台目录 |
-| `CI 内装配（仅 CI）` | publish-core.sh --all-platforms | 全平台子包发布（默认 dry-run） |
+| `npm run build:launcher` | build-launcher.sh | 构建本机平台 launcher（发布链路在 CI 内） |
+| `npm run publish:core` | publish-core.sh | 子包组装 + dry-run（本地可用） |
+| `npm run publish:core -- --publish` | publish-core.sh | 真发布 —— **仅 CI 内**（本地 exit 2） |
+| `npm run build:launcher:all` | build-launcher.sh --all-platforms | 一次构建 → 派生 4 平台目录 —— **仅 CI 内**（本地 exit 2） |
 | `npm run release:guard` | release.sh | 源码打包 |
 
 > 已移除：`build:sea` / `verify:shell`（2026-09 双仓拆分：SEA 形态全平台弃用 → launcher 形态）。
@@ -346,12 +329,12 @@ git add -A && git commit && git tag v<ver> && git push origin main && git push o
 ## 推送通道（固定标准，2026-09-10 定案）
 
 **所有 git push 走 SSH over 443（ssh.github.com:443）**——国内网络稳定，弃用 github.com git HTTPS 直连（间歇断连）。
-核仓/壳仓本地 clone 均已配置 `core.sshCommand`（密钥 `/home/bowen/develop/plus/.ssh/id_ed25519_dshpush`）与
+核仓/壳仓本地 clone 均已配置 `core.sshCommand`（密钥 `<repo>/.ssh/id_ed25519_dshpush`）与
 `remote = ssh://git@ssh.github.com:443/<owner>/<repo>.git`。REST api.github.com 稳定但**不能** push 分支/触发 tag CI。
 
 ## 凭据与令牌（**认证单源**，2026-09-10 标准化）
 
-发布链路需要的令牌**值不存仓库目录**，按根目录 **`CREDENTIALS-STANDARD.md`** 管理（工具 `release/scripts/cred.sh`，规范库 `/home/bowen/.dsh/credentials/` 0700/0600）。
+发布链路需要的令牌**值不存仓库目录**，按根目录 **`CREDENTIALS-STANDARD.md`** 管理（工具 `release/scripts/cred.sh`，规范库为真实用户 home 下的 `.dsh/credentials/`，0700/0600）。
 
 | 令牌 | 消费方 | 最小权限 |
 |---|---|---|

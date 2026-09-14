@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
-# 内核发布产线（CI 核心逻辑单源）——供 .github/workflows/build.yml 的 **四平台** build 矩阵调用
-# CI 的 build 矩阵与 test job 都直接调用本脚本（**无本地编排器**）。
+# 内核发布产线（CI 核心逻辑单源）—— .github/workflows/build.yml 的 test job 与四平台 build 矩阵都调用。
+# 硬标准（2026-09-13）：**所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。**
 # 用法: release/scripts/ci-core.sh [--publish] [--all-platforms]
-#   - 无 --publish      = 只验证（verify:versions → build-ui → npm test → build:launcher → 子包 dry-run）
-#   - --publish         = 验证通过后追加真发布（**本机平台**子包 → 官方 registry）
-#   - --all-platforms   = 构建并（可选）发布**全部 4 个平台**。
-#                         launcher 是纯 JS 产物（0 依赖、0 个 .node），平台差异仅在 npm 元数据，
-#                         故可在单一机器上完成全部平台 —— 这是「内核发布零 GitHub 额度」的实现路径。
-#                         平台清单来自 package.json#npmPublish.packages（单一事实源）。
-#                         ⚠ CI 的 mac/win 矩阵**不要**用此选项（会与其它 job 形成同平台重复发布）。
+#   - 无 --publish      = 只验证（verify:versions → 前端 verify → npm test → build:launcher → 子包 dry-run）
+#   - --publish         = 验证通过后真发布**本平台**子包 → 官方 registry（**仅 CI 内**；GITHUB_ACTIONS 守卫）
+#   - --all-platforms   = 一律拒绝（已废弃；四平台由 CI 各 runner 各自产出）
 # 版本：从仓库根 package.json 单源注入；launcher 自报版本错配即拒绝（publish-core.sh 内置强制）。
-# 2026-09 定案：全平台弃 SEA（macOS Node SEA 注入后段错误铁证），统一 Node launcher 形态。
-# 2026-09 平台分工：linux-x64 本地生产 / win+darwin 由 GitHub CI 生产（额度优化）。
+# 形态（2026-09 定案）：全平台弃 SEA（macOS Node SEA 注入后段错误），统一 Node launcher。
 #
 # 认证（2026-09 修复）：本脚本**不再改动用户全局 npm 配置**。
 #   原实现执行 `npm config set registry` + `npm config set //registry.npmjs.org/:_authToken`
@@ -35,6 +30,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# 硬标准（2026-09-13）：真发布只允许在 GitHub CI 内（单平台也不例外）。
+if [ "$PUBLISH" = 1 ] && [ "${GITHUB_ACTIONS:-}" != 'true' ]; then
+  echo '拒绝：真发布（--publish）只允许在 GitHub CI 内运行（GITHUB_ACTIONS=true）。' >&2
+  exit 2
+fi
+
 PLAT_ARGS=()
 if [ "$ALL_PLATFORMS" = 1 ]; then PLAT_ARGS=(--all-platforms); fi
 

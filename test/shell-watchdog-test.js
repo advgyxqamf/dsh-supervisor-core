@@ -12,7 +12,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
-const shellRepoHelper = require('./_shell-repo');
 const fs = require('node:fs');
 const ROOT = path.join(__dirname, '..');
 const { createShellWatchdog, decide, isShellProcess, DEFAULTS } =
@@ -60,7 +59,7 @@ const mk = (opts) => {
   const deps = {
     shell: {
       identity: () => (o.identity === undefined ? { exe: '/usr/bin/dsh-supervisor-gui', phase: o.phase || 'ready' } : o.identity),
-      readJournal: () => (o.journal || { to: null, confirmed: false, rolledBack: false }),
+      readJournal: () => (o.journal || { to: null, confirmed: false }),
       restartShell: async (a) => { calls.restarts.push(a); return o.restartResult || { ok: true, pid: 4321, exe: a.exePath }; },
     },
     pidlookup: { pgrepList: () => (o.alive ? [{ pid: 999, cmdline: '/usr/bin/dsh-supervisor-gui' }] : []) },
@@ -150,23 +149,11 @@ const mk = (opts) => {
       capabilityProfile('darwin', 'arm64').shellSelfHeal === true);
   }
 
-  // ── W5 壳侧：identity.json 必须记录 exe（看护的路径来源）──
-  console.log('== W5 壳侧契约 ==');
-  {
-    const shellRepo = shellRepoHelper.shellRepoPath();
-    const upd = path.join(shellRepo, 'src-tauri', 'src', 'update.rs');
-    if (fs.existsSync(upd)) {
-      const src = fs.readFileSync(upd, 'utf8');
-      check('W5-a identity.json 记录 exe（current_exe）', /"exe"\s*:\s*std::env::current_exe\(\)/.test(src));
-      check('W5-b identity.json 记录 lastSeenAt', /"lastSeenAt"/.test(src));
-    } else {
-      console.log('SKIP W5-a/b（壳仓不在同级目录；跨仓断言仅本地可见）');
-      // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
-      // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
-      const whyMissing = shellRepoHelper.skipReason('W5-a/b');
-      if (whyMissing) check('W5-a/b 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
-    }
-  }
+  // ── W5（已移除跨仓读）──
+  //   「壳写 identity.json 的 exe/lastSeenAt」是壳仓自身的产出契约，由壳仓测试负责
+  //   （src-tauri/src/update.rs::t1 已断言 exe 必须存在）。
+  //   内核侧只验证**消费行为**：W1-i（无 exe → 不盲拉）、W3-c（用 identity.exe 拉起）、
+  //   W3-f（exe 为空 → 明确跳过）。内核不读壳仓源码。
 
   const failed = results.filter((r) => !r);
   console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

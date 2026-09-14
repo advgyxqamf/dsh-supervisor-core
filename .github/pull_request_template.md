@@ -20,7 +20,7 @@
 - [ ] **注入验证**：新增/修改的门禁我都做了「注入缺陷 -> 确认 FAIL -> 还原（sha256 校验）-> 确认 PASS」
 - [ ] **未引入假绿**：判据不依赖默认值兜底 / 不靠夹具顺序巧合 / 不与自己的说明文字匹配（见 DEVELOPMENT-TRACK 第 3 节）
 - [ ] **本机全量通过**：`npm test` 绿
-- [ ] **CI 等价预演通过**：`bash release/scripts/ci-core.sh` 绿（需 `DSH_SHELL_REPO`）
+- [ ] **CI 等价预演通过**：`bash release/scripts/ci-core.sh` 绿（本仓自包含，不依赖壳仓源码）
 
 ## 跨仓影响（若涉及契约）
 

@@ -8,18 +8,17 @@
 //   `1.0.0+`、`1.0.0+!!!`、`1.0.0+あ` 壳判合法、内核判非法
 //   （壳旧实现在验证前 split('+') 丢弃 build 段）。
 //
-// 跨语言无法共享代码，故共享**行为规格**：`shared/version-vectors.json`
-// （壳仓 `shell-release/` 下有逐字节相同的一份）。
+// 跨语言无法共享代码，故共享**行为规格**：本仓 `shared/version-vectors.json`。
+// 内核只对本仓向量断言自己的实现；壳仓持有自己的一份并在其测试里对本实现断言。
+// 两仓**不互相读源码** —— 跨仓一致性属契约产物问题（见 RELEASE-STANDARD.md §0）。
 //
-// 本测试做两件事：
+// 本测试：
 //   V1 逐条断言内核实现（VERSION_RE / semverCompare）符合向量；
-//   V2 断言两仓的向量文件**逐字节相同**（防止只改一侧）。
+//   V2 向量文件自身 schema/结构自洽（**不含跨仓读**）。
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
-const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
@@ -51,23 +50,12 @@ console.log('== V1 版本向量（内核实现）==');
   check('V1 向量总数充足', n >= 23, 'n=' + n);
 }
 
-// ── V2 两仓向量文件逐字节一致 ──
-console.log('== V2 两仓向量文件一致 ==');
+// ── V2 向量文件自身自洽（只读本仓；不含跨仓读）──
+console.log('== V2 向量文件自洽 ==');
 {
-  const shell = shellRepoHelper.pathIn('shell-release', 'version-vectors.json');
-  if (fs.existsSync(shell)) {
-    const a = crypto.createHash('sha256').update(fs.readFileSync(VEC)).digest('hex');
-    const b = crypto.createHash('sha256').update(fs.readFileSync(shell)).digest('hex');
-    check('V2 内核与壳的向量文件逐字节相同（改一侧即失败）', a === b, a.slice(0, 12) + ' vs ' + b.slice(0, 12));
-  } else {
-    console.log('SKIP V2（壳仓不在同级目录；跨仓断言仅本地可见）');
-    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
-    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
-    const whyMissing = shellRepoHelper.skipReason('V2');
-    if (whyMissing) check('V2 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
-  }
-  // 自洽：文件必须可解析且含两个数组
   check('V2 向量文件结构完整', Array.isArray(doc.versionValidation) && Array.isArray(doc.compare));
+  check('V2 schema 为正整数且已声明', Number.isInteger(doc.schema) && doc.schema >= 1, 'schema=' + doc.schema);
+  check('V2 文件声明了跨仓共享语义（note 非空）', typeof doc.note === 'string' && doc.note.length > 0);
 }
 
 // ── V3 与壳的历史分歧必须已闭合 ──

@@ -5,7 +5,8 @@
 // 端点设计原则：
 //   · **只回环**（壳在本机）——与既有 API 信任模型一致（identity.js socket 层判定）。
 //   · 不含「更新源」职责（壳直连 npm CDN），故**没有** /shell/update/check。
-//   · 写操作（health/rollback/pending）走 originAllowed 同源校验（与 dist/relay 同规）。
+//   · 写操作（health/update-pending/check-update/restart）走 originAllowed 同源校验（与 dist/relay 同规）。
+//   · 壳更新强制且不可回退：**没有** /shell/rollback。
 function owns(pathname) {
   return pathname === '/shell/status' || pathname.startsWith('/shell/');
 }
@@ -73,20 +74,6 @@ function handle(ctx) {
         return send(r.ok ? 200 : 500, r);
       })
       .catch((e) => send(500, { ok: false, error: e.message }));
-  }
-
-  // 手动回退（排障入口）：把当前待确认版本拉黑
-  if (req.method === 'POST' && pathname === '/shell/rollback') {
-    if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-    return collectBody(req, res, 8192, (body) => {
-      let j = {};
-      try { j = body ? JSON.parse(body) : {}; } catch {}
-      try {
-        const r = shell.rollback(j.reason || 'manual');
-        if (sup.events) sup.events.append('shell_update_rolled_back', { pinned: r.pinned, reason: r.reason });
-        return send(200, r);
-      } catch (e) { return send(500, { ok: false, error: e.message }); }
-    });
   }
 
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });

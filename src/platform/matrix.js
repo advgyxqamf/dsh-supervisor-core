@@ -77,11 +77,14 @@ function npmTag(platform, arch) {
   return os + '-' + a;
 }
 
-/** 是否为受支持的平台组合（不发错，供能力判定）。 */
+/** 是否为**受支持**（= `SUPPORTED` / 发布矩阵）的平台组合（不发错，供能力判定）。
+ *
+ *  ⚠ 与 `SUPPORTED` **同集合**：`linux-arm64` / `win32-arm64` 目前**不在发布矩阵**，
+ *    故返回 false（此前只判「OS 已知 + arch 合法」，会把这两个组合误报为支持）。 */
 function isSupported(platform, arch) {
   const p = platform || process.platform;
   const a = arch || process.arch;
-  return !!(OS_TAG[p] && (a === 'x64' || a === 'arm64'));
+  return SUPPORTED.some((x) => x.platform === p && x.arch === a);
 }
 
 /** FRP 客户端官方产物标签；不支持返回 null（调用方据此如实上报）。
