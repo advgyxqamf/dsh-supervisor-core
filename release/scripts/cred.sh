@@ -24,7 +24,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./_npm-auth.sh
 . "$SCRIPT_DIR/_npm-auth.sh"
 REAL_HOME="$(dsh_real_home)"
-CANON_STORE="$REAL_HOME/.dsh/credentials"
+# 归一为 /（Windows 路径含反斜杠）——必须与下方 STORE 的归一保持一致，
+# 否则 IS_REAL 比较（STORE == CANON_STORE）在 Windows 上恒假 → 真机保护被绕过。
+CANON_STORE="$(printf '%s' "$REAL_HOME/.dsh/credentials" | tr '\\' '/')"
 
 # 凭据库根：默认 = 真实 home 下的规范位置；可用 DSH_CRED_DIR 覆盖（测试 / 换机 / 多套环境）。
 STORE=${DSH_CRED_DIR:-$CANON_STORE}
