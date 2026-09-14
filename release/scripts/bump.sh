@@ -27,9 +27,10 @@ case "$MODE" in
     node release/scripts/verify-versions.js --core
     echo "=== 内核版本已提升: $CUR → $NEW ==="
     echo "  1) CHANGELOG.md：整理 [未发布] 段为 [$NEW] 并新开 [未发布]"
-    echo "  2) git add -A && git commit -m 【release: v$NEW 】 && git tag v$NEW && git push origin HEAD --tags（⚠ 必须同时推分支与 tag，否则 CI 不触发）"
-    echo "  3) npm run build:launcher（本机内核 launcher）"
-    echo "  4) npm run publish:core -- --publish（对应平台）"
+    echo "  2) git add -A && git commit && git push origin HEAD（走 PR 过门禁；master 有分支保护）"
+    echo "  3) 打 tag 并推送：git tag v$NEW && git push origin v$NEW"
+    echo "  4) 此后**全部由 CI 完成**：四平台完整构建 + 验证 + 各平台发布子包 + 挂 Release 附件"
+    echo "     （硬标准：不得在本地构建/发布；本地只做 S0-S4 门禁）"
     ;;
   *) echo "未知模式: $MODE （本仓只支持 --core；壳版本见壳仓 scripts/bump-shell.sh）"; exit 2;;
 esac

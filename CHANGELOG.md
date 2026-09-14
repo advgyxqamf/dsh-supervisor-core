@@ -8,6 +8,64 @@
 
 （下一版本待记）
 
+## [0.1.5-BETA.3]（2026-09-14）
+
+> 本轮确立**硬标准**并据此修正 CI 门控；修正后立刻暴露出 5 类只在 macOS/Windows
+> 暴露的缺陷（长期被跳过的构建矩阵掩盖）。每条均经「构造/注入 → 确认门禁失败 →
+> 修复 → 确认通过」验证。
+
+### 硬标准（不可协商）
+
+**所有平台构建与发布必须经 GitHub CI 完成；本地不得产生任何发布产物。**
+
+| 项 | 内容 |
+|---|---|
+| 删除 | `release-core.sh`（157 行本地发布编排器，CI 从不调用）|
+| 本地全平台发布 | `publish-core.sh --all-platforms` 一律 exit 2；`ci-core.sh --all-platforms` 同 |
+| 本地全平台构建 | `build-launcher.sh --all-platforms` 改为**仅 CI 内放行**（`GITHUB_ACTIONS` 守卫）|
+| npm scripts | 移除 `release:core*` / `publish:core:all`（5 个本地发布入口）|
+
+### 修复：四平台完整构建不再被跳过（原为隐藏风险）
+
+`build` job 原受 `need_build == true` 门控，理由是「本地已产出，幂等」——
+**那是本地构建时代的理由**。硬标准禁止本地构建后该理由失效，后果是：
+**已发布版本之后的任何改动都从未经过四平台构建验证**，而 required checks 只有 ubuntu 上的
+`test` → 在 Windows/macOS 编不过的改动照样能合并。
+
+- `build` 去掉条件（**每次 push / PR 都跑**）；`need_build` **只作用于发布**（一次性闸）；
+- 四条 `build (...)` 设为 **required status check** → 完整构建成为**合并门禁**；
+- 新增门禁 P-8 / T5-d：build **不得**被条件跳过（含反向判据）。
+
+### 修复：改成每次构建后立刻暴露的跨平台缺陷
+
+| 平台 | 缺陷 | 影响 |
+|---|---|---|
+| macOS | `cred.sh` 用 GNU 专有 `stat -c %a` | BSD stat 不支持 → 权限判定全失效 |
+| macOS | **`$VAR` 紧跟全角字符**（如 `$m（应为 600）`）| **bash 3.2 把字节并进变量名** → unbound variable，脚本中止 |
+| Windows | 路径**插进 JS 源码字符串**（如 `require('$INDEX')`）| 反斜杠=无效转义 → require 失败或路径错乱 |
+| Windows | 门禁夹具注入 Windows 路径未 POSIX 化 | 路径变成 C:UsersRUNNER~1... 无法定位清单 |
+| Windows | X-4 断言硬编码 `path.join('/H',...)` | 把 POSIX 语义当通用（被测值其实正确）|
+
+**「$VAR 紧跟全角字符」一类是存量缺陷，不止一处**：`cred.sh` 6 处、
+`build-launcher.sh` 1 处（`$BASE_HASH）`）、`configure-credentials.sh` 2 处 ——
+即这两个发布脚本原本在 macOS 上会**直接报错中止**。
+
+### 新增：防止同类再犯的门禁
+
+| 门禁 | 断言数 | 作用 |
+|---|---|---|
+| `test/shell-portability-test.js` | 7 | **本机即可拦**：$VAR+全角、JS 里插路径（值/名字类不误报）|
+| `test/release-spec-consistency-test.js` | 21 | 规范↔现实一致；含 P-8（完整构建不得被跳过）|
+| `test/standards-uniqueness-test.js` | 8 | **规范唯一性**：其它文档不得自称「唯一事实源」|
+
+### 文档：唯一事实源与清理
+
+- `RELEASE-STANDARD.md` 增 §0 硬标准；S5–S7 改为 CI 流程；机器块重写；
+- README 文档索引重写为**角色表**（三份唯一规范 / 契约 / 论证降级 / 历史 / 复盘），根级文档与索引一一对应；
+- 整节替换与硬标准矛盾的「全平台本地构建」章节；修正 README「CI 矩阵不含 ubuntu」等直接矛盾；
+- `cred.sh backup <目录>`（拒绝默认值、拒绝实例子目录）+ 4 条**持久化断言**；
+- 事故复盘 `INCIDENT-2026-09-13-credential-overwrite.md`。
+
 ## [0.1.5-BETA.2]（2026-09-13）
 
 > 本轮为**双仓完整审计与缺陷修复**（第十三轮），每条修复均经
