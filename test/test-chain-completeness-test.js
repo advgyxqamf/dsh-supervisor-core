@@ -86,7 +86,7 @@ function isTestFile(name) {
   check('N-c 助手/fixture 不被当作测试跑（也不在链中）',
     wronglyInChain.length === 0, wronglyInChain.length ? wronglyInChain.join(', ') : helpers.length + ' 个助手');
   check('N-c _ 前缀助手被视为非测试',
-    ['_ports.js', '_shell-repo.js', '_workflow.js'].every((h) => !isTestFile(h)), 'ok');
+    ['_ports.js', '_workflow.js'].every((h) => !isTestFile(h)), 'ok');
   check('N-c 历史遗留门禁（smoke/ports-verify）被承认为测试',
     isTestFile('smoke.js') && isTestFile('ports-verify.js'), 'ok');
 }

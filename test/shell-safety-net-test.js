@@ -10,10 +10,9 @@
 //   R4 反回归：回退机构（rollback/pinnedVersions/should-rollback）不得复活
 //   R5 ⛔ 硬约束：安全网**绝不触碰内核更新机制**（不 import dist、不调用 runNpmInstall）
 //   R6 物理隔离：壳状态目录（~/.dsh/shell）与内核状态目录（~/.dsh/supervisor）不同
-//   R10 跨仓契约：内核与壳均不得引入回退/拉黑机构
+//   R10 反回归：内核侧回退/拉黑机构不得复活（壳侧反回归归壳仓自身测试）
 
 const fs = require('node:fs');
-const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const os = require('node:os');
 const ROOT = path.join(__dirname, '..');
@@ -164,17 +163,17 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
     check('R9-c 未杀任何真实进程（killed 为空）', Array.isArray(r2.killed) && r2.killed.length === 0, JSON.stringify(r2.killed));
   }
 
-  // ── R10 跨仓契约：壳与内核同一套升级逻辑，回退机构不得复活 ──
-  //   历史（2026-09-13 P3 跨仓契约）：内核曾用 update-journal.json 的 pinnedVersions
-  //     记「坏版本」并据此回退壳版本；实测壳仓从不消费该字段（grep 零命中）。
+  // ── R10 反回归：内核侧回退机构不得复活（**只读内核源码**）──
   //   产品规则（用户确认）：壳与内核同一套升级逻辑 —— 有新版必须强制更新，
   //     **不得回退、不得跳过、不得按版本拉黑、不得冷却抑制**。
   //     → 内核侧壳回退机构（rollback/pinnedVersions/should-rollback）已整体移除。
-  //   本门禁锁定三件事：
+  //   壳侧「不得重新引入 attempt / pendingVersion / update-journal」属**壳仓自身**约束，
+  //   由壳仓测试负责（src-tauri/src/update.rs::t5 与壳仓反回归测试）。
+  //   内核**不读壳仓源码** —— 两仓按账号/仓库隔离（见 RELEASE-STANDARD.md §0）。
+  //   本组锁定两件事：
   //     R10-a 内核侧回退机构不得复活（shell 域 + api/shell.js + surface 登记）
-  //     R10-b 壳侧不得出现读取 update-journal 的代码（防止重新引入拉黑/回退）
   //     R10-c identity.json 的护栏字段只由壳写（内核不得成为第二写入方）
-  console.log('== R10 跨仓契约：回退机构不得复活 ==');
+  console.log('== R10 反回归：回退机构不得复活 ==');
   {
     const shellSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'shell', 'index.js'), 'utf8');
     const apiShellSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'shell.js'), 'utf8');
@@ -191,38 +190,6 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
     check('R10-a api/shell.js 不调用 shell.rollback', !/shell\.rollback/.test(apiShellCode), '无');
     check('R10-a surface 无 /shell/rollback 登记', !/\/shell\/rollback/.test(surfaceCode), '无');
     check('R10-a surface 前缀清单不含 rollback', !/update-pending\|rollback/.test(surfaceCode), '无');
-
-    // R10-b：壳仓**不得**出现读取 update-journal 的代码。
-    //   证明方式：扫壳仓源码文件，注释行排除后检查 update-journal / pinnedVersions
-    //   是否作为字符串字面量（读取路径）出现。
-    // 2026-09-13：经 helper 定位（CI 检出壳仓后用 DSH_SHELL_REPO 指定；缺失即硬失败）
-    const shellRepo = shellRepoHelper.shellRepoPath();
-    let shellCode = '';
-    const collect = (d) => {
-      let ents = [];
-      try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-      for (const e of ents) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) {
-          if (e.name === 'target' || e.name === 'node_modules' || e.name === 'docs') continue;
-          collect(p);
-        } else if (/\.(rs|js|ts|html)$/.test(e.name)) {
-          shellCode += stripCommentLines(fs.readFileSync(p, 'utf8')) + LF;
-        }
-      }
-    };
-    collect(shellRepo);
-    check('R10-b 壳仓代码中无 update-journal 引用（未接线，故无拉黑/回退风险）',
-      !/update-journal/.test(shellCode), '零命中');
-    check('R10-b 壳仓代码中无 pinnedVersions 引用',
-      !/pinnedVersions/.test(shellCode), '零命中');
-    check('R10-b 壳仓代码中无 attempt 计数引用', !/attempt/.test(shellCode), '零命中');
-    check('R10-b 壳仓代码中无 pendingVersion 引用', !/pendingVersion/.test(shellCode), '零命中');
-    // 反向：确认扫描**真的读到了**壳仓代码（否则该断言恒真 = 假门禁）
-    //   ⚠ 锚点不能用 should_check：壳收敛后该函数已删除，改用仍保留的 install_kind。
-    check('R10-b 反向：扫描确实读到壳仓源码（非空转）',
-      shellCode.length > 5000 && /fn install_kind/.test(shellCode),
-      'len=' + shellCode.length);
 
     // ── R10-c：identity.json 只由壳写（内核不得成为第二写入方）──
     //   背景：壳仓 update.rs::write_identity_for 是 identity.json 的唯一写入点；

@@ -21,7 +21,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
-const shellRepoHelper = require('./_shell-repo');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const POS = path.join(ROOT, 'src', 'platform', 'os');
@@ -58,31 +57,11 @@ console.log('== P2 内核不写/不删守卫 plist ==');
     /守卫服务定义缺失/.test(mac), 'ok');
   check('P2-d 用 launchctl enable/disable 持久化开关', /on \? 'enable' : 'disable'/.test(asSrc), 'ok');
   check('P2-e 守卫定义模板已不再是内核资产（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
-  // 壳侧必须仍持有守卫 plist 模板（否则两边都没了 → 功能真空）
-  // 2026-09-13 修正：路径同上（service.rs → platform/macos.rs）；
-  //   且 P2-g 原先断言字面量 com.dsh.supervisor.plist —— **该字面量在壳仓不存在**
-  //   （代码是 format!("{}.plist", GUARD_LABEL)），故该断言恒假，
-  //   只因旧路径失效而从未真正执行。现改为**真正比对两侧的 label 值**：
-  //     内核 src/platform/os/autostart.js: GUARD_LABEL = 'com.dsh.supervisor'
-  //     壳   platform/macos.rs:          GUARD_LABEL: &str = "com.dsh.supervisor"
-  const svc = shellRepoHelper.pathIn('src-tauri', 'src', 'platform', 'macos.rs');
-  if (fs.existsSync(svc)) {
-    const s = fs.readFileSync(svc, 'utf8');
-    check('P2-f 壳仍持有守卫 plist 模板（KeepAlive + RunAtLoad）',
-      /KeepAlive/.test(s) && /RunAtLoad/.test(s), 'ok');
-    const kernelLabel = (asSrc.match(/GUARD_LABEL\s*=\s*'([^']+)'/) || [])[1];
-    const shellLabel = (s.match(/GUARD_LABEL:\s*&str\s*=\s*"([^"]+)"/) || [])[1];
-    check('P2-g 两侧 GUARD_LABEL 取值一致（跨仓契约）',
-      !!kernelLabel && kernelLabel === shellLabel, 'kernel=' + kernelLabel + ' shell=' + shellLabel);
-    check('P2-g 壳的 plist 文件名由 GUARD_LABEL 派生（非硬编码）',
-      /format!\("\{\}\.plist",\s*GUARD_LABEL\)/.test(s), 'ok');
-  } else {
-    console.log('SKIP P2-f/P2-g（壳仓不在同级目录）');
-    // 2026-09-13：CI 会检出壳仓并设 DSH_SHELL_REPO；此时缺失必须**响亮失败**，
-    // 不得静默跳过（否则该跨仓契约在产线上永不检查 —— 假门禁）。
-    const whyMissing = shellRepoHelper.skipReason('P2-f/P2-g');
-    if (whyMissing) check('P2-f/P2-g 壳仓可用（CI 已指定 DSH_SHELL_REPO，不得静默跳过）', false, whyMissing);
-  }
+  // 壳侧「仍持有守卫 plist 模板 / label 与内核一致」属壳仓自身契约，
+  //   由壳仓测试负责；内核**不读壳仓源码**（两仓按账号/仓库隔离）。
+  //   ⚠ 已知设计债：内核 macOS 的 enable/disable 仍需与该 label 一致 ——
+  //     正确形态是壳把 label 经**运行期契约产物**（如 registry.json）投给内核，
+  //     或在壳仓发布物中固定，而非内核硬编码 + 跨仓比对源码。见 RELEASE-STANDARD.md §0。
 }
 
 // ── P3 GUI plist 内容约束 ──

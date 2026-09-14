@@ -99,7 +99,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 
 ```bash
 npm test                          # 全量；新门禁会拦住越界
-bash release/scripts/ci-core.sh   # CI 等价预演（需 DSH_SHELL_REPO）
+bash release/scripts/ci-core.sh   # CI 等价预演（本仓自包含，无需壳仓）
 ```
 
 ---

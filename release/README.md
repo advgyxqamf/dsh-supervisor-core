@@ -204,10 +204,11 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 |---|---|
 | 先 `build-ui.sh` 再 `npm test` | `core-test` 的面板 CSP / nosniff 断言需要**构建产物**，否则 503 → 2 条失败 |
 | `xvfb-run -a npm test` | 看护 E2E 需要**图形会话**；无头 runner 里看护按设计拒绝拉起 GUI 壳 |
-| 检出公开壳仓 + `DSH_SHELL_REPO` | 5 条**跨仓门禁**原先在 CI 中静默 `SKIP`（壳仓不在同级目录）→ 假门禁 |
+| **内核仓不再检出/读取壳仓源码** | 两仓按账号/仓库隔离；跨语言契约只经「已发布产物 / schema / 测试向量」消费，由 `test/no-cross-repo-test.js` 锁定 |
 
-> 跨仓门禁的定位统一走 `test/_shell-repo.js`：`DSH_SHELL_REPO` 优先；
-> **一旦声明了壳仓却缺失即硬失败**，禁止静默跳过。
+> 曾经的 `test/_shell-repo.js` / `DSH_SHELL_REPO` / 壳仓 checkout 已整体删除：
+> 它把「跨语言行为一致性」错误实现成了「跨仓库源码读取」，会让内核 CI 读壳仓 `main`
+> 的浮动版本 → **本地绿、CI 红**，且两仓隔离被穿透。
 
 ---
 

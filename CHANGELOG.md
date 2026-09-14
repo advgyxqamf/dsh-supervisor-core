@@ -6,7 +6,32 @@
 
 ## [未发布]
 
-（下一版本待记）
+### 设计修正：内核仓与壳仓彻底解耦（移除跨仓源码依赖）
+
+**问题（实证）**：内核测试经 `test/_shell-repo.js` 读取**壳仓源码**，CI 又 `actions/checkout`
+壳仓默认分支 `main`。于是同一内核提交 `4eae7371`：本地（同级壳仓工作树在 `release/shell-1.1.0`）
+全绿，CI（壳仓 `main` 仍含 `attempt`/`pendingVersion`）在 `shell-safety-net R10-b` 失败。
+一个与内核无关的壳仓提交即可翻转内核 CI 结论 —— 两仓账号/仓库隔离被测试层穿透。
+
+**修正**：内核**不检出、不读取壳仓源码**；跨语言契约只经「已发布产物 / schema / 测试向量」消费。
+
+| 位置 | 处置 |
+|---|---|
+| `.github/workflows/build.yml` | 删除两处壳仓 `actions/checkout` 与 `DSH_SHELL_REPO` |
+| `test/_shell-repo.js` | 删除 |
+| `test/version-vectors-test.js` V2 | 去掉两仓逐字节比对，改为本仓向量 schema/结构自洽 |
+| `test/shell-safety-net-test.js` R10-b | 删除扫描壳源码；保留内核侧 R10-a/R10-c |
+| `test/shell-watchdog-test.js` W5 | 删除读壳 `update.rs`；消费行为由 W1-i/W3-c/W3-f 覆盖 |
+| `test/autostart-ownership-test.js` P2-f/P2-g | 删除读壳 `macos.rs`；所有权内核侧断言保留 |
+| `test/platform-capability-audit-test.js` A5/A7 | 删除读壳源码；保留内核侧所有权断言 |
+| `test/no-cross-repo-test.js`（新增） | X-1..X-5：代码/workflow 不得再出现壳仓耦合，含反向判据 |
+
+壳侧反回归（不得重新引入 `attempt`/`pendingVersion`/`update-journal`）归**壳仓自身测试**。
+
+### 已知未修（另案）
+
+- 内核单平台 `publish-core.sh --publish` 仍无 `GITHUB_ACTIONS` 守卫（本地发布路径未封死）；
+- `release/scripts/cred.sh` 等仍写死 `/home/bowen` 路径。
 
 ## [0.1.5-BETA.4]（2026-09-14）
 

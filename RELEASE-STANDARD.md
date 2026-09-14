@@ -15,6 +15,7 @@
 | 本地不得全平台发布 | `publish-core.sh --all-platforms` 一律 exit 2 | T2-b |
 | 无本地发布编排器 | `release-core.sh` **已删除** | T2-e |
 | npm scripts 无本地发布入口 | `release:core*` 与 `publish:core:all` 全部移除 | T2-g |
+| **内核仓不得依赖壳仓源码** | 不检出、不读取壳仓；跨语言契约只经「已发布产物 / schema / 测试向量」消费 | `test/no-cross-repo-test.js` |
 
 **为什么**：本地构建让「产物从哪来」不可复现、不可审计；曾出现「本地发一部分、CI 发一部分」的分裂，以及本机与 CI 同平台二次发布（npm 同版本不可重发，实测 409 Conflict）。统一到 CI 后：产物可追溯、四平台同构、发布单一入口。
 
@@ -252,7 +253,8 @@
     "test/release-auth-test.js",
     "test/glibc-gate-test.js",
     "test/credential-hygiene-test.js",
-    "test/destructive-op-safety-test.js"
+    "test/destructive-op-safety-test.js",
+    "test/no-cross-repo-test.js"
   ]
 }
 ```
