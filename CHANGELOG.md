@@ -6,6 +6,10 @@
 
 ## [未发布]
 
+（下一版本待记）
+
+## [0.1.5-BETA.4]（2026-09-14）
+
 ### 设计修正：内核仓与壳仓彻底解耦（移除跨仓源码依赖）
 
 **问题（实证）**：内核测试经 `test/_shell-repo.js` 读取**壳仓源码**，CI 又 `actions/checkout`
@@ -51,8 +55,6 @@
   （规范正文里每个 `npm run X` 必须在 package.json 存在）；
 - `LICENSE` / `.gitignore` / `_npm-auth.sh` / `build-ui.sh` SEA 遗留措辞；
 - **删除过时根级文档** `AUDIT-HANDOFF.md`、`AUDIT-CROSS-PLATFORM.md`，并同步 README 索引与引用。
-
-## [0.1.5-BETA.4]（2026-09-14）
 
 ### 强制更新收敛：壳回退机构整体移除
 
