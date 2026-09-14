@@ -2,11 +2,11 @@
 # 前端统一构建入口（2026-09-06 定：一源双出口）。
 #   源码唯一事实源 = ui/（React，入口 supervisor.html）
 #   出口① = ui/dist（构建临时产物，gitignored）
-#   出口② = ui-react（守卫托管发布镜像：浏览器/局域网 GET / 服务；release.sh/SEA/npm 子包携带）
+#   出口② = ui-react（守卫托管发布镜像：浏览器/局域网 GET / 服务；release.sh/npm 子包携带）
 # 用法: release/scripts/build-ui.sh [--skip-install]
 #   - 默认先 npm ci（可复现构建）；--skip-install 跳过（本地已装依赖时加速）
 #   - 产物自检：supervisor.html 存在 + 含 root 挂载点
-# 被调方：release.sh / build-sea.sh / publish-core.sh / CI（见 REDESIGN-2026-09-06-frontend-build-strategy.md）
+# 被调方：release.sh / ci-core.sh / build-launcher.sh / CI
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 UI="$ROOT/ui"

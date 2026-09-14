@@ -87,6 +87,16 @@ if (spec) {
   check('P-2b 阶段命令引用的脚本/script 都存在',
     badStages.length === 0, badStages.length ? badStages.join(', ') : (spec.stages.length + ' 个阶段'));
 
+  // ── P-2c：规范正文里出现的每个 `npm run X` 都必须在 package.json 存在 ──
+  //   原缺陷：§3 表格曾列 `npm run publish:core:all`，而该 script 已被硬标准移除；
+  //   正文表格不在机器块内，P-2 抓不到。本检查把「规范正文 = 现实」也钉死。
+  {
+    const allRuns = Array.from(specTxt.matchAll(/npm run ([A-Za-z0-9:_-]+)/g)).map((m) => m[1]);
+    const badRuns = Array.from(new Set(allRuns)).filter((s) => !npmScripts[s]);
+    check('P-2c 规范正文里的每个 npm run X 都存在于 package.json#scripts',
+      badRuns.length === 0, badRuns.length ? badRuns.join(', ') : (new Set(allRuns).size + ' 个唯一 script'));
+  }
+
   // ── P-3：矩阵一致 ──
   const pub = (pkg.npmPublish && pkg.npmPublish.packages) || [];
   check('P-3 规范声明的矩阵来源 = package.json#npmPublish.packages',

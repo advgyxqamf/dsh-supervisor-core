@@ -231,7 +231,7 @@ export function InstancesPage({ onRegisterActions }: { onRegisterActions?: (a: {
               <Label>启动命令（每项一参数，可留空用默认）</Label>
               <Textarea
                 className="min-h-[72px] font-mono text-sm"
-                placeholder={"node\n/home/bowen/.npm-global/bin/dsh\nweb"}
+                placeholder={"node\n/usr/local/bin/dsh\nweb"}
                 value={fCmd}
                 onChange={(e) => setFCmd(e.target.value)}
               />

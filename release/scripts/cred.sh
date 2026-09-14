@@ -18,9 +18,16 @@
 #
 set -u
 
-# 凭据库根：默认**绝对路径**（$HOME 被 DSH 重定向，不可用 ~）；
-# 可用 DSH_CRED_DIR 覆盖（测试 / 换机 / 多套环境）。
-STORE=${DSH_CRED_DIR:-/home/bowen/.dsh/credentials}
+# 真实用户 home：$HOME 被 DSH 重定向到实例数据目录，故经 _npm-auth.sh 的
+#   dsh_real_home()（getent/dscl/USERPROFILE）解析 —— **不得硬编码任何机器路径**。
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=./_npm-auth.sh
+. "$SCRIPT_DIR/_npm-auth.sh"
+REAL_HOME="$(dsh_real_home)"
+CANON_STORE="$REAL_HOME/.dsh/credentials"
+
+# 凭据库根：默认 = 真实 home 下的规范位置；可用 DSH_CRED_DIR 覆盖（测试 / 换机 / 多套环境）。
+STORE=${DSH_CRED_DIR:-$CANON_STORE}
 #  2026-09-14 跨平台归一：Windows 传入路径可能含反斜杠，而本脚本多处把
 #   $STORE / $INDEX 放进**双引号 shell 串**（反斜杠=转义，会被吃）；
 #   node 在 Windows 上同样接受正斜杠。故统一归一为 /。
@@ -89,7 +96,7 @@ case "${1:-list}" in
     #   ② 旧值先备份到 <file>.bak-<时间戳>（0600），使覆盖**不再不可逆**。
     # ══════════════════════════════════════════════════════════════════════════
     IS_REAL=0
-    [ "$STORE" = '/home/bowen/.dsh/credentials' ] && IS_REAL=1
+    [ "$STORE" = "$CANON_STORE" ] && IS_REAL=1
     if [ "$IS_REAL" = '1' ] && [ "${DSH_CRED_ALLOW_OVERWRITE:-}" != '1' ] && [ "${3:-}" != '--yes' ]; then
       echo "拒绝写入真机凭据库：put 会**覆盖**已有凭据，必须显式确认。" >&2
       echo "  · 真机写入：DSH_CRED_ALLOW_OVERWRITE=1 bash $0 put $2" >&2
@@ -206,7 +213,7 @@ case "${1:-list}" in
     # ⚠ 第 4 项是**真机检查**：别名/散落副本都锚定在真实库根。
     #   当 DSH_CRED_DIR 覆盖了库根（测试夹具）时，这些真机事实与本库无关，必须跳过 ——
     #   否则夹具模式会因"别名指向另一个库根"而误报（已踩过）。
-    if [ "$STORE" != '/home/bowen/.dsh/credentials' ]; then
+    if [ "$STORE" != "$CANON_STORE" ]; then
       echo '== 4) 失效散落副本（真机检查）=='
       echo '  SKIP  DSH_CRED_DIR 已覆盖库根 —— 该项只对真机库有意义'
       echo '== 5) 清单内不得含令牌值 =='
@@ -216,7 +223,7 @@ case "${1:-list}" in
     echo '== 4) 失效散落副本（已知的 ephemeral 位置）=='
     hits=0
     # 兼容别名为**符号链接**指向库内 -> 合规（单一副本）；普通文件 -> 散落副本
-    LEGACY="/home/bowen/.dsh/github-pat-advgyxqamf"
+    LEGACY="$REAL_HOME/.dsh/github-pat-advgyxqamf"
     if [ -L "$LEGACY" ]; then
       tgt=$(readlink -f "$LEGACY" 2>/dev/null || echo '')
       case "$tgt" in
@@ -228,7 +235,7 @@ case "${1:-list}" in
     else
       echo "  OK   $LEGACY 不存在（已迁移）"
     fi
-    for d in /home/bowen/gh_token.txt /home/bowen/gh_token /home/bowen/.gh_token; do
+    for d in "$REAL_HOME/gh_token.txt" "$REAL_HOME/gh_token" "$REAL_HOME/.gh_token"; do
       [ -e "$d" ] && { echo "  FAIL 发现散落令牌副本 $d"; rc=1; hits=1; }
     done
     [ "$hits" = '0' ] && echo '  OK   无 $HOME 根下的散落副本'

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// 跨平台规范回归（AUDIT-CROSS-PLATFORM.md）：
+// 跨平台规范回归（能力矩阵见 PLATFORM-CAPABILITY-MATRIX.md）：
 //   P0 可执行解析：Windows 扩展名/PATHEXT、标准目录跨平台差异、PATH 连接符
 //   P1 文件保护：Unix chmod / Windows icacls（平台条件断言）
 //   P2 无硬编码 ':' 连接 PATH

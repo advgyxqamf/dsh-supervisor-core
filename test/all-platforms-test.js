@@ -1,20 +1,18 @@
 #!/usr/bin/env node
 'use strict';
 
-// 内核「全平台本地构建/发布」能力回归（2026-09-11）。
+// 内核全平台构建/发布纪律回归（2026-09-11 起，2026-09-13 硬标准改版）。
 //
-// 背景：私有仓 GitHub Actions 额度按倍率计费（macOS 10x / Windows 2x），本仓 mac/win 矩阵
-//   约 110 分钟/次，免费额度 2000 分钟/月仅够约 18 次 —— 实测曾耗尽（run #25 起拿不到 runner）。
-// 根治：launcher 是**纯 JS 产物**（内核 0 依赖、产物 0 个 .node），平台差异仅在 npm 元数据，
-//   故可在单一机器上一次构建、派生四平台，完全不消耗 GitHub 额度。
+// 硬标准：**所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。**
+//   本测试锁定该纪律的**可执行面**，防止「本地构建 → 本地发布」旁路复活。
 //
-// 本测试锁定的不变量（任一被破坏都会让发布链路静默退化）：
+// 锁定的不变量：
 //   T1 平台矩阵来自 package.json 单一事实源，且为固定顺序的 4 条
-//   T2 三个脚本都接入了 --all-platforms，且 release/ci 逐层传递
-//   T3 npm scripts 已接线（用户入口存在）
-//   T4 构建脚本内含「四平台 core.cjs 逐字节一致」断言（防未来改动破坏同源保证）
-//   T5 workflow：**四平台完整构建不得被 need_build 跳过**（2026-09-14 硬标准）
-//   T6 「纯 JS 产物」这一前提本身（0 依赖 / esbuild 无平台参数 / 产物无原生二进制）
+//   T2 本地无全平台构建/发布路径；**单平台真发布亦仅 CI 内**（GITHUB_ACTIONS 守卫）
+//   T3 npm scripts 无本地发布入口
+//   T4 构建脚本内含「四平台 core.cjs 逐字节一致」断言
+//   T5 workflow：四平台完整构建不得被 need_build 跳过（2026-09-14 硬标准）
+//   T6 「纯 JS 产物」前提本身（0 依赖 / esbuild 无平台参数 / 产物无原生二进制）
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -75,6 +73,11 @@ console.log('== T2 硬标准：本地无全平台构建/发布路径 ==');
     /--all-platforms\)/.test(pub) && /已废弃/.test(pub) && /exit 2/.test(pub), 'ok');
   check('T2-d ci-core 的 --all-platforms 一律拒绝',
     /--all-platforms\)/.test(ci) && /已废弃/.test(ci) && /exit 2/.test(ci), 'ok');
+  // ⭐ 2026-09-14：单平台真发布也必须仅 CI 内（原漏洞：只封了 --all-platforms）。
+  check('T2-b2 publish-core 单平台真发布也仅 CI 内（GITHUB_ACTIONS 守卫）',
+    /GITHUB_ACTIONS/.test(pub), 'ok');
+  check('T2-d2 ci-core 真发布也仅 CI 内（GITHUB_ACTIONS 守卫）',
+    /GITHUB_ACTIONS/.test(ci), 'ok');
 
   // release-core.sh 已删除（纯本地编排器）
   check('T2-e release-core.sh 已删除（不再有本地发布编排）',

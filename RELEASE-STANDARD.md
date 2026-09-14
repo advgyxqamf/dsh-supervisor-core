@@ -16,6 +16,8 @@
 | 无本地发布编排器 | `release-core.sh` **已删除** | T2-e |
 | npm scripts 无本地发布入口 | `release:core*` 与 `publish:core:all` 全部移除 | T2-g |
 | **内核仓不得依赖壳仓源码** | 不检出、不读取壳仓；跨语言契约只经「已发布产物 / schema / 测试向量」消费 | `test/no-cross-repo-test.js` |
+| **本地不得真发布（含单平台）** | `publish-core.sh` / `ci-core.sh` 的 `--publish` 要求 `GITHUB_ACTIONS=true` | T2-b2 / T2-d2 |
+| **无机器绑定路径** | 真实 home 经 getent/dscl/USERPROFILE 解析；不得写死 `/home/<user>` | `test/no-dev-path-test.js` |
 
 **为什么**：本地构建让「产物从哪来」不可复现、不可审计；曾出现「本地发一部分、CI 发一部分」的分裂，以及本机与 CI 同平台二次发布（npm 同版本不可重发，实测 409 Conflict）。统一到 CI 后：产物可追溯、四平台同构、发布单一入口。
 
@@ -92,8 +94,10 @@
 | 用途 | 命令 |
 |---|---|
 | CI 产线核心（测试 job 与 build 矩阵共用）| `bash release/scripts/ci-core.sh` |
-| 仅构建 launcher | `npm run build:launcher:all` |
-| 仅组装/发布子包 | `npm run publish:core:all` |
+| 本地构建 launcher（本机平台）| `npm run build:launcher` |
+| 四平台 launcher（**仅 CI 内**；本地 exit 2）| `npm run build:launcher:all` |
+| 本地子包组装 + dry-run | `npm run publish:core` |
+| 真发布（**仅 CI 内**；本地 exit 2）| `npm run publish:core -- --publish` |
 | 版本一致性 | `npm run verify:versions` |
 | 凭据自检 | `bash release/scripts/cred.sh doctor` |
 
@@ -167,7 +171,7 @@
 | 组 | 校验 |
 |---|---|
 | P-1 | 每个入口文件**存在**；`.sh` 可执行 |
-| P-2 | 每个 `npm run X` 的 X **存在**于 `package.json#scripts` |
+| P-2 | 每个 `npm run <name>` 的 `<name>` **存在**于 `package.json#scripts` |
 | P-3 | 矩阵与 `npmPublish.packages` **逐项一致**，且 CI build 矩阵覆盖同集合 |
 | P-4 | CI job 名与触发（含 tag 模式）与 workflow 一致 |
 | P-5 | 本文件列出的门禁文件都存在，且在 `scripts.test` 链中 |
@@ -254,7 +258,8 @@
     "test/glibc-gate-test.js",
     "test/credential-hygiene-test.js",
     "test/destructive-op-safety-test.js",
-    "test/no-cross-repo-test.js"
+    "test/no-cross-repo-test.js",
+    "test/no-dev-path-test.js"
   ]
 }
 ```

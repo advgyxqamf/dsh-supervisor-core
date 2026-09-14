@@ -43,7 +43,7 @@ const ROOT = findPackageRoot(__dirname);
 const SUPERVISOR_DIR = path.join(os.homedir(), '.dsh', 'supervisor');
 const USER_CONFIG = path.join(SUPERVISOR_DIR, 'config.json');
 
-// 内嵌默认配置（发行态唯一模板源）：SEA/发布物不再依赖 ROOT/config.json 外置文件（fresh-HOME 自举必需）。
+// 内嵌默认配置（发行态唯一模板源）：发布物不再依赖 ROOT/config.json 外置文件（fresh-HOME 自举必需）。
 // command 用 PATH 查找的 'dsh'（用户本机路径由 install/壳写入用户配置；nativeCommand 会注入 --port）。
 // 配置单一事实源 = src/infra/config.js 的 DEFAULTS；此处仅补充 DEFAULTS 未含的「模板必填项」
 // command（DSH 启动命令）与 healthUrl（探活地址）——避免默认配置在多处复制漂移（2026-09 收敛）。
@@ -87,7 +87,7 @@ function resolveConfigPath({ autoCopy = false } = {}) {
   const found = findConfigPath();
   if (found) return found;
   if (!autoCopy) return USER_CONFIG; // 仅作读取兜底，不落盘
-  // 写内嵌默认配置（发行态不自带 config.json 模板文件——SEA/发布物必须自足）
+  // 写内嵌默认配置（发行态不自带 config.json 模板文件——发布物必须自足）
   console.warn('[warn] 未找到用户配置，写入默认配置到', USER_CONFIG);
   fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
   fs.writeFileSync(USER_CONFIG, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
@@ -243,8 +243,8 @@ function cmdDaemon() {
     releaseLock();
     process.exit(1);
   }
-  // 静态 require（esbuild 可跟随，使 SEA 内核完整打入 bundle）——不能再用 path.join 动态拼接，
-  // 否则 SEA 二进制只含 CLI 壳、daemon 运行期仍依赖发行目录旁置的 src/（2026-09 架构审计实证）。
+  // 静态 require（esbuild 可跟随，使内核完整打入 bundle/打包态）——不能再用 path.join 动态拼接，
+  // 否则打包产物只含 CLI 壳、daemon 运行期仍依赖发行目录旁置的 src/（2026-09 架构审计实证）。
   const { Supervisor } = require('../src/supervisor');
   const sup = new Supervisor(cfg, cfgPath);
   // ⚠ 2026-09-12（P1 修复）：**必须等 shutdown 真正完成再退出**。
@@ -362,7 +362,7 @@ function finishControl(r) {
 
 function cmdInstall() {
   fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
-  // 配置文件（内嵌默认模板；源码态与 SEA 态一致，不再依赖仓库 config.json 外置文件）
+  // 配置文件（内嵌默认模板；源码态与打包态一致，不再依赖仓库 config.json 外置文件）
   if (!fs.existsSync(USER_CONFIG)) {
     fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
     fs.writeFileSync(USER_CONFIG, JSON.stringify(DEFAULT_CONFIG, null, 2), { mode: 0o600 });
@@ -666,7 +666,7 @@ switch (cmd) {
     cmdGuiAutostart(process.argv[3]);
     break;
   case 'self-check':
-    // SEA 内核冒烟：纯逻辑自检（不依赖资产目录/网络），供每平台构建后验证二进制可自举。
+    // 发布物内核冒烟：纯逻辑自检（不依赖资产目录/网络），供每平台构建后验证产物可自举。
     {
       const { guardVersion } = require('../src/platform/version');
       console.log('dsh-supervisor core self-check');

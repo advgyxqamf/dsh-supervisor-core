@@ -28,10 +28,29 @@
 
 壳侧反回归（不得重新引入 `attempt`/`pendingVersion`/`update-journal`）归**壳仓自身测试**。
 
-### 已知未修（另案）
+### 规范立住：封死本地发布 + 清除机器绑定与过时声明
 
-- 内核单平台 `publish-core.sh --publish` 仍无 `GITHUB_ACTIONS` 守卫（本地发布路径未封死）；
-- `release/scripts/cred.sh` 等仍写死 `/home/bowen` 路径。
+**本地单平台真发布封死**：此前只拒绝了 `--all-platforms`，单平台 `publish-core.sh --publish`
+/ `ci-core.sh --publish` 仍可在开发机直发 npm。现两者均要求 `GITHUB_ACTIONS=true`（本地 exit 2）；
+`all-platforms-test` T2-b2/T2-d2 锁定。`RELEASE-STANDARD.md` §0 增两条硬标准。
+
+**清除机器绑定（`/home/bowen`）**：
+- `release/scripts/cred.sh`：库根改由 `_npm-auth.sh::dsh_real_home()` 解析（getent/dscl/USERPROFILE），
+  可用 `DSH_CRED_DIR` 覆盖；旧别名/散落副本路径同源派生；
+- `test/credential-hygiene-test.js` / `test/destructive-op-safety-test.js`：同源派生真实 home；
+  后者改用 `DSH_REAL_HOME=<tmp>` 模拟真机库（不再复制/改写脚本）；
+- `ui/src/features/supervisor/InstancesPage.tsx` placeholder 与 `README.md` 示例路径改通用；
+- `CREDENTIALS-STANDARD.md` / `DEVELOPMENT-TRACK.md` / `release/README.md` 改 `<REAL_HOME>`；
+- 新增 `test/no-dev-path-test.js`（X-1..X-3，含反向判据）。
+
+**清除过时/分歧声明**：
+- 脚本头：`ci-core.sh` / `publish-core.sh`（SEA、`--all-platforms` 可用、linux 本地生产）；
+- `release/README.md`：删「本地全平台构建已跑通」与「build 被 need_build 跳过」的过时章节/边界；
+- `release/runbooks/publish-and-verify.md`：本地生产与 `launcher-build.yml`（幽灵产线）改指真实 CI；
+- `RELEASE-STANDARD.md` §3：`publish:core:all`（不存在）→ `publish:core` / `--publish`；新增 P-2c 门禁
+  （规范正文里每个 `npm run X` 必须在 package.json 存在）；
+- `LICENSE` / `.gitignore` / `_npm-auth.sh` / `build-ui.sh` SEA 遗留措辞；
+- **删除过时根级文档** `AUDIT-HANDOFF.md`、`AUDIT-CROSS-PLATFORM.md`，并同步 README 索引与引用。
 
 ## [0.1.5-BETA.4]（2026-09-14）
 

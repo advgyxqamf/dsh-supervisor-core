@@ -17,8 +17,6 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 | [RELEASE-AND-UPDATE-MECHANISM.md](RELEASE-AND-UPDATE-MECHANISM.md) | 论证（原理） | 发布与更新机制**为何这样设计**（流程见 RELEASE-STANDARD） |
 | [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 论证（方案） | 跨平台构建与自更新方案论证（流程见 RELEASE-STANDARD） |
 | [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划（历史） | 会话生命周期重构的根因级计划（已完成） |
-| [AUDIT-CROSS-PLATFORM.md](AUDIT-CROSS-PLATFORM.md) | 审计（历史） | 跨平台规范审计；§五.a 含 2026-09-11 复核更正 |
-| [AUDIT-HANDOFF.md](AUDIT-HANDOFF.md) | 审计（历史） | 两仓审计与修复交接 |
 | [INCIDENT-2026-09-13-credential-overwrite.md](INCIDENT-2026-09-13-credential-overwrite.md) | 事故复盘 | 凭据被覆盖事故：时间线 / 根因四层 / 加固与重放验证 |
 | [CHANGELOG.md](CHANGELOG.md) | 记录 | 版本变更 |
 | [archive/](archive/) | 归档 | 已完成/被取代的历史文档（见 [archive/README.md](archive/README.md)）|
@@ -216,7 +214,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `command` | `["node","/home/bowen/.npm-global/bin/dsh","web"]` | 被监管命令（数组） |
+| `command` | `["node","/usr/local/bin/dsh","web"]` | 被监管命令（数组） |
 | `healthUrl` | `http://127.0.0.1:3080/` | HTTP 探活地址 |
 | `probeIntervalMs` | 5000 | 探测周期 |
 | `probeTimeoutMs` | 3000 | L2 HTTP 单次探测超时 |

@@ -24,22 +24,23 @@ git push origin HEAD --tags   # 触发 CI 四平台构建+发布
 产物中 `.node` 文件为 0），平台差异**仅**体现在 npm 的 `os`/`cpu` 元数据与目录名。
 同一 bundle 在 linux / win32 / darwin 三种覆盖下 sha256 完全一致（已逐一验证）。
 
-**为什么不走 CI**：私有仓 Actions 按倍率计费（macOS 10x、Windows 2x），
-本仓 mac/win 矩阵约 110 分钟/次，免费额度 2000 分钟/月仅够约 18 次 —— 曾实测耗尽。
-本地全平台生产把额度消耗降为 0。
+**为什么必须走 CI**：可复现、可审计、单一入口。本地不得产生发布产物 ——
+`publish-core.sh` / `ci-core.sh` 的任何 `--publish` 都要求 `GITHUB_ACTIONS=true`（本地 exit 2）。
+（额度曾是历史动因；内核仓转公开后已免除。）
 
-### 分步执行（如需手动控制）
+### 分步执行
 
 ```bash
-# 1) 提升版本（单源 = package.json.version，只允许递增）
+# 1) 本地：提升版本（单源 = package.json.version，只允许递增）
 bash release/scripts/bump.sh --core 0.1.5-BETA.1
 #    然后整理 CHANGELOG.md：[未发布] → [0.1.5-BETA.1]
 
-# 2) dry-run（完整门禁 + 组装 + 打印计划，不 tag 不发布）
-git push origin HEAD --tags   # 触发 CI（dry-run 阶段在本地 S2-S4 完成）
+# 2) 本地：门禁 + dry-run（不产生发布产物）
+npm test
+bash release/scripts/ci-core.sh          # verify → 前端 verify → npm test → build:launcher → 子包 dry-run
 
-# 3) 真发布（内部会 tag + push + 4 平台直推 npm）
-git push origin HEAD --tags   # 触发 CI 四平台构建+发布
+# 3) 推 tag：此后构建与发布全部在 CI 内
+git push origin HEAD --tags
 ```
 
 ### 门禁内容（`ci-core.sh`）
@@ -51,13 +52,11 @@ verify:versions → build-ui（ui-react/ 为测试与产物依赖）→ npm test
 > ⚠ **`build-ui` 不可跳过**：`npm test` 中的面板响应头断言与 launcher 携带的 UI 均依赖
 > `ui-react/`（gitignored 构建产物）。直接跑 `npm test` 会得到 503「UI not built」。
 
-## 兜底路径：CI 补平台（消耗额度）
+## release job 与 need_build
 
-tag 推送仍会触发 `.github/workflows/build.yml`。其 `precheck` 会先判断「该版本是否已在 npm 全部发布」：
-- **已全部发布** → 跳过整个 mac/win 矩阵（约 1 分钟 ubuntu 探测，1x 计费）；
-- **未全发布** → 由矩阵补齐 mac/win（macOS 按 10x 计费）。
-
-因此无论走哪条路径，tag 都能收敛到「四平台齐备」。
+`precheck` 探测「该版本是否已在 npm 全部发布」，输出 `need_build`：
+- **只作用于发布**（防 npm 同版本重发）；**不再跳过构建** —— 四平台完整构建每次 push / PR 都跑；
+- tag 且 `need_build=true` 时 `release` job 汇总四平台产物并挂 GitHub Release。
 
 ## 壳的发布（在壳仓执行，本仓不参与）
 
@@ -67,7 +66,7 @@ bash scripts/bump-shell.sh 1.0.5        # 三处互锁：Cargo.toml / tauri.conf
 git commit && git tag v1.0.5 && git push origin main && git push origin v1.0.5
 ```
 
-公开仓 tag 触发 `launcher-build.yml` → 四平台 Tauri bundle 挂 GitHub Release + 发布 npm 壳包 + 生成
+公开仓 tag 触发 `.github/workflows/build.yml` → 四平台 Tauri bundle 挂 GitHub Release + 发布 npm 壳包 + 生成
 `shell-manifest.json`（Tauri updater 静态清单）。**壳仓是公开仓，Actions 额度不受限**。
 
 ## 桌面真机验收

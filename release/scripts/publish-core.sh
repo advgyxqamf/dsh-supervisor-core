@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# 内核 npm 子包发布（构建物 = SEA 二进制；版本 = 单源注入，裸版本——npm 强制不带 v 前缀）。
-# 用法（在对应平台机器运行，无交叉编译；脚本按本机 platform/arch 自动识别）：
-#   release/scripts/publish-core.sh                  # 组装 + npm publish --dry-run（安全检查，推荐先跑）
-#   release/scripts/publish-core.sh --publish        # 真发布（需 npm 登录且有 scope 权限）
-#   release/scripts/publish-core.sh --all-platforms [--publish]
-#                                                    # **全部 4 个平台**（linux-x64/darwin-arm64/
-#                                                    #  darwin-x64/win-x64）：launcher 为纯 JS 产物，
-#                                                    #  故可在单一机器（如 Linux）上完成全部平台的组装与发布。
-#                                                    #  平台清单来自 package.json#npmPublish.packages（单一事实源）。
-#   release/scripts/publish-core.sh --scope @acme    # 指定 scope（不传则读 package.json npmPublish.scope 或环境 DSH_CORE_SCOPE，兜底 @dsh-core）
-# 版本规范（DESIGN §16）：version 从仓库根 package.json 注入（禁手写）；发布前强制校验
-# 二进制 self-check 自报版本 === 单源版本（防产物错配发布）；产物命名 dsh-supervisor-<ver>-<plat>-<arch>。
+# 内核 npm 子包发布（构建物 = Node launcher；版本 = 单源注入，裸版本——npm 强制不带 v 前缀）。
+# 用法（由 ci-core.sh 调用；按本机 platform/arch 或 DSH_*_OVERRIDE 识别）：
+#   release/scripts/publish-core.sh                  # 组装 + npm publish --dry-run（本地验证；推荐先跑）
+#   release/scripts/publish-core.sh --publish        # 真发布（**仅 GitHub CI 内**；本地 exit 2）
+#   release/scripts/publish-core.sh --all-platforms  # 一律拒绝（已废弃；四平台由 CI 各 runner 各自发布）
+#   release/scripts/publish-core.sh --scope @acme    # 指定 scope（不传则读 npmPublish.scope / DSH_CORE_SCOPE）
+# 硬标准（2026-09-13）：所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。
+# 版本规范：version 从仓库根 package.json 注入（禁手写）；发布前强制校验 launcher self-check 自报版本
+#  === 单源版本（防产物错配发布）；产物命名 dsh-supervisor-<ver>-<plat>-<arch>。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -35,6 +32,15 @@ while [ $# -gt 0 ]; do case "$1" in
   --scope=*) SCOPE="${1#*=}" ;;
   *) echo "未知参数: $1（支持 --publish / --dry-run / --all-platforms / --scope <val>）"; exit 2 ;;
 esac; shift; done
+
+# ── 硬标准（2026-09-13）：真发布只允许在 GitHub CI 内 —— **单平台也不例外** ──
+#   原漏洞：--all-platforms 被拒绝，但单平台 --publish 仍可本机直发 npm。
+if [ "$PUBLISH" = 1 ] && [ "${GITHUB_ACTIONS:-}" != 'true' ]; then
+  echo '拒绝：真发布（--publish）只允许在 GitHub CI 内运行（GITHUB_ACTIONS=true）。' >&2
+  echo '  硬标准：所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。' >&2
+  echo '  本地只允许 dry-run（不带 --publish）。' >&2
+  exit 2
+fi
 
 
 # ── 全平台模式：自递归（每个平台各跑一遍「单平台」路径）──

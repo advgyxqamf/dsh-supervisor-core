@@ -16,7 +16,7 @@
 #   5. $HOME/.npmrc                 兜底（沙箱内可能存在的旧副本）
 #
 # 设计要点：「真实用户 home」经 getent/dscl/~user 展开解析，**不受 $HOME 覆盖影响**——
-# 这是让「本地发布」在任何沙箱、任何 shell 下行为一致的关键。
+# 这是让发布链路（CI 发布 / 本地 dry-run / 凭据自检）在任何沙箱、任何 shell 下行为一致的关键。
 
 # 解析真实用户 home（POSIX getent → macOS dscl → bash ~user 展开 → Windows USERPROFILE → $HOME）。
 dsh_real_home() {

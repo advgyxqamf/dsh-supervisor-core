@@ -11,7 +11,7 @@
 //     · 注释声称「mac 由 LaunchAgent 一并代管」（macPlist 从奠基至今逐字节未变、只含守卫）
 //     · status() 硬编码 `gui: on`（把守卫自启当成壳自启）
 //     · setGuiAutostart 对非 Linux **静默 `return { ok: true }`**
-//     · AUDIT-CROSS-PLATFORM.md 给这项打了「三端齐全」
+//     · 早期审计曾给这项打了「三端齐全」（现行矩阵见 PLATFORM-CAPABILITY-MATRIX.md）
 //   四层互相背书，**没有一层验证行为**。
 //
 // 本测试即是「验证行为」这一层。

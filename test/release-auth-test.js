@@ -7,8 +7,8 @@
 //   R3 NPM_TOKEN → 临时 userconfig（0600、退出即删、env 精确恢复）
 //   R4 规范位置（真实 home/.npmrc）可被命中
 //   R5 发布脚本**不得**执行 npm config set（回归：曾永久改开发机 registry + 明文写入 ~/.npmrc）
-//   R6 CI 矩阵不含 ubuntu（Linux 已改本地生产）
-//   R7 release-core 有平台闸（非 Linux 拒绝真发布，防与 CI 二次发布）
+//   R6 CI 矩阵覆盖四平台（构建/发布一律经 CI）
+//   R7 本地无全平台路径；单平台真发布亦仅 CI 内（GITHUB_ACTIONS 守卫）
 
 const fs = require('node:fs');
 const path = require('node:path');
