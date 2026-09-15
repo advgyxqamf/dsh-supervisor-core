@@ -48,6 +48,10 @@ P6 healthz  ── GET /healthz ────────────►  2xx
 
 ## 3. 现状与缺口（2026-09-15 审计）
 
+> **2026-09-15 收口**：C1–C4 均已落地（`install` 不再部署服务定义、看护收归壳、
+> 端口绑定后登记实际值、状态/日志路径经 `stateDir`），且各有门禁（D-1..D-8）。
+> 下表保留为**审计记录**（写的是修复前状态）。
+
 | # | 缺口 | 证据 | 规范要求 |
 |---|---|---|---|
 | C1 | `install` 仍部署 systemd/launchd/schtasks 定义 | `bin/dsh-supervisor` 的 `cmdInstall` 写 `UNIT_PATH`/`DESKTOP_*` | D6：定义只由壳写 |
