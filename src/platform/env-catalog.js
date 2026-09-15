@@ -88,10 +88,25 @@ function probeNode() {
   return { version: 'v' + ver, min, meets: verAtLeast(ver, min) };
 }
 
+/** npm 探测：**契约优先**（壳投放的解析结果 = 单一事实源），退回 PATH。
+ *  旧实现用裸 `'npm'` —— Windows 上 npm 实际是 `npm.cmd`，且 Node 的 spawn 不做 PATHEXT
+ *  解析 → 裸名 ENOENT → 明明装了也误报 missing（与壳侧「只查 node」合成「环境就绪但装不上」）。 */
+function probeNpm() {
+  try {
+    const c = require('./runtime-contract').read();
+    if (c && c.npmPath) {
+      const args = Array.isArray(c.npmArgs) ? c.npmArgs : [];
+      const v = ex.runOut(c.npmPath, [...args, '--version'], { timeoutMs: 3000 });
+      if (v && v.trim()) return v.trim();
+    }
+  } catch {}
+  return cachedWhichVersion('npm');
+}
+
 /** 系统环境条目（必要前置：Node/npm 为 DSH 与反代更新的执行器；git 可选）。 */
 const SYSTEM_ENTRIES = {
   node: { label: 'Node.js', required: true, probe: probeNode },
-  npm:  { label: 'npm',     required: true, probe: () => cachedWhichVersion('npm') },
+  npm:  { label: 'npm',     required: true, probe: probeNpm },
   git:  { label: 'git',     required: false, probe: () => cachedWhichVersion('git') },
 };
 

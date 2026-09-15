@@ -8,6 +8,30 @@
 
 （下一版本待记）
 
+## [0.1.5-BETA.7]（2026-09-16）
+
+### 修复：原生 DSH「检测 → 绑定 → 接管」——消除两套对立逻辑
+
+真机：系统已原生安装 DSH，守卫却判「未安装」，面板据此去装**第二个** DSH 顶替原生的那个。
+
+根因：原生 DSH 的存在/位置**只来自静态 `config.command[1]`**（出厂默认裸逻辑名 `'dsh'`）——
+`fs.existsSync('dsh')` 恒 false → `NativeManager.status().installed` 恒 false；全仓（含壳）
+**没有任何一处**把 `dsh` 解析为真实入口（`node dsh` 不做 PATH 解析、Windows 裸名无扩展名）。
+同一事实得到两个相反结论 —— 这才是「两套对立的逻辑」。
+
+修法（契约见 `NATIVE-DSH-TAKEOVER-CONTRACT.md` N1–N5）：
+
+- `platform/os/exec-path.js::resolveDsh()`：跨平台解析原生 DSH（`DSH_BIN` → PATH/PATHEXT →
+  标准落点 → 包内 `node_modules/@deepseek-ai/dsh/lib/bin.js`），优先包内 JS（用 node 承载，
+  规避 shebang / `.cmd` 垫片）；
+- `supervisor._bindNativeDshCommand()`：启动时**在任何消费者之前**把出厂默认/裸名绑定为绝对入口；
+  用户显式给出的路径**原样尊重**（即使当前不存在也不覆盖）；
+- `NativeManager.detected()/binPath()`：以检测结果为准，未装**如实 false**，绝不伪造路径；
+- 插件 CLI 经 `target.runtime` 承载（原生绑定后与沙箱的 `lib/bin.js` 都可跑，Windows 亦成立）；
+- 壳体感契约同步：`runtime.json` 增 `npmArgs`（npm 仅包内 JS 时 program=node、args=[npm-cli.js]）；
+  内核 `env-catalog` 的 npm 探测改为**契约优先**（Windows 裸 `npm` 是 ENOENT）。
+- 门禁：`test/native-dsh-binding-test.js`（检测 / 绑定 / 版本 / 如实未装 / 结构不变量）。
+
 ## [0.1.5-BETA.6]（2026-09-15）
 
 ### 产品状态根独立于 DSH（XDG，2026-09-15）

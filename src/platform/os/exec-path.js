@@ -167,4 +167,51 @@ function npmBin(opts) {
   return 'npm.cmd';
 }
 
-module.exports = { resolveExecutable, candidateNames, standardDirs, firstExecutable, npmBin, npxBin };
+const DSH_PKG = ['@deepseek-ai', 'dsh'];
+
+/** 包内 DSH JS 入口（给定 npm 全局 prefix 或垫片所在目录）。 */
+function dshJsIn(prefix) {
+  return path.join(prefix, 'node_modules', ...DSH_PKG, 'lib', 'bin.js');
+}
+
+/**
+ * 解析**原生 DSH** 的可执行入口（跨平台，优先包内 JS）。
+ *
+ * 为什么必须：原生 DSH 一直被当作**裸逻辑名** `'dsh'` 使用（`config.command[1]` / `dshBin`），
+ *   而 `node dsh` 不做 PATH 解析、Windows 上裸 `dsh` 也无扩展名 —— 于是「是否已安装」永远判为 false，
+ *   与「安装」分支形成**两套相反判定**（静态默认配置 vs 真实安装）。
+ *
+ * 解析顺序：显式 `DSH_BIN` → PATH（Windows 走 PATHEXT）→ 标准落点（standardDirs）→
+ *   `<npmRoot>/node_modules/@deepseek-ai/dsh/lib/bin.js`。
+ * 返回 `{ runtime, bin, isJs, launcher }`：
+ *   · 命中包内 JS → runtime=当前 node，bin=<abs js>（最稳：不依赖 shebang / .cmd 垫片）；
+ *   · 只命中垫片（.cmd / 无扩展名 shim）→ 反查同前缀包内 JS；
+ *   · 都没有 → null（调用方如实报「未安装」，绝不猜）。
+ */
+function resolveDsh(opts) {
+  const o = opts || {};
+  const pl = o.platform || process.platform;
+  const env = o.env || process.env;
+  const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+  const asJs = (bin, launcher) => ({ runtime: process.execPath, bin, isJs: true, launcher: launcher || null });
+  // ① 显式覆盖
+  if (env.DSH_BIN) { try { const r = fs.realpathSync(env.DSH_BIN); if (isFile(r)) return asJs(r, env.DSH_BIN); } catch {} }
+  // ② PATH → 标准落点
+  const hit = resolveExecutable('dsh', { platform: pl, env });
+  if (hit) {
+    // Unix：dsh 常是软链 → canonicalize 到包内 lib/bin.js
+    try { const real = fs.realpathSync(hit); if (isFile(real) && /\.(js|cjs|mjs)$/i.test(real)) return asJs(real, hit); } catch {}
+    // Windows：.cmd 垫片 → 同前缀的包内 JS
+    const js = dshJsIn(path.dirname(hit));
+    if (isFile(js)) return asJs(js, hit);
+    // 无扩展名 JS（Unix 包内入口）→ 交给 node
+    if (isFile(hit) && !/\.(cmd|bat|exe)$/i.test(hit)) return asJs(hit, hit);
+    // 只能是垫片：调用方需 shell 承载（Windows）
+    return { runtime: null, bin: hit, isJs: false, launcher: hit };
+  }
+  // ③ npm 全局 root 反查（调用方注入；不在此处执行 npm —— 保持纯解析）
+  if (o.npmRoot) { const js = dshJsIn(o.npmRoot); if (isFile(js)) return asJs(js, null); }
+  return null;
+}
+
+module.exports = { resolveExecutable, candidateNames, standardDirs, firstExecutable, npmBin, npxBin, resolveDsh, dshJsIn };

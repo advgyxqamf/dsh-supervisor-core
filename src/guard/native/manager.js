@@ -79,11 +79,29 @@ class NativeManager {
   }
 
   /* ═══════ 安装状态探测 ═══════ */
+  /** 原生 DSH 真实安装（**唯一检测入口**，2026-09-16 架构修正）：
+   *  此前只读静态 `config.command[1]`（出厂默认裸名 'dsh'）→ `fs.existsSync('dsh')` 恒 false →
+   *  「已安装」永远判不出来，与「安装」分支形成两套相反逻辑（系统已装 DSH，守卫却报未安装）。
+   *  · 已绑定/用户显式指定且**真实存在**的绝对路径 → 尊重之；
+   *  · 否则跨平台解析：PATH/PATHEXT → 标准落点 → 包内 `lib/bin.js`（exec-path.resolveDsh）。 */
+  detected() {
+    const cmd = Array.isArray(this.config.command) ? this.config.command : [];
+    const configured = cmd[1];
+    const isBare = !configured || configured === 'dsh' || configured === 'dsh.cmd' || (!/[\\/]/.test(configured) && !String(configured).startsWith('~'));
+    if (!isBare) {
+      // 显式路径 = 用户权威：存在→已装；不存在→未装（如实，不再去猜/顶替）。
+      return { bin: configured, runtime: cmd[0] || null, isJs: /\.(js|cjs|mjs)$/i.test(configured) };
+    }
+    try { return execPath.resolveDsh({ npmRoot: this.npmRoot }); } catch { return null; }
+  }
+
   binPath() {
+    const d = this.detected();
+    if (d && d.bin) return d.bin;
+    // 未检测到：如实返回配置原值（可能是裸名/不存在），由上层区分「未安装」——绝不伪造。
     const bin = this.config.command && this.config.command[1];
     if (!bin) return null;
-    const p = bin === '~' ? os.homedir() : (bin.startsWith('~/') ? path.join(os.homedir(), bin.slice(2)) : bin);
-    return p;
+    return bin === '~' ? os.homedir() : (bin.startsWith('~/') ? path.join(os.homedir(), bin.slice(2)) : bin);
   }
 
   /** 已安装版本：优先显式配置（installedPkgJsonPath），否则从 bin 所在目录向上找 package.json。未安装返回 null（唯一探测实现）。 */

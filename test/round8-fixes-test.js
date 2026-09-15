@@ -264,7 +264,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 {
   const pg = read('src/domains/plugin/plugins.js');
   check('J-i 插件 CLI spawn 用 detached（自成进程组）',
-    /target\.bin, \[\.\.\.cliArgs, \.\.\.args\], \{ env, stdio: \['ignore', 'pipe', 'pipe'\], windowsHide: true, detached: true \}/.test(pg),
+    /spawn\(argv0, \[\.\.\.argvPrefix, \.\.\.cliArgs, \.\.\.args\], \{ env, stdio: \['ignore', 'pipe', 'pipe'\], windowsHide: true, detached: true \}/.test(pg),
     '已改');
   check('J-i 超时经 killTree（POSIX 杀进程组 -pid）',
     /process\.kill\(-child\.pid, sig\)/.test(pg), '有');
