@@ -220,6 +220,8 @@ class Supervisor {
     try { ports.configureFile(path.join(path.dirname(this.config.stateFile), 'ports.json')); } catch (e) { this.logger.warn && this.logger.warn('ports configure: ' + e.message); }
     // 端口池规模可配置（工业标准：范围是配置项而非编译期常量）：config.portPools 覆盖默认池。
     try { if (this.config.portPools) ports.configurePools(this.config.portPools); } catch (e) { this.logger.warn && this.logger.warn('ports pools configure: ' + (e && e.message)); }
+    // 原生 DSH 检测 → 绑定（**必须先于任何消费者**：InstanceManager/PluginManager/spawn）。
+    this._bindNativeDshCommand();
     this.instances = new InstanceManager({
       dir: path.dirname(this.config.stateFile),
       logger: this.logger,
@@ -296,7 +298,7 @@ class Supervisor {
       logger: this.logger,
     });
     this.pluginManager = new PluginManager({
-      dshBin: 'dsh',
+      dshBin: this.config.command && this.config.command[1] ? this.config.command[1] : 'dsh',
       profileName: this.config.pluginsProfileName || 'web',
       profileDir: path.join(os.homedir(), '.dsh', 'profiles', this.config.pluginsProfileName || 'web'),
       overlayFile: path.join(path.dirname(this.config.stateFile), 'plugin-states.patch.yml'),
@@ -348,6 +350,34 @@ class Supervisor {
     //  this.eventHub = logCore.hub，聚合文件按 stateFile 派生唯一。）
     // 系统级端口登记：固定端口统一注册，冲突启动即 fail-fast，杜绝各子系统各管各的端口
     this._registerFixedPorts();
+  }
+
+  /** 原生 DSH 检测 → 绑定（2026-09-16 架构修正）。
+   *
+   *  原生 DSH 此前只被静态 `config.command[1]`（出厂默认裸名 'dsh'）定义 —— `node dsh` 不做 PATH 解析、
+   *  Windows 裸名无扩展名 → 「已安装」永远判 false，与「安装」分支形成两套相反逻辑，
+   *  且会去装第二个 DSH 顶替原生的那个。
+   *
+   *  这里在**任何消费者之前**把无法解析的 command[1] 解析为真实绝对入口：
+   *    包内 JS → `['<node>', '<abs lib/bin.js>', ...rest]`；仅垫片 → `['<abs shim>', ...rest]`。
+   *  用户显式给出且真实存在的路径**原样尊重**（不覆盖）。检测与接管由此同源：
+   *    已装 → 绑定并接管；未装 → 由 NativeManager 安装后重新绑定。 */
+  _bindNativeDshCommand() {
+    try {
+      const cmd = Array.isArray(this.config.command) ? this.config.command.slice() : [];
+      const cur = cmd[1];
+      // 显式路径（含分隔符或 ~）→ **以用户为准**，即使当前不存在也不覆盖（未装就如实报未装）。
+      // 只有出厂默认/裸逻辑名才由检测填充 —— 这正是「检测 → 绑定」的边界。
+      const isBare = !cur || cur === 'dsh' || cur === 'dsh.cmd' || (!/[\\/]/.test(cur) && !String(cur).startsWith('~'));
+      if (!isBare) return;
+      const d = require('./platform/os/exec-path').resolveDsh();
+      if (!d || !d.bin) return;
+      this.config.command = d.isJs
+        ? [d.runtime || process.execPath, d.bin, ...cmd.slice(2)]
+        : [d.bin, ...cmd.slice(2)];
+      try { this.events && this.events.append('dsh_command_bound', { from: cur || null, to: this.config.command[1] }); } catch {}
+      try { this.logger.info && this.logger.info('原生 DSH 已绑定: ' + this.config.command.join(' ')); } catch {}
+    } catch (e) { try { this.logger.warn && this.logger.warn('原生 DSH 绑定失败: ' + (e && e.message)); } catch {} }
   }
 
   /** 固定端口统一登记：主DSH / 守卫API / 中转服务。冲突即抛错（守卫启动失败，避免带病运行）。

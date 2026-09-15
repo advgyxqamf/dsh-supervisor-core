@@ -61,6 +61,8 @@ class PluginManager {
       name: '原生实例',
       kind: 'native',
       bin: this.dshBin,
+      // 绑定后的原生入口可能是包内 JS（`.../lib/bin.js`）——必须用 node 承载（Windows 更甚：.js 不可直接执行）。
+      runtime: /\.(js|cjs|mjs)$/i.test(this.dshBin) ? process.execPath : null,
       profileDir: this.profileDir,
       profileName: this.profileName,
       env: { HOME: os.homedir(), PATH: this._pathExtra() },
@@ -78,6 +80,7 @@ class PluginManager {
       name: inst.name || inst.id,
       kind: 'sandbox',
       bin: path.join(installDir, 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+      runtime: process.execPath, // 包内 JS 入口：显式 node 承载（跨平台一致）
       installDir,
       profileDir: path.join(dataDir, '.dsh', 'profiles', this.profileName),
       profileName: this.profileName,
@@ -394,7 +397,10 @@ class PluginManager {
           //   缺陷：原实现无 detached，且超时只用 `child.kill()` 杀**直接子进程** ——
           //     dsh plugin → pnpm 的**孙进程**（真正在跑安装的那个）会成为孤儿，
           //     继续占用 profile 目录与 pnpm store 锁。
-          child = spawn(target.bin, [...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: true });
+          // 入口可能是包内 JS（原生绑定后 / 沙箱）→ 用 `node <js> plugin …`；纯垫片则直接执行。
+          const argv0 = target.runtime || target.bin;
+          const argvPrefix = target.runtime ? [target.bin] : [];
+          child = spawn(argv0, [...argvPrefix, ...cliArgs, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: true });
         } catch (e) { return settle({ ok: false, error: e.message }); }
         // 整树终止（POSIX 进程组 / Windows 退化为单进程，与平台能力声明一致）
         const killTree = (sig) => {
