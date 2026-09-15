@@ -66,6 +66,9 @@ check('R-1 schema1 兼容（binDir 由 nodePath 推导前仍可读 minNode）', 
 fs.writeFileSync(path.join(SUP, 'runtime.json'), '{ bad json', 'utf8');
 check('R-1 损坏 JSON → null（不抛）', rc.read() === null);
 
+// R-6 契约版本握手：本侧 schema 常量必须与壳写入的 schema 一致（各自断言，不跨仓读源码）。
+check('R-6 契约 schema 版本 = 2（与壳 handshake）', rc.SUPPORTED_SCHEMA === 2, String(rc.SUPPORTED_SCHEMA));
+
 // R-4 消费点接入（静态）。
 const dist = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
 check('R-4 dist/index.js 用契约解析 npm', /runtimeContract\.npmBin\(/.test(dist), 'ok');
