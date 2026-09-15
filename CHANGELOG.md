@@ -8,6 +8,18 @@
 
 （下一版本待记）
 
+### 产品状态根独立于 DSH（XDG，2026-09-15）
+
+本产品**管控 DSH**，状态不得寄在被管控对象的 `~/.dsh` 下：
+
+- 新增 `src/platform/state-root.js`（唯一入口）：`DSH_SUPERVISOR_HOME` 覆盖 + XDG/平台默认 + `migrateLegacy()`；
+- `config`/`ports`/`runtime-contract`/`router|relay daemon`/`domains/shell`/`proxy`/`autostart`/`bin`
+  的 supervisor|shell 状态路径全部切换；**DSH 自身数据（`~/.dsh/profiles`、`DSH_HOME`）保持不动**；
+- daemon/install 启动早期 `migrateLegacy()`（按条目合并，不覆盖新文件）；
+- `npm test` 注入 `DSH_SUPERVISOR_HOME=$(mktemp -d)`：测试不再写真实 HOME（根除"本地残留"）；
+- 门禁 `state-root-test.js`（SR-1..SR-7，含迁移行为与 hygiene）；`defects-batch-f` K7、
+  `runtime-contract-test` 同步到新状态根。
+
 ### 端口/路径/看护契约收口（2026-09-15）
 
 按 KERNEL-DAEMON-CONTRACT D3/D6/D7：

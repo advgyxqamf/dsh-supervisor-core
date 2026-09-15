@@ -108,7 +108,7 @@ function xmlEscape(s) {
 }
 
 function macGuiPlist(guiExe) {
-  const log = path.join(os.homedir(), '.dsh', 'shell', 'gui-stdio.log');
+  const log = path.join(require('../state-root').shellDir(), 'gui-stdio.log');
   return '<?xml version="1.0" encoding="UTF-8"?>\n'
     + '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
     + '<plist version="1.0"><dict>\n'

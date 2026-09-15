@@ -63,14 +63,15 @@ function hasTool(name, args) {
   _toolCache[name] = ok ? true : { at: Date.now() };
   return ok;
 }
-/** 统一数据目录：~/.dsh（三平台一致，os.homedir 通用）。 */
+/** DSH 数据目录：~/.dsh（**被管控对象**的数据；不属于本产品状态）。 */
 function dataDir() {
   return path.join(os.homedir(), '.dsh');
 }
 
-/** 产品私有数据目录：~/.dsh/supervisor（状态/日志/端口登记/任务历史）。 */
+/** 本产品状态目录（**独立于 DSH**）：XDG 状态根/dsh-supervisor/supervisor。
+ *  单一事实源 = platform/state-root.js（覆盖 DSH_SUPERVISOR_HOME）。 */
 function supervisorDir() {
-  return path.join(dataDir(), 'supervisor');
+  return require('../state-root').supervisorDir();
 }
 
 /** 平台静态能力档位（纯函数，可测——2026-09 审计修复：capabilities 原硬编码全 true

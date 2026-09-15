@@ -28,7 +28,9 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : '')); };
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'rtc-'));
-const SUP = path.join(TMP, '.dsh', 'supervisor');
+// 产品状态根隔离（独立于 DSH）：runtime.json 落在 <DSH_SUPERVISOR_HOME>/supervisor。
+process.env.DSH_SUPERVISOR_HOME = TMP;
+const SUP = path.join(TMP, 'supervisor');
 fs.mkdirSync(SUP, { recursive: true });
 const NODE_DIR = path.join(TMP, 'nodebin');
 fs.mkdirSync(NODE_DIR, { recursive: true });
@@ -77,6 +79,7 @@ const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'env-catalog.js'),
 check('R-4 env-catalog 用契约读 minNode', /runtime-contract/.test(ec), 'ok');
 
 process.env.HOME = savedHome; process.env.USERPROFILE = savedUp;
+delete process.env.DSH_SUPERVISOR_HOME;
 fs.rmSync(TMP, { recursive: true, force: true });
 
 const failed = results.filter((r) => !r);

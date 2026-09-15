@@ -18,7 +18,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 
 const HOME = os.homedir();
-const CONFIG_PATH = process.env.DSH_SUPERVISOR_CONFIG || path.join(HOME, '.dsh', 'supervisor', 'config.json');
+const CONFIG_PATH = process.env.DSH_SUPERVISOR_CONFIG || path.join(require('../../platform/state-root').supervisorDir(), 'config.json');
 
 function loadConfig() {
   const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -33,7 +33,7 @@ function main() {
   const { TaskRegistry } = require('../../platform/tasks');
 
   const config = loadConfig();
-  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : path.join(HOME, '.dsh', 'supervisor');
+  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : require('../../platform/state-root').supervisorDir();
   // 系统日志框架（历史设计文档）：daemon 经每进程唯一 LogCore 取日志/事件
   // （自有独立文件，不共享守卫文件；单例 init 幂等，异进程复用拒绝）。
   const core = require('../../platform/logcore').init({

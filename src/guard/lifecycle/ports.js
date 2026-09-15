@@ -49,7 +49,7 @@ class PortRegistry {
     //   与其它状态文件**不在同一目录**：state.json 在 %USERPROFILE%\.dsh\supervisor\，
     //   ports.json 却在 \tmp\。后果：端口记录与守卫状态分裂，卸载/迁移时残留。
     //   os.homedir() 是三平台正确来源（Windows 用 USERPROFILE，Unix 用 HOME）。
-    this._file = (opts && opts.file) || path.join(os.homedir(), '.dsh', 'supervisor', 'ports.json');
+    this._file = (opts && opts.file) || path.join(require('../../platform/state-root').supervisorDir(), 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
     this._allocLock = false;     // 分配互斥：isTaken(await) 窗口内并发调用必须串行
     // 物理池（可配置）：opts.pools 覆盖默认（config.portPools 注入）；键缺失回退默认。

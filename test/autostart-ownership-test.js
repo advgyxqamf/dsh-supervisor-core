@@ -85,8 +85,8 @@ console.log('== P3 GUI plist 只表达「登录启动」==');
       /xmlEscape\(\s*guiExe\s*\)/.test(body), 'ok');
     check('P3-f2 plist 内不再有把双引号当 XML 转义的旧写法',
       !/replace\(\/"\/g/.test(body), 'ok');
-    check('P3-g 输出 stderr/stdout 落 ~/.dsh/shell（与壳同域，便于排障）',
-      /\.dsh.*shell/.test(body) || /'shell'/.test(body), 'ok');
+    check('P3-g 输出 stderr/stdout 落产品状态根 shell 目录（独立于 DSH）',
+      /shellDir\(\)/.test(body), 'ok');
   }
 }
 
