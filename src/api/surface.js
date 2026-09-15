@@ -49,9 +49,9 @@ const SURFACE = [
   { path: '/settings/access-key',  methods: ['GET', 'POST'], domain: 'guard', category: 'public', consumers: ['UI(StartupCard)'], note: '访问密钥' },
   { path: '/settings/close-action', methods: ['GET', 'POST'], domain: 'guard', category: 'public', consumers: ['UI(StartupCard)', '壳(读取执行)'], note: '关窗行为（hide/exit）' },
   { path: '/settings/lan',         methods: ['GET', 'POST'], domain: 'guard', category: 'public', consumers: ['UI(StartupCard)'], note: '面板局域网访问开关' },
-  { path: '/self-update/status',   methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '内核自更新状态' },
-  { path: '/self-update/apply',    methods: ['POST'], domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '执行内核自更新' },
-  { path: '/self-update/restart-guard', methods: ['POST'], domain: 'guard', category: 'public', consumers: ['UI(AboutCard)'], note: '重启守卫以生效（守卫退出 + systemd 重拉）' },
+  { path: '/self-update/status',   methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '内核更新状态（只读；安装归桌面壳）' },
+  { path: '/self-update/apply',    methods: ['POST'], domain: 'guard', category: 'deprecated',  consumers: ['无（已下架）'], note: '已下架（单写入者=壳）：返回 410 KERNEL_UPDATE_SINGLE_WRITER；替代 = 桌面壳 kernel_update_apply' },
+  { path: '/self-update/restart-guard', methods: ['POST'], domain: 'guard', category: 'deprecated', consumers: ['无（已下架）'], note: '已下架（守卫不自重启）：返回 410；替代 = 壳在安装后经服务管理器重启守卫' },
 
   // ── 原生 DSH（native.js）──
   { path: '/native/status',       methods: ['GET'],  domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI(status)'], note: '安装状态 + 版本 + 升级状态机' },
@@ -138,7 +138,7 @@ const PREFIXES = [
   { prefix: '/plugins/',     domain: 'plugins',   category: 'public',      consumers: ['UI'], note: '/plugins/{install|enable|disable|uninstall|update}' },
   { prefix: '/router/',      domain: 'router',    category: 'public',      consumers: ['UI'], note: '/router/... （ports/domain-summary 为 internal，见 SURFACE）' },
   { prefix: '/shell/',       domain: 'shell',     category: 'public',      consumers: ['壳', 'UI'], note: '/shell/{status|health|update-pending|check-update|restart}（壳更新强制，无回退）' },
-  { prefix: '/self-update/', domain: 'guard',     category: 'public',      consumers: ['UI'], note: '/self-update/{status|apply|restart-guard}' },
+  { prefix: '/self-update/', domain: 'guard',     category: 'public',      consumers: ['UI'], note: '/self-update/status（只读）；apply|restart-guard 已下架=410' },
   { prefix: '/settings/',    domain: 'guard',     category: 'public',      consumers: ['UI'], note: '/settings/{lan|access-key|close-action}' },
   { prefix: '/tasks/',       domain: 'tasks',     category: 'public',      consumers: ['UI'], note: '/tasks/{id}' },
 ];

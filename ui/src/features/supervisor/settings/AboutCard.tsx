@@ -16,6 +16,7 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "../../../framework/ui";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../../framework/ui/dialog";
 import { supervisorApi } from "../../../services/supervisor";
+import { hasShellHost, requestKernelUpdate } from "../../../services/supervisor/kernelUpdateBridge";
 import { useSupervisorAction } from "../useSupervisorAction";
 import { Card, CardTitle, Pill } from "../widgets";
 import { cn } from "../../../framework/utils";
@@ -147,17 +148,18 @@ export function AboutCard() {
     }, { refresh: false });
   };
 
-  // 内核更新（无跳过，用户定稿 2026-09）：npm 装新内核后重启守卫
+  // 内核更新（无跳过，用户定稿 2026-09）：**唯一写入者 = 桌面壳**。
+  //   面板不能调用内核端点安装（/self-update/apply 已下架 = 410）；经消息桥请壳执行
+  //   kernel_update_apply（装内核 + 由所有者重启守卫）。
   const applyCoreUpdate = async () => {
-    if (!window.confirm("发现内核新版本 " + fmt(ver?.latest) + "，是否立即更新？")) return;
+    if (!hasShellHost()) { toast.error("内核更新由桌面壳执行：请在桌面壳面板中操作。"); return; }
+    if (!window.confirm("发现内核新版本 " + fmt(ver?.latest) + "，是否立即更新？\n\n内核将由桌面壳安装，并自动重启守卫。")) return;
     await run("upd", async () => {
-      const r = await supervisorApi.selfUpdateApply();
-      if (r?.ok === false) { toast.error(r.error || "更新失败"); return; }
-      if (r?.restartRequired) {
-        toast.success("内核已更新至 " + fmt(r.installed || r.latest) + "，正在重启守卫…");
-        const rs = await supervisorApi.selfUpdateRestart().catch(() => null);
-        if (rs?.ok === false) toast.warning("更新完成，请手动重启守卫：" + (rs.error || ""));
-      } else { toast.success("内核已是最新，无需更新"); }
+      const r = await requestKernelUpdate();
+      if (!r.ok) { toast.error(r.error || "更新失败"); return; }
+      const v = fmt(r.version || ver?.latest);
+      if (r.restartUncertain) toast.warning("内核已更新至 " + v + "，但守卫可能未自动重启，请手动确认。");
+      else toast.success("内核已更新至 " + v + "，守卫已重启。");
     }, { refresh: true });
   };
 
@@ -216,9 +218,13 @@ export function AboutCard() {
             {coreUpdate ? (
               <>
                 <Pill tone="warn">可更新 {fmt(ver?.latest)}</Pill>
-                <Button size="chip" disabled={busy === "upd"} onClick={() => void applyCoreUpdate()} variant="outline">
-                  <RefreshCw className={cn("size-3", busy === "upd" && "animate-spin")} />更新
-                </Button>
+                {hasShellHost() ? (
+                  <Button size="chip" disabled={busy === "upd"} onClick={() => void applyCoreUpdate()} variant="outline">
+                    <RefreshCw className={cn("size-3", busy === "upd" && "animate-spin")} />更新
+                  </Button>
+                ) : (
+                  <Pill tone="off">请在桌面壳中更新</Pill>
+                )}
               </>
             ) : null}
           </span>

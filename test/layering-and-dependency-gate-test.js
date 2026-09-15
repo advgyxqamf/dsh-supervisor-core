@@ -78,7 +78,6 @@ const CROSS_LAYER = {
     'src/platform/os': '平台抽象层（能力/执行/路径）—— 正常向下依赖',
     'src/platform/matrix': '平台标签矩阵（跨平台架构规范唯一事实源）',
     'src/platform/config': '读统一配置（数据目录/端口段等）',
-    'src/platform/exec': '有界执行器（统一超时/输出上限）',
     'src/platform/fs-utils': '文件工具（原子写/目录准备）',
     'src/platform/logcore': '日志核心（结构化事件写入）',
     'src/platform/registry-contract': '镜像目录契约（domains/dist 消费）',

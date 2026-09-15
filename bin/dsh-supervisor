@@ -537,20 +537,18 @@ function cmdSelfUpdate(action) {
       if (s.ok) {
         console.log('守卫当前版本: ' + s.installed);
         console.log('最新版本:     ' + s.latest);
-        console.log(s.updateAvailable ? '→ 有可用更新！执行: dsh-supervisor self-update apply' : '已是最新。');
+        console.log(s.updateAvailable ? '→ 有可用更新：请在桌面壳面板「关于」中点「更新」' : '已是最新。');
       }
       return;
     }
     if (action === 'apply') {
-      const r = await apiOne('POST', '/self-update/apply');
-      if (r.error) return console.log('应用更新失败: ' + r.error);
-      if (r.ok) {
-        console.log('已更新到 v' + r.version + (r.restartRequired ? '，需要重启守卫生效' : '（无变化）'));
-        console.log('重启: systemctl --user restart dsh-supervisor');
-      }
-      return;
+      // 单写入者契约（2026-09-15）：内核包只能由桌面壳安装（守卫不自装）。
+      //   CLI 不再代跑安装；接口 /self-update/apply 已下架（410 KERNEL_UPDATE_SINGLE_WRITER）。
+      console.error('内核更新由桌面壳执行（单写入者契约）：请在桌面壳面板「关于」中点「更新」。');
+      console.error('本命令不再安装内核。');
+      process.exit(2);
     }
-    console.log('用法: dsh-supervisor self-update [check|apply]');
+    console.log('用法: dsh-supervisor self-update [check]');
   })();
 }
 

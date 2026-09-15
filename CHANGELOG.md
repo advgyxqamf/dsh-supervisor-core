@@ -22,6 +22,25 @@
 - `SUPPORTED_SCHEMA` 恒为 2，门禁 R-6 锁定；与壳 `runtime_contract.rs` 的 `SCHEMA` 握手，
   两仓各自断言、**互不读源码** —— 任一侧改 schema 必须同时改两侧，否则各自 CI 变红。
 
+### 内核更新收敛为单写入者 = 桌面壳（2026-09-15）
+
+问题 1 的根：内核 npm 包有**两个写入者**（内核自更新 `POST /self-update/apply` 与壳 `core_apply`），
+两套版本判定、两种源策略（内核官方 registry vs 壳镜像）。现收敛为**唯一写入者 = 桌面壳**；
+守卫只提供只读状态，从不安装/重启自己。面板运行在内核托管的 iframe 内、无 Tauri IPC，
+故经 postMessage 请壳主帧代执行。
+
+- 写端点下架：`POST /self-update/apply`、`POST /self-update/restart-guard` → `410` + `KERNEL_UPDATE_SINGLE_WRITER`；
+  `GET /self-update/status` 保留为**只读**；
+- 删除写实现：`settings-view` 的 `guardSelfUpdateApply` / `guardSelfUpdateRestart`、
+  `_selfUpdatePending` 及其状态字段；
+- 删除旧 manifest 通道死代码：`src/domains/dist/self-update.js`、config 的
+  `selfUpdateManifestUrl`/`selfUpdateDir` 残留键、`fs-utils.extractTarGz`（唯一消费方已删）；
+- CLI `dsh-supervisor self-update apply` 不再安装（给指引 + 退出码 2）；`check` 保留；
+- 面板改用 `ui/src/services/supervisor/kernelUpdateBridge.ts` 经壳主帧代执行（协议 v1）；
+- 门禁：`test/kernel-update-single-writer-test.js`（SW-1..SW-7，含反向判据）；api-surface 标 deprecated。
+
+配套壳仓（另一仓）：`src/bridge.rs` + `kernel_update_apply` + `shell.html` 消息桥（见其 §3.2c）。
+
 ## [0.1.5-BETA.4]（2026-09-14）
 
 ### 设计修正：内核仓与壳仓彻底解耦（移除跨仓源码依赖）

@@ -162,9 +162,7 @@ GET  /changelog              DSH 更新日志（text/plain）
 GET  /guard/changelog        管家自身更新日志（CHANGELOG.md）
 GET  /guard/version          管家本地版本（同步安全，无网络 I/O）
 POST /guard/version/check    管家完整检查（npm 或 git 上游，按部署形态）
-GET  /self-update/status     内核自更新状态
-POST /self-update/apply      执行自更新
-POST /self-update/restart-guard  守卫退出以生效（systemd Restart=always 重拉）
+GET  /self-update/status     内核更新状态（**只读**；安装/重启由桌面壳执行）
 # 环境与平台能力
 GET  /env/status             环境探针 + **平台能力矩阵**（capabilities）
 GET  /env/dsh                DSH 本体安装/纳管判定（bin/binOk/managed/phase）
@@ -288,7 +286,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 > 验证超时收尾与锁释放，全程不触碰真实 npm）。
 
 
-## 桌面产品：环境引导 + 守卫自更新（Phase 1/2）
+## 桌面产品：环境引导 + 内核更新（单写入者 = 桌面壳）
 
 ### 安装即用（免预装 Node）
 - Tauri 桌面壳（src-tauri）是**引导器 + 面板壳**（Phase 3 一源双出口：完整壳内嵌面板产物，公开壳为 MIT 引导器）；
@@ -297,10 +295,12 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 - **前端一源双出口**：源码唯一 `ui/`，构建一次 → `ui-react` 镜像（守卫托管/浏览器出口）+ 壳 frontend 内嵌（桌面出口）；统一入口 `release/scripts/build-ui.sh`（release.sh/build-sea.sh/CI 均经它）。
 - 守卫保持零第三方依赖（node: 内置即可运行）；shell 提供无头冒烟入口：`dsh-supervisor-gui --node-plan`。
 
-### 守卫自更新（D1 定案：统一走 npm 平台子包；manifest 通道仅底层执行器回归保留）
-- **发布通道（D1，2026-09 定案）**：守卫自身更新统一走 npm 平台子包（`DistributionManager.runNpmInstall` + `@dsh-core/<os>-<arch>`）；`release/scripts/release.sh` 不再产出自更新 manifest，仅作源码打包出口。
-- 底层执行器：`src/domains/dist/self-update.js`（tar 解包/SHA256 校验/`current` 软链原子翻转/剪枝；guard-update-test 全量覆盖，作回归保留，非发布通道）。
-- 接入：配置 `selfUpdateManifestUrl` / `selfUpdateDir`；API `GET /self-update/status`、`POST /self-update/apply`。
+### 内核更新（单写入者 = 桌面壳；2026-09-15 A 方案）
+- **唯一写入者**：内核 npm 平台子包（`@dsh-sup/dsh-core-<os>-<arch>`）的安装/升级**只由桌面壳**执行；
+  启动门 2（`core_apply`）与面板请求（壳 `kernel_update_apply`，经面板→壳 postMessage 桥）**共用同一实现**。
+- 守卫只提供**只读**状态：`GET /self-update/status`；写端点 `POST /self-update/apply`、`POST /self-update/restart-guard`
+  已下架（`410 KERNEL_UPDATE_SINGLE_WRITER`）。守卫重启（应用新内核）由壳经服务管理器完成（守卫从不重启自己）。
+- 旧 manifest 通道（`selfUpdateManifestUrl`/`selfUpdateDir` + `src/domains/dist/self-update.js`）**已删除**。
 - 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）；推荐一键：`CI（tag 触发）` / `CI（tag 触发，四平台各自 ci-core.sh --publish）`。
 - 环境状态：`GET /env/status`（node/npm/git 探针 + 壳写入的 runtime.json）、`GET /env/dsh`（DSH 本体安装/纳管判定）。
 

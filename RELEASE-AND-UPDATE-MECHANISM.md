@@ -224,24 +224,37 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 ---
 
-## 6. 与内核更新机制的边界（D6 硬约束）
+## 6. 与内核更新机制的边界（单一写入者，2026-09-15 修订）
 
-| 内核更新路径 | 现有语义 | 本方案 |
+**硬规则**：内核 npm 包的安装/升级**只有一个写入者 = 桌面壳**。守卫（内核）**不再安装自己**，
+只提供只读状态。此前的「D6 双通道」判定（下表 ①④）作废 —— 它正是「更新逻辑分裂」的根因：
+同一个全局 npm 包被内核与壳两个进程写，两套版本判定、两种源策略（内核强制官方 registry，壳走镜像）。
+
+| 内核更新路径 | 旧语义 | 现方案 |
 |---|---|---|
-| ① 守卫自更新 | **全更新强制**（latest>当前即装，无跳过/无降级）+ 磁盘版本校验 + 重启后复核 | **不改** |
-| ② 原生 DSH 更新 | 唯一 `_runInstall` → `dist.runNpmInstall` + 自动回滚 | **不改** |
-| ③ 沙箱实例更新 | 带 `--prefix`，每实例独立 | **不改** |
-| ④ manifest 通道 | `selfUpdateManifestUrl` 默认 null（未启用） | **不改** |
+| ① 守卫自更新（npm 通道） | 内核 `POST /self-update/apply` → `runNpmInstall` | **撤销**：端点下架（410 + `KERNEL_UPDATE_SINGLE_WRITER`）；安装归壳 `core_apply` |
+| ② 原生 DSH 更新 | 唯一 `_runInstall` → `dist.runNpmInstall` + 自动回滚 | **不改**（这是 DSH 本体，不是内核） |
+| ③ 沙箱实例更新 | 带 `--prefix`，每实例独立 | **不改**（具名实例，不是内核包） |
+| ④ manifest 通道 | `selfUpdateManifestUrl` 默认 null（未启用） | **删除**：死代码（端点从未接线，仅自测引用） |
 
-**壳侧禁止事项**：
+**只读面（保留）**：内核 `GET /self-update/status` —— 版本/可更新性是事实查询，不是写入。
+**写入面（唯一）**：壳 `core_apply`（启动门 2）与壳命令 `kernel_update_apply`（面板请求）。
+**重启面（唯一）**：壳经服务管理器重启守卫（守卫从不重启自己）。
+
+**面板请求通道**：面板由内核托管、运行在壳的内容 iframe 内，**不能用 Tauri IPC**（IPC 仅主帧）。
+故面板经 `postMessage` 把「更新内核」转交壳主帧，由壳调用 `kernel_update_apply`（协议与校验见壳仓
+`docs/DESIGN-SHELL-ARCHITECTURE.md` §3.2c）。核心里**没有任何**安装/重启自己的代码路径。
+
+**壳侧约束**：
 1. **禁止**为兼容旧壳而把内核降级或 pinned；
 2. **禁止**壳回退时连带回退内核；
-3. **禁止**壳写任何内核版本状态；
-4. P1 复用 `dist` 仅限**只读**（`fetchLatestVersion`），**不调用** `runNpmInstall`。
+3. 内核更新**必须**经壳（单一写入者）——壳是唯一有权 `npm i -g <corePackageName>` 的一方；
+4. P1 复用 `dist` 仅限**只读**（`fetchLatestVersion`）；壳安装内核走 `core.rs::install_version`，
+   **不调用**内核 `dist.runNpmInstall`。
 
-**隔离证明**：壳 `~/.dsh/shell/` vs 内核 `~/.dsh/supervisor/`（物理隔离）；
-壳账本 `update-journal.json` vs 内核 `_selfUpdateExpectedVersion`（不同命名空间）；
-壳 `pinnedVersions` **只针对壳版本**。
+**隔离证明**：壳状态 `~/.dsh/shell/` vs 内核状态 `~/.dsh/supervisor/`（物理隔离）；
+壳账本 `update-journal.json` vs 内核事件流（不同命名空间）；壳 `pinnedVersions` **只针对壳版本**。
+内核 npm 包是**共享产物**，故以「单一写入者」而非物理隔离来保证一致性。
 
 ---
 
