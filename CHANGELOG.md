@@ -8,6 +8,18 @@
 
 （下一版本待记）
 
+### 端口/路径/看护契约收口（2026-09-15）
+
+按 KERNEL-DAEMON-CONTRACT D3/D6/D7：
+
+- **端口声明实际值（D3）**：API 绑定成功（含冲突顺延）后 `ports.register('supervisor-api', 实际端口)`，
+  并释放旧端口登记 —— 修「守卫已健康、但壳按旧端口判定未就绪」；
+- **看护收归壳（D6/G3）**：`autostart.js` 不再创建 `DSH-Supervisor-Watchdog` / 写 `watchdog.ps1`，
+  只保留 GUI 自启；Windows 看护由壳 `ensure_watchdog` 建立；
+- **状态/日志路径经 stateDir（D7/G6）**：`domains/router/providers/proxy.js` 改用注入的 `stateDir`，
+  不再直拼 `os.homedir()`（修本地跑测写真实 `~/.dsh` 的根因）；
+- 门禁：`kernel-daemon-contract-test` 增 D-6/D-7/D-8；`platform-capability-audit` A5 改负向不变量。
+
 ### 内核守护进程契约：install 不再部署服务定义（2026-09-15）
 
 按 `KERNEL-DAEMON-CONTRACT.md` D6（内核不建/不启/不停自己的服务定义，唯一所有者=桌面壳）：

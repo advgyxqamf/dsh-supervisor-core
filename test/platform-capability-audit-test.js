@@ -159,21 +159,16 @@ console.log('== A5 自愈机制真实性 ==');
   // 守卫 plist 的**内容模板**归桌面壳（所有权矩阵）—— 由壳仓测试负责，
   //   内核**不读壳仓源码**。内核侧只保留所有权不变量：不得再持有该模板。
   check('A5 内核不再持有守卫 plist 模板（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
-  // 壳自愈 Windows：shell 检查必须**独立于** `if (-not $up)` 块
-  const ps = asSrc.match(/const ps = \[[\s\S]*?\]\.join/);
-  check('A5 Windows watchdog 脚本存在', !!ps, 'ok');
-  if (ps) {
-    const script = ps[0];
-    const idxUpBlock = script.indexOf('if (-not $up)');
-    const idxGuiCheck = script.indexOf('if (-not $g');
-    check('A5 Windows 壳检查**未**嵌套在守卫块内（壳崩/守卫活时可自愈）',
-      idxUpBlock >= 0 && idxGuiCheck > 0 && idxGuiCheck > idxUpBlock,
-      'up@' + idxUpBlock + ' gui@' + idxGuiCheck);
-    check('A5 Windows watchdog 定时存在（schtasks MINUTE）', /\/SC',\s*'MINUTE'/.test(asSrc) || /MINUTE/.test(asSrc), 'ok');
-  }
-  // 声明为 true 的平台必须有对应机制
-  check('A5 win32 shellSelfHeal 声明为 true 且机制存在',
-    capabilityProfile('win32', 'x64').shellSelfHeal === true && !!ps, 'ok');
+  // 2026-09-15（G3/C2）：Windows 看护（watchdog）所有者 = 桌面壳（KERNEL-DAEMON-CONTRACT D6）。
+  //   内核侧只保留**负向不变量**：不得再创建 watchdog 任务 / 写 watchdog.ps1。
+  //   壳侧「建立看护任务、且壳检查独立于守卫块」由壳仓 K-7 门禁负责（内核不读壳仓源码）。
+  check('A5 内核不再创建 Windows watchdog 任务',
+    !asSrc.includes("'/TN', 'DSH-Supervisor-Watchdog'"), 'ok');
+  check('A5 内核不再写 Windows watchdog 脚本',
+    !/writeFileSync\([^)]*watchdog\.ps1/.test(asSrc), 'ok');
+  // 声明为 true 的平台必须有对应机制（机制在壳仓，见其 K-7）
+  check('A5 win32 shellSelfHeal 声明为 true（机制由壳仓保证）',
+    capabilityProfile('win32', 'x64').shellSelfHeal === true, 'ok');
 }
 
 // ── A6 无回归：历史错误声明不得重现 ──

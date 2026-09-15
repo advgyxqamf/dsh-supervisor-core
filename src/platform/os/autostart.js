@@ -194,49 +194,18 @@ function setAutostart(on) {
     // Windows 崩溃自拉宿主（2026-09 补齐）：schtasks ONLOGON 只登录启动一次，进程崩溃后不会重启。
     // 方案：双任务——(a) ONLOGON 启动 GUI 壳（用户常驻入口）；(b) Watchdog 每 5 分钟检查守卫
     // API（localhost:apiPort 探测），进程不在则重新拉起 daemon（写 watchdog.ps1 到数据目录，纯 PS 免转义）。
+    // 看护（DSH-Supervisor-Watchdog）与守卫任务（DSH-Supervisor）的所有者 = **桌面壳**
+    //   （KERNEL-DAEMON-CONTRACT D6 / KERNEL-LAUNCH-STANDARD H5）。
+    //   2026-09-15：本函数只保留「GUI 壳开机自启」这一个语义 —— 不再创建 watchdog、
+    //   不再 enable/disable 守卫任务（否则与壳争定义，且形成第二个启动器）。
     try {
-      const watchdogPs1 = path.join(os.homedir(), '.dsh', 'supervisor', 'watchdog.ps1');
       if (on) {
-        const apiPort = process.env.DSH_SUPERVISOR_API_PORT || '36361';
-        const daemon = daemonCommand();
-        const guiPath = guiCommand();
-        const ps = [
-          '$ErrorActionPreference = "SilentlyContinue"',
-          '$port = ' + JSON.stringify(String(apiPort)),
-          '$daemon = ' + JSON.stringify(String(daemon)),
-          '$gui = ' + JSON.stringify(String(guiPath)),
-          '$up = Test-NetConnection -ComputerName 127.0.0.1 -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue',
-          '# ── 守卫保活（仅在守卫不可达时）──',
-          'if (-not $up) {',
-          '  $p = @(Get-Process -Name dsh-supervisor -ErrorAction SilentlyContinue)',
-          "  if (-not $p) { Start-Process -FilePath $daemon -ArgumentList 'daemon' -WindowStyle Hidden }",
-          '}',
-          '# ── 壳保活（⚠ 必须**独立于守卫状态**）──',
-          '#   2026-09-11 审计修复：旧实现把壳检查嵌在上面的 if (-not $up) 内，',
-          '#   于是「壳崩、守卫活」时 $up 为真 → 整块跳过 → **壳永远不会被拉起**。',
-          '#   而那恰是壳自愈唯一需要生效的场景（守卫由服务管理器保活，壳无人管）。',
-          '$g = @(Get-Process -Name dsh-supervisor-gui -ErrorAction SilentlyContinue)',
-          'if (-not $g -and (Test-Path $gui)) { Start-Process -FilePath $gui -WindowStyle Hidden }',
-          'exit 0',
-        ].join(String.fromCharCode(13, 10));
-        fs.mkdirSync(path.dirname(watchdogPs1), { recursive: true });
-        const atmp = watchdogPs1 + '.tmp'; fs.writeFileSync(atmp, ps); fs.renameSync(atmp, watchdogPs1); // 原子写
-        // (a) 登录启动 GUI（任务名与「守卫服务」分离，避免覆盖壳建立的守卫任务）
-        { const r = ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-GUI', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']);
-          if (!r.ok) errors.push('schtasks gui: ' + (r.error || '执行失败')); }
-        // (c) 守卫任务（DSH-Supervisor）由**桌面壳**建立；这里只负责「开机自启」语义的启用
-        ex.run('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/ENABLE']);
-        // (b) 每 5 分钟 watchdog 保活（崩溃自动拉起）
-        { const r = ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-Watchdog', '/SC', 'MINUTE', '/MO', '5', '/RL', 'HIGHEST', '/F', '/TR', 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + watchdogPs1 + '"']);
-          if (!r.ok) errors.push('schtasks watchdog: ' + (r.error || '执行失败')); }
+        const r = ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-GUI', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + guiCommand() + '"']);
+        if (!r.ok) errors.push('schtasks gui: ' + (r.error || '执行失败'));
       } else {
-        ex.run('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-Watchdog', '/F']);
         ex.run('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-GUI', '/F']);
-        // 守卫任务不删除（它是**服务定义**，删了壳的 /Run 会再次失败）；只停用开机自启。
-        ex.run('schtasks', ['/Change', '/TN', 'DSH-Supervisor', '/DISABLE']);
-        try { fs.unlinkSync(watchdogPs1); } catch {}
       }
-    } catch (e) { errors.push('watchdog setup: ' + e.message); }
+    } catch (e) { errors.push('gui autostart: ' + e.message); }
     return { ok: errors.length === 0, errors, ...status() };
   }
   if (isMac) {
