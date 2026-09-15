@@ -82,6 +82,7 @@ const CROSS_LAYER = {
     'src/platform/fs-utils': '文件工具（原子写/目录准备）',
     'src/platform/logcore': '日志核心（结构化事件写入）',
     'src/platform/registry-contract': '镜像目录契约（domains/dist 消费）',
+    'src/platform/runtime-contract': '运行期启动契约（domains/dist 消费壳投放的 npm/PATH）',
     'src/platform/tasks': '任务注册表（异步任务可观测）',
   },
   'guard -> domains': {

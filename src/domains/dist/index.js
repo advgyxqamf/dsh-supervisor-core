@@ -20,6 +20,8 @@ const matrix = require('../../platform/matrix');
 const { spawn } = require('node:child_process');
 // P1-C：npm 的统一解析入口（Windows 上是 npm.cmd；裸 'npm' 会 ENOENT）。
 const { npmBin } = require('../../platform/os/exec-path');
+// 运行期启动契约（壳写、内核读）：npm/PATH 的**单一事实源**，与壳侧成对。
+const runtimeContract = require('../../platform/runtime-contract');
 // 镜像契约读取器（壳 → 内核）。**目录与探测方法的所有权在壳**：
 // 用户在装壳那刻机器上没有内核，壳必须先完成镜像选择才能装内核，
 // 故内核**消费壳投放的契约**，而不是自己再持一份硬编码副本。
@@ -498,20 +500,21 @@ class DistributionManager {
     // 收敛 native 旧 _runInstall 模板分支的重复 spawn/killTree/超时/行收集实现（2026-09 架构收敛）。
     let argv;
     // P1-C：经统一解析（Windows → npm.cmd）。旧实现硬编码 'npm' → ENOENT。
-    let bin = npmBin();
+    let bin = runtimeContract.npmBin(npmBin);
     if (Array.isArray(o.commandTemplate) && o.commandTemplate.length) {
       argv = o.commandTemplate.map((s) => String(s).replace(/{pkg}/g, pkg).replace(/{version}/g, o.version).replace(/{prefix}/g, o.prefix || ''));
       // ⚠ P1-C：模板首项通常就是逻辑名 `npm`（见 platform/config.js 的默认模板），
       //   它同样需要跨平台解析 —— 否则「走模板」这条路径在 Windows 上照样 ENOENT。
       //   保持模板机制不变（测试可注入 fake-npm 绝对路径），只在首项恰为逻辑名时解析。
-      bin = (argv[0] === 'npm') ? npmBin() : argv[0];
+      bin = (argv[0] === 'npm') ? runtimeContract.npmBin(npmBin) : argv[0];
       argv = argv.slice(1);
     } else {
       argv = ['install', '-g', '--no-audit', '--no-fund'];
       if (o.prefix) argv.push('--prefix', o.prefix);
       argv.push(pkg + '@' + o.version);
     }
-    const envVars = Object.assign({}, process.env);
+    // 契约 PATH 注入（nodeBinDir 首位）：内核自身执行的 npm 也必须能找到 node。
+    const envVars = runtimeContract.withPath(process.env);
     if (o.registry) { envVars.npm_config_registry = o.registry; envVars.NPM_CONFIG_REGISTRY = o.registry; }
     return new Promise((resolve) => {
       let child;
