@@ -6,7 +6,21 @@
 
 ## [未发布]
 
-（下一版本待记）
+### 内核读运行期启动契约 —— npm/PATH 与壳同源（Phase 2）
+
+问题：内核自身也要执行 npm（自更新 / 装 DSH / 插件），旧实现用 ambient PATH 的裸 `npm`
+与 `process.env`；GUI / 服务环境常找不到 npm，表现为「壳能装、内核自己装不了」。
+
+- 新增 `src/platform/runtime-contract.js`（壳写内核读，schema 2）：`read()` / `npmBin()` / `withPath()`；
+- `domains/dist` 的 `runNpmInstall` 用契约里的**绝对** npm 并注入 PATH（模板 npm 分支同源解析）；
+- `platform/env-catalog.js` 的 `runtimeMeta()` 委托同一契约，消除第二份读取实现；
+- 门禁：`test/runtime-contract-test.js`（R-1..R-6）、`test/npm-resolution-test.js` C-d 断言更新；
+- `test/layering-and-dependency-gate-test.js` 登记 `src/platform/runtime-contract`。
+
+### 契约 schema 握手门禁（Phase 3）
+
+- `SUPPORTED_SCHEMA` 恒为 2，门禁 R-6 锁定；与壳 `runtime_contract.rs` 的 `SCHEMA` 握手，
+  两仓各自断言、**互不读源码** —— 任一侧改 schema 必须同时改两侧，否则各自 CI 变红。
 
 ## [0.1.5-BETA.4]（2026-09-14）
 
