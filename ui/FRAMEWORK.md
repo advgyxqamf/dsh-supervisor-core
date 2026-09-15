@@ -75,5 +75,5 @@ src/
 
 ### 4.4 版本控制
 - 前端源码入外层 git 仓（2026-09-05 commit 3f87482 以 `skiff-original/` 纳入；2026-09-06 迁至 `dsh-supervisor/ui/`）；dist/ node_modules/ 不入库。
-- `ui-react/` 为构建镜像（统一入口 `release/scripts/build-ui.sh` 从 `ui/` 构建生成；release.sh/build-sea.sh/CI 均经它），gitignore 不入库；`ui/dist`（构建临时产物）亦不入库。
+- `ui-react/` 为构建镜像（统一入口 `release/scripts/build-ui.sh` 从 `ui/` 构建生成；release.sh 与 CI 均经它），gitignore 不入库；`ui/dist`（构建临时产物）亦不入库。
 

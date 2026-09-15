@@ -71,7 +71,7 @@ git commit && git tag v1.0.5 && git push origin main && git push origin v1.0.5
 
 ## 桌面真机验收
 
-按 `release/runbooks/verify-desktop.md` 清单执行。核心链路（对应壳 1.0.4 的服务定义修复）：
+按**壳仓** `docs/DESKTOP-ACCEPTANCE.md` 清单执行（该清单属壳资产，不在本仓）。核心链路：
 
 | 场景 | 通过标志 |
 |---|---|

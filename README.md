@@ -26,9 +26,9 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 > **文档可信度不变量**（2026-09-11 确立）：能力声明必须由**可执行断言**支撑；
 > 本仓的文字（注释/审计/文档）**不构成证据**。新增能力请同步 `test/platform-capability-audit-test.js`。
 
-## 桌面面板（原生 Linux 应用）
+## 运维面板（守卫内置，浏览器直接打开）
 
-守卫内置一个运维面板（`http://127.0.0.1:3100/`，浏览器可直接打开），并用 **Tauri** 打包成原生桌面应用（~10MB，无 Electron 大壳）：
+守卫内置一个运维面板（`http://127.0.0.1:3100/`）。桌面壳（Tauri 原生应用，源码在**壳仓**）另行打包该面板：
 
 - 实时状态：阶段 / 期望状态 / DSH 与守卫进程 / 最近探测 / 重启次数 / 最近故障
 - **版本信息**：顶栏徽标显示守卫版本，「更新日志」一键查看每次版本变更内容
@@ -55,11 +55,10 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 启动方式（二选一）：
 
 ```bash
-dsh-supervisor-gui          # 桌面窗口（GNOME 应用菜单里也有「dsh-supervisor」）
-xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
+xdg-open http://127.0.0.1:3100/   # 浏览器直接开面板
 ```
 
-桌面应用源码在 `src-tauri/`（Rust + WebKitGTK），重新编译：`cd src-tauri && cargo build --release`。
+桌面壳（Tauri 原生应用）源码在**壳仓** `wasi7mglns/dsh-supervisor-launcher`（MIT）的 `src-tauri/`，本仓不持有 `src-tauri/`。
 
 ## 内核发布：Node launcher 统一形态（2026-09 定案：全平台弃 SEA）
 
@@ -291,10 +290,10 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 ## 桌面产品：环境引导 + 内核更新（单写入者 = 桌面壳）
 
 ### 安装即用（免预装 Node）
-- Tauri 桌面壳（src-tauri）是**引导器 + 面板壳**（Phase 3 一源双出口：完整壳内嵌面板产物，公开壳为 MIT 引导器）；
+- Tauri 桌面壳（源码在**壳仓** `src-tauri/`）是**引导器 + 面板壳**（Phase 3 一源双出口：完整壳内嵌面板产物，公开壳为 MIT 引导器）；
   - 缺失 → 壳内引导页 → **一键安装官方最新 Node.js LTS**（Windows .msi / macOS .pkg / Linux 官方 tar.xz→/usr/local，均经官方 SHASUMS256 校验 + 一次系统授权）；
   - 就绪 → 壳拉起守卫（daemon）→ 完整壳（embedded-panel feature 默认）导航**壳内面板**（frontend 内嵌 supervisor.html），API 经 Rust `api_proxy` command 转发守卫 3100（绕浏览器 CORS，守卫零 CORS 边界不变）；公开壳（导出仓）导航守卫 3100 托管面板。
-- **前端一源双出口**：源码唯一 `ui/`，构建一次 → `ui-react` 镜像（守卫托管/浏览器出口）+ 壳 frontend 内嵌（桌面出口）；统一入口 `release/scripts/build-ui.sh`（release.sh/build-sea.sh/CI 均经它）。
+- **前端一源双出口**：源码唯一 `ui/`，构建一次 → `ui-react` 镜像（守卫托管/浏览器出口）+ 壳 frontend 内嵌（桌面出口）；统一入口 `release/scripts/build-ui.sh`（release.sh 与 CI 均经它）。
 - 守卫保持零第三方依赖（node: 内置即可运行）；shell 提供无头冒烟入口：`dsh-supervisor-gui --node-plan`。
 
 ### 内核更新（单写入者 = 桌面壳；2026-09-15 A 方案）
@@ -315,7 +314,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 `macos-15-intel` x64 / `windows-latest`）→ Tauri bundle → GitHub Release + npm 壳包 +
 `shell-manifest.json`（Tauri updater 静态清单）。详见壳仓 `README.md`。
 
-桌面实机验收清单：`release/runbooks/verify-desktop.md`（内核侧视角）。
+桌面壳实机验收清单：见壳仓 `docs/DESKTOP-ACCEPTANCE.md`（属壳资产，不在本仓）。
 
 ## 边界与非目标（v1）
 

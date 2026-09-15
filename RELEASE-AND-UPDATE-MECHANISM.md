@@ -176,7 +176,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 | 安装到系统目录 | `/usr/bin/dsh-supervisor-gui`（deb 标准），root 所有 |
 | 更新需提权 | `pkexec` 图形密码框；用户拒绝 = 正常失败路径 → 选择页 |
 | **依赖由 dpkg 校验** | deb 声明 `Depends`；因当前版本已在运行，依赖已满足；若新版本**新增**依赖，`dpkg -i` 可能报未满足 → 归入失败路径 |
-| 内核 `desktop/` 模板须修正 | 现指向 `~/.local/bin`，与 deb 的 `/usr/bin` **不一致**（P5.4） |
+| 内核 XDG 自启 .desktop | **已修（2026-09-16）**：模板改为**内嵌**（`autostart.js`），Exec/Icon 按实际安装路径重写，不再依赖外置 `desktop/` 目录 |
 
 ---
 

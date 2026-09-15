@@ -118,6 +118,24 @@ console.log('== P4/P5 边界行为 ==');
     st.guiSupported === undefined, String(st.guiSupported));
 }
 
+// ── P6 XDG 自启模板必须内嵌（2026-09-16 清理）──
+//   缺陷：模板原从 `<pkg>/desktop/*.desktop` 读盘，而 launcher 发行态**不携带**该目录
+//     → Linux 壳自启 `fs.readFileSync` ENOENT → 静默失败，且无任何门禁覆盖。
+//   修法：模板内嵌为常量；本门禁锁定「内嵌」且「不再读外置 desktop/ 目录」。
+console.log('== P6 XDG 自启模板内嵌 ==');
+{
+  check('P6-a 存在内嵌的 GUI_AUTOSTART_TEMPLATE 常量',
+    /const GUI_AUTOSTART_TEMPLATE\s*=/.test(asSrc), 'ok');
+  check('P6-b 不再从外置 desktop/ 目录读模板',
+    !/readFileSync\([^)]*desktop[^)]*\)/.test(asSrc), 'ok');
+  check('P6-c 模板含 Desktop Entry 必需键',
+    /\[Desktop Entry\]/.test(asSrc) && /Type=Application/.test(asSrc), 'ok');
+  const tpl = asSrc.match(/const GUI_AUTOSTART_TEMPLATE = \[([\s\S]*?)\]\.join/);
+  check('P6-d 模板含 Exec/Icon/Name（写入前会被重写）',
+    !!tpl && /Exec=@HOME@/.test(tpl[1]) && /Icon=@HOME@/.test(tpl[1]) && /Name=/.test(tpl[1]),
+    tpl ? 'ok' : '未匹配到模板数组');
+}
+
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
 process.exit(failed.length ? 1 : 0);

@@ -94,4 +94,5 @@ function migrateLegacy() {
   return moved;
 }
 
-module.exports = { SCHEMA, root, supervisorDir, shellDir, legacySupervisorDir, legacyShellDir, migrateLegacy };
+// legacy* 仅本模块 migrateLegacy 内部使用，不对外导出（收窄公开面）。
+module.exports = { SCHEMA, root, supervisorDir, shellDir, migrateLegacy };

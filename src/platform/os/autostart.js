@@ -122,6 +122,20 @@ function macGuiPlist(guiExe) {
     + '  <key>StandardErrorPath</key><string>' + xmlEscape(log) + '</string>\n'
     + '</dict></plist>\n';
 }
+/** XDG 自启条目模板（**内嵌**，不依赖外置 desktop/ 目录——launcher 发行态不携带它）。
+ *  @HOME@ 与 Exec/Icon 行在写入前按实际安装路径重写（见 setGuiAutostart）。 */
+const GUI_AUTOSTART_TEMPLATE = [
+  '[Desktop Entry]',
+  'Type=Application',
+  'Name=dsh-supervisor GUI',
+  'Comment=登录时打开 DSH 监管面板',
+  'Exec=@HOME@/.local/bin/dsh-supervisor-gui',
+  'Icon=@HOME@/.local/share/icons/dsh-supervisor.png',
+  'Terminal=false',
+  'X-GNOME-Autostart-enabled=true',
+  '',
+].join('\n');
+
 function guiFile() {
   return path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
 }
@@ -293,8 +307,9 @@ function setGuiAutostart(on, platform) {
   try {
     const file = guiFile();
     if (on) {
-      const tpl = path.join(__dirname, '..', '..', '..', 'desktop', 'dsh-supervisor-gui-autostart.desktop');
-      let entry = fs.readFileSync(tpl, 'utf8');
+      // 模板**内嵌**（与 DEFAULT_CONFIG / 服务定义同一惯例）：launcher 发行态不含 desktop/ 目录，
+      //   若从磁盘读模板必然 ENOENT → Linux 壳自启静默失败（无门禁覆盖的历史缺口）。
+      let entry = GUI_AUTOSTART_TEMPLATE;
       // ⚠ Exec 必须指向**解析出的真实路径**（2026-09-11 审计修复）：
       //   模板写死 `@HOME@/.local/bin/dsh-supervisor-gui`，而 deb/rpm 把可执行装在
       //   **/usr/bin/dsh-supervisor-gui**（实测 dpkg -c 确认）。

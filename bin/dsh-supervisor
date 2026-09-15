@@ -56,9 +56,6 @@ const DEFAULT_CONFIG = Object.assign(
 );
 const STATE_FILE = path.join(SUPERVISOR_DIR, 'state.json');
 const EVENTS_FILE = path.join(SUPERVISOR_DIR, 'events', 'guard.events.log');
-const UNIT_PATH = path.join(os.homedir(), '.config', 'systemd', 'user', 'dsh-supervisor.service');
-const AUTOSTART_TEMPLATE = path.join(ROOT, 'desktop', 'dsh-supervisor-gui-autostart.desktop');
-const AUTOSTART_FILE = path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
 // 跨平台命令行入口（P1 审计修复）：
 //   Unix    ：~/.local/bin/dsh-supervisor（软链到包内脚本，无扩展名）。
 //   Windows ：%APPDATA%\npm 下的 .cmd 垫片——Windows 可执行须有扩展名，且创建**符号链接**
@@ -396,52 +393,32 @@ function cmdInstall() {
 }
 
 function cmdGuiAutostart(onoff) {
-  if (onoff === 'on') {
-    if (!fs.existsSync(AUTOSTART_TEMPLATE)) {
-      console.error('未找到自启模板: ' + AUTOSTART_TEMPLATE);
-      process.exitCode = 1;
-      return;
-    }
-    fs.mkdirSync(path.dirname(AUTOSTART_FILE), { recursive: true });
-    const entry = fs.readFileSync(AUTOSTART_TEMPLATE, 'utf8').replace(/@HOME@/g, os.homedir());
-    fs.writeFileSync(AUTOSTART_FILE, entry);
-    console.log('[gui-autostart] 已开启：登录时自动打开监管面板 → ' + AUTOSTART_FILE);
-  } else if (onoff === 'off') {
-    try {
-      fs.unlinkSync(AUTOSTART_FILE);
-      console.log('[gui-autostart] 已关闭。');
-    } catch {
-      console.log('[gui-autostart] 本来就未开启。');
-    }
-  } else {
+  if (onoff !== 'on' && onoff !== 'off') {
     console.log('用法: dsh-supervisor gui-autostart on|off');
     process.exitCode = 1;
+    return;
   }
+  // **单一实现**：GUI 自启的模板与写入逻辑归 `platform/os/autostart.js`（模板已内嵌，
+  //   不依赖外置 desktop/ 目录——launcher 发行态不携带它）。CLI 只做委托，不再重复一份。
+  const r = require('../src/platform/os/autostart').setGuiAutostart(onoff === 'on');
+  if (!r || r.ok === false) {
+    console.error('[gui-autostart] 设置失败: ' + ((r && (r.error || (r.errors && r.errors.join('; ')))) || '未知错误'));
+    process.exitCode = 1;
+    return;
+  }
+  console.log('[gui-autostart] ' + (onoff === 'on' ? '已开启：登录时自动打开监管面板' : '已关闭')
+    + '（' + (r.via || r.kind || 'ok') + '）');
 }
 
 function cmdUninstall() {
-  try {
-    execInherit('systemctl', ['--user', 'stop', 'dsh-supervisor.service']);
-  } catch {}
-  try {
-    execInherit('systemctl', ['--user', 'disable', 'dsh-supervisor.service']);
-  } catch {}
-  try {
-    fs.unlinkSync(UNIT_PATH);
-    console.log('[uninstall] 已移除 systemd unit: ' + UNIT_PATH);
-  } catch {}
+  // 服务定义 / 开机自启 / linger 的所有者是**桌面壳**（D6）：内核卸载只移除自己的命令行入口，
+  //   绝不触碰壳建立或持有的服务定义与自启项（否则与壳争夺所有权）。
+  //   状态目录（config/日志/端口）**故意保留** —— 卸载不应销毁用户数据。
   try {
     fs.unlinkSync(BIN_PATH);
     console.log('[uninstall] 已移除命令行: ' + BIN_PATH);
   } catch {}
-  try {
-    execInherit('loginctl', ['disable-linger', os.userInfo().username]);
-    console.log('[uninstall] loginctl disable-linger 已撤销');
-  } catch {}
-  try {
-    execInherit('systemctl', ['--user', 'daemon-reload']);
-  } catch {}
-  console.log('[uninstall] 完成。DSH 自身不受影响。');
+  console.log('[uninstall] 完成。服务定义/自启由桌面壳负责；DSH 自身不受影响。');
 }
 
 function cmdEvents() {
@@ -570,13 +547,13 @@ function usage() {
   console.log('用法: dsh-supervisor <command> [options]');
   console.log('');
   console.log('命令:');
-  console.log('  daemon [-c <config>]      启动守护进程（由 systemd 调用）');
+  console.log('  daemon [-c <config>]      启动守护进程（由桌面壳/服务管理器调用）');
   console.log('  status [-c <config>]      查看当前状态');
   console.log('  start [-c <config>]       设置 desired=running 并启动 DSH');
   console.log('  stop [-c <config>]        设置 desired=stopped 并停止 DSH');
   console.log('  restart [-c <config>]     立即重启一次（不改变 desired）');
-  console.log('  install                   安装：config + systemd unit + enable-linger');
-  console.log('  uninstall                 卸载：移除 systemd unit 与命令行链接');
+  console.log('  install                   安装：内嵌 config + 命令行入口（服务定义由桌面壳负责）');
+  console.log('  uninstall                 卸载：移除命令行入口（不触碰壳的服务定义）');
   console.log('  events [N]                显示最近 N 条事件日志（默认 50）');
   console.log('  logs [supervisor|dsh|upgrade|events] [N]');
   console.log('                            查看对应运行日志末尾（默认 supervisor 50 行）');

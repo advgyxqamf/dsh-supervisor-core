@@ -6,7 +6,6 @@ screenshots/
 # 注：src-tauri/* 与 dist/export-shell 条目已于 2026-09-11 清理 —— 前者属壳仓（本仓不得存在
 #     src-tauri 目录），后者的 export-shell.sh 脚本已随双仓隔离删除。
 dist/release
-dist/sea
 dist/npm
 **/dist/
 # React UI 构建产物（release.sh 从 ui/dist 构建后镜像，不入库）
