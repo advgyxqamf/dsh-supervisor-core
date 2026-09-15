@@ -40,7 +40,9 @@ function findPackageRoot(start) {
   return path.join(__dirname, '..');
 }
 const ROOT = findPackageRoot(__dirname);
-const SUPERVISOR_DIR = path.join(os.homedir(), '.dsh', 'supervisor');
+// 产品状态根（独立于 DSH 的 ~/.dsh）——单一事实源 = src/platform/state-root.js。
+const stateRoot = require('../src/platform/state-root');
+const SUPERVISOR_DIR = stateRoot.supervisorDir();
 const USER_CONFIG = path.join(SUPERVISOR_DIR, 'config.json');
 
 // 内嵌默认配置（发行态唯一模板源）：发布物不再依赖 ROOT/config.json 外置文件（fresh-HOME 自举必需）。
@@ -224,6 +226,9 @@ function releaseLock() {
 
 // ---- 子命令 ----
 function cmdDaemon() {
+  // 前向自愈迁移：旧位置（DSH 目录下）→ 产品状态根。必须在读/写配置前完成。
+  const moved = stateRoot.migrateLegacy();
+  for (const m of moved) console.log('[migrate] 状态目录迁移: ' + m);
   if (!acquireLock()) {
     console.error('[supervisor] 已有守卫实例在运行（锁 ' + LOCK_FILE + '），本进程退出。');
     process.exit(1);
@@ -357,6 +362,8 @@ function finishControl(r) {
 }
 
 function cmdInstall() {
+  const moved = stateRoot.migrateLegacy();
+  for (const m of moved) console.log('[migrate] 状态目录迁移: ' + m);
   fs.mkdirSync(SUPERVISOR_DIR, { recursive: true });
   // 配置文件（内嵌默认模板；源码态与打包态一致，不再依赖仓库 config.json 外置文件）
   if (!fs.existsSync(USER_CONFIG)) {

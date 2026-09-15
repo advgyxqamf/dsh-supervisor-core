@@ -29,8 +29,10 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'wd-e2e-'));
-const swDir = path.join(HOME, '.dsh', 'supervisor');
-const shDir = path.join(HOME, '.dsh', 'shell');
+// 产品状态根隔离（独立于 DSH）：DSH_SUPERVISOR_HOME=HOME ⇒ <HOME>/{supervisor,shell}。
+process.env.DSH_SUPERVISOR_HOME = HOME;
+const swDir = path.join(HOME, 'supervisor');
+const shDir = path.join(HOME, 'shell');
 fs.mkdirSync(swDir, { recursive: true });
 fs.mkdirSync(shDir, { recursive: true });
 
@@ -103,7 +105,7 @@ process.env.HOME = HOME;
 // ⚠ 2026-09-13 修复（P1）：**必须同时设 USERPROFILE**。
 //   本仓既有约定（见 test/shell-safety-net-test.js:27 与 test/guard-update-test.js:172-180）：
 //   Node 的 os.homedir() 在 **Windows 上优先读 USERPROFILE**（Windows 没有 HOME）。
-//   而 shell.identity() 经 shellDir() = path.join(os.homedir(), '.dsh', 'shell') 定位 identity.json ——
+//   而 shell.identity() 经 shellDir()（产品状态根；本夹具经 DSH_SUPERVISOR_HOME=HOME）定位 identity.json ——
 //   只设 HOME 时 Windows 读不到本夹具写入的 identity.json →
 //   watchdog 的 hasExe=false → 「无法定位壳可执行文件（identity.json 未记录 exe）」→
 //   **不拉起** → E2E-1/3/4/5 在 Windows 必红（CI 日志给出了该确切原因）。

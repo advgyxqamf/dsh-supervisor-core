@@ -82,6 +82,7 @@ const CROSS_LAYER = {
     'src/platform/logcore': '日志核心（结构化事件写入）',
     'src/platform/registry-contract': '镜像目录契约（domains/dist 消费）',
     'src/platform/runtime-contract': '运行期启动契约（domains/dist 消费壳投放的 npm/PATH）',
+    'src/platform/state-root': '产品状态根（domains 的 supervisor|shell 路径单一事实源）',
     'src/platform/tasks': '任务注册表（异步任务可观测）',
   },
   'guard -> domains': {
@@ -97,6 +98,7 @@ const CROSS_LAYER = {
     'src/platform/log': '日志（组件级 logger）',
     'src/platform/loghub': '统一日志中枢（跨组件日志汇聚）',
     'src/platform/srcpath': '源码路径解析（控制面展示）',
+    'src/platform/state-root': '产品状态根（guard 的 ports 等路径单一事实源）',
     'src/platform/version': '版本自报（内核/契约版本）',
   },
   // 注：曾以为 platform/deploy.js 会 require('../core.cjs') —— 实测那 4 处**全在注释里**

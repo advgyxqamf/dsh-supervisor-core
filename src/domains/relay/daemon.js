@@ -32,7 +32,7 @@ const POLL_MS = 2000;
 function loadConfig() {
   const cfgPath = process.argv.indexOf('-c') >= 0
     ? process.argv[process.argv.indexOf('-c') + 1]
-    : (process.env.DSH_SUPERVISOR_CONFIG || path.join(HOME, '.dsh', 'supervisor', 'config.json'));
+    : (process.env.DSH_SUPERVISOR_CONFIG || path.join(require('../../platform/state-root').supervisorDir(), 'config.json'));
   const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
   const { normalize } = require('../../platform/config');
   return { cfgPath, ...normalize(raw) };
@@ -44,7 +44,7 @@ function main() {
   const { createRouterCtlServer } = require('../router/ctl'); // 通用 dispatcher（POST /ctl {method,args}）
 
   const config = loadConfig();
-  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : path.join(HOME, '.dsh', 'supervisor');
+  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : require('../../platform/state-root').supervisorDir();
   const stateFile = path.join(swDir, 'lan-state.json');
   // 系统日志框架（历史设计文档）：lan-daemon 经每进程唯一 LogCore 取日志/事件
   // （自有独立文件，不共享守卫文件；单例 init 幂等）。

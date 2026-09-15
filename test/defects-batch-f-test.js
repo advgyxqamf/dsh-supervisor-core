@@ -80,9 +80,10 @@ console.log('== K7 端口注册表路径（三平台一致）==');
     !/process\.env\.HOME/.test(code), 'HOME');
   check('K7 不再把 /tmp 作为兜底（状态文件会与 state.json 分裂）',
     !code.includes("'/tmp'"), '/tmp');
-  check('K7 使用 os.homedir()（三平台正确来源）',
-    /os\.homedir\(\)/.test(code), 'os.homedir()');
-  check('K7 引入了 node:os', /require\('node:os'\)/.test(src), 'node:os');
+  // 2026-09-15：路径改由**产品状态根**（src/platform/state-root.js）给出 ——
+  //   仍是三平台正确来源，且与 state.json 同域（不分裂）；不再各自 os.homedir()。
+  check('K7 经产品状态根解析端口文件（platform/state-root）',
+    /platform\/state-root/.test(code) && /supervisorDir\(\)/.test(code), 'state-root');
 }
 
 // ── K9 版本解析正则 ──

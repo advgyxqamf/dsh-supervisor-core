@@ -24,10 +24,10 @@ const path = require('node:path');
 // 版本比较复用内核**同一份**实现（dist 模块导出），避免两处 semver 语义分叉。
 const { semverCompare } = require('../dist/index');
 
-// ── 状态目录（与内核状态目录物理隔离）──
-// 内核：~/.dsh/supervisor/    壳：~/.dsh/shell/
+// ── 状态目录（与内核状态目录物理隔离，且独立于 DSH 的 ~/.dsh）──
+// 内核：<状态根>/supervisor/    壳：<状态根>/shell/（单一事实源 = platform/state-root.js）
 function shellDir() {
-  return path.join(os.homedir(), '.dsh', 'shell');
+  return require('../../platform/state-root').shellDir();
 }
 
 function readJson(p) {

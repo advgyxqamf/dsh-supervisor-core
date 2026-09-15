@@ -13,6 +13,10 @@ function expandHome(p) {
   return p;
 }
 
+// 产品状态根（独立于 DSH 的 ~/.dsh）——单一事实源 = platform/state-root.js。
+// 进程内固定：避免运行中环境变化导致状态目录半途切换。
+const SUP = require('./state-root').supervisorDir();
+
 const DEFAULTS = {
   probeIntervalMs: 5000,
   // 健康探测（三层）：L0 进程存活 + L1 端口监听 + L2 HTTP GET healthUrl。
@@ -38,15 +42,15 @@ const DEFAULTS = {
   // managed = relay/proxyInstance/oauthCallback 共享池（K8s 单一范围思想，杜绝段碎片化）；
   // providerApi = 智能路由供应商独立端点池（按供应商规模调大）。null = 用内置默认池。
   portPools: null,
-  stateFile: '~/.dsh/supervisor/state.json',
+  stateFile: path.join(SUP, 'state.json'),
   // 系统日志框架目录布局：log/ 与 events/ 分目录；
   // 守卫(guard) 事件在 events/guard.events.log、分级日志在 log/guard.log（daemon 用 router/lan 同构文件）。
   // 显式配置（既有生产 config.json / 测试）仍尊重用户给定路径——不强行改写。
-  logFile: '~/.dsh/supervisor/events/guard.events.log',
+  logFile: path.join(SUP, 'events', 'guard.events.log'),
   eventsMaxBytes: 5 * 1024 * 1024,
-  supervisorLogFile: '~/.dsh/supervisor/log/guard.log',
-  dshLogFile: '~/.dsh/supervisor/log/dsh.log',
-  upgradeLogFile: '~/.dsh/supervisor/log/upgrade.log',
+  supervisorLogFile: path.join(SUP, 'log', 'guard.log'),
+  dshLogFile: path.join(SUP, 'log', 'dsh.log'),
+  upgradeLogFile: path.join(SUP, 'log', 'upgrade.log'),
   logLevel: 'info',
   logMaxBytes: 5 * 1024 * 1024,
   notifyEnabled: true,

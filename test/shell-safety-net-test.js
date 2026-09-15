@@ -9,7 +9,7 @@
 //   R3 强制更新：attempt 再高也不回退（永不回退）
 //   R4 反回归：回退机构（rollback/pinnedVersions/should-rollback）不得复活
 //   R5 ⛔ 硬约束：安全网**绝不触碰内核更新机制**（不 import dist、不调用 runNpmInstall）
-//   R6 物理隔离：壳状态目录（~/.dsh/shell）与内核状态目录（~/.dsh/supervisor）不同
+//   R6 物理隔离：壳状态目录（<状态根>/shell）与内核状态目录（<状态根>/supervisor）不同
 //   R10 反回归：内核侧回退/拉黑机构不得复活（壳侧反回归归壳仓自身测试）
 
 const fs = require('node:fs');
@@ -32,6 +32,8 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
   const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'shell-net-'));
   process.env.HOME = TMP;
   process.env.USERPROFILE = TMP;
+  // 产品状态根隔离（独立于 DSH）：DSH_SUPERVISOR_HOME=TMP ⇒ <TMP>/{shell,supervisor}。
+  process.env.DSH_SUPERVISOR_HOME = TMP;
   if (process.platform === 'win32') {
     // 双保险：os.homedir() 在 USERPROFILE 缺失时的回退来源
     process.env.HOMEDRIVE = '';
@@ -46,8 +48,8 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
 
   // ── R6 隔离 ──
   console.log('== R6 状态目录物理隔离 ==');
-  check('R6-a 壳状态目录为 ~/.dsh/shell', dir === path.join(TMP, '.dsh', 'shell'), dir);
-  check('R6-b 与内核状态目录不同', dir !== path.join(TMP, '.dsh', 'supervisor'));
+  check('R6-a 壳状态目录为 <状态根>/shell', dir === path.join(TMP, 'shell'), dir);
+  check('R6-b 与内核状态目录不同', dir !== path.join(TMP, 'supervisor'));
 
   // ── R1 账本 ──
   console.log('== R1 账本与初始判定 ==');

@@ -280,7 +280,7 @@ class ProxyProvider extends ProviderBase {
     let logStream = null;
     try {
       // D7：优先用注入的数据目录（config.stateFile 派生），杜绝测试/多实例写进真实 ~/.dsh。
-      const baseDir = this.stateDir || require('node:path').join(require('node:os').homedir(), '.dsh', 'supervisor');
+      const baseDir = this.stateDir || require('../../platform/state-root').supervisorDir();
       const logDir = require('node:path').join(baseDir, 'logs');
       require('node:fs').mkdirSync(logDir, { recursive: true });
       logStream = require('node:fs').createWriteStream(require('node:path').join(logDir, 'proxy-instance-' + this.proxyAppId + '-' + port + '.log'), { flags: 'a' });

@@ -44,7 +44,8 @@ const EXCLUDED = {
 
 function chainFiles() {
   const s = require(path.join(ROOT, 'package.json')).scripts.test;
-  return s.split(' && ').map((x) => x.replace(/^node /, '').trim());
+  // 每条为 `node --require ./test/_preload.js test/<x>.js`（跨平台隔离预载）——剥掉前缀取文件名。
+  return s.split(' && ').map((x) => x.replace(/^node (--require \S+ )?/, '').trim());
 }
 
 /** 命名约定：`*-test.js` 为标准测试名。

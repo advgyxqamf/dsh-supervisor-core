@@ -26,7 +26,7 @@ const SUPPORTED_SCHEMA = 2;
 
 /** 契约文件路径。 */
 function file() {
-  return path.join(os.homedir(), '.dsh', 'supervisor', 'runtime.json');
+  return path.join(require('./state-root').supervisorDir(), 'runtime.json');
 }
 
 /** 读取契约（缺失/损坏返回 null）。兼容 schema 1（仅有 nodePath/nodeVersion/minNode）。 */
