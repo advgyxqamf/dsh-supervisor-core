@@ -103,8 +103,8 @@ check("C-e 非 Windows 返回 'npx'", npxBin({ platform: 'linux' }) === 'npx', n
 // ── C-d：模板路径也解析 ──
 {
   const dist = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
-  check('C-d commandTemplate 首项为 npm 时经 npmBin() 解析',
-    /argv\[0\] === 'npm'\s*\)\s*\?\s*npmBin\(\)/.test(dist),
+  check('C-d commandTemplate 首项为 npm 时经统一 npm 解析（runtimeContract.npmBin(npmBin)）',
+    /argv\[0\] === 'npm'\s*\)\s*\?\s*runtimeContract\.npmBin\(npmBin\)/.test(dist),
     '已接入');
 }
 

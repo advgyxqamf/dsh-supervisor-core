@@ -47,13 +47,9 @@ let _runtimeMetaAt = 0;
 function runtimeMeta() {
   const now = Date.now();
   if (_runtimeMetaCache && now - _runtimeMetaAt < 10000) return _runtimeMetaCache;
-  let meta = {};
-  try {
-    const os = require('node:os');
-    const path = require('node:path');
-    const f = path.join(os.homedir(), '.dsh', 'supervisor', 'runtime.json');
-    meta = JSON.parse(fs.readFileSync(f, 'utf8')) || {};
-  } catch { meta = {}; }
+  // 单一事实源：与内核其它消费点共用 platform/runtime-contract（壳写、内核读）。
+  const c = require('./runtime-contract').read();
+  const meta = (c && c.raw) || {};
   _runtimeMetaCache = meta;
   _runtimeMetaAt = now;
   return meta;
