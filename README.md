@@ -13,6 +13,7 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 | **`CREDENTIALS-STANDARD.md`** | **规范（唯一事实源）** | **凭据管理**：规范库、四铁律、轮换步骤。由 `test/credential-hygiene-test.js` 校验 |
 | **`DEVELOPMENT-TRACK.md`** | **规范（唯一事实源）** | **改代码规则**：分层边界、跨层依赖登记、测试补齐、注入验证、不可逆操作纪律 |
 | [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md) | 规范（契约） | 阶段 0 契约：会话生命周期 · 所有权矩阵 · 状态机 · 时序 |
+| [KERNEL-DAEMON-CONTRACT.md](KERNEL-DAEMON-CONTRACT.md) | 规范（契约） | 内核守护进程契约（D1–D9）：被壳拉起时必须提供什么；配套 `test/kernel-daemon-contract-test.js` |
 | [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) | 规范（能力矩阵） | 跨平台能力矩阵（14 项 × 3 平台）+ 证据 + 缺口；配套 `test/platform-capability-audit-test.js` |
 | [RELEASE-AND-UPDATE-MECHANISM.md](RELEASE-AND-UPDATE-MECHANISM.md) | 论证（原理） | 发布与更新机制**为何这样设计**（流程见 RELEASE-STANDARD） |
 | [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 论证（方案） | 跨平台构建与自更新方案论证（流程见 RELEASE-STANDARD） |
