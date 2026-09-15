@@ -20,7 +20,7 @@
 //
 // ## 锁定的不变量
 //   X-1 代码/脚本/workflow 无操作者绝对路径（注释里举例不算；剥离注释后判）
-//   X-2 现行文档（.md）无操作者绝对路径（CHANGELOG 与 archive/ 属历史，排除）
+//   X-2 现行文档（.md）无操作者绝对路径（CHANGELOG 属历史，排除）
 //   X-3 反向：判据能识别 POSIX/Windows 真实账号路径，且放行通用占位
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -51,7 +51,7 @@ function realHits(text) {
 
 const CODE_DIRS = ['src', 'test', 'release', 'bin', '.github', 'ui/src'];
 const CODE_EXT = new Set(['.js', '.cjs', '.mjs', '.ts', '.tsx', '.sh', '.yml', '.yaml', '.json']);
-const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react', 'archive']);
+const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react']);
 const SKIP_FILE = new Set([SELF, 'CHANGELOG.md']);
 
 /** 剥离注释：只对代码用。注释里举例（如 `/home/john smith`）不构成机器绑定。 */
@@ -96,7 +96,7 @@ console.log('== X-1 代码/脚本无操作者绝对路径 ==');
     offenders.length === 0, offenders.slice(0, 6).join(' | ') || ('扫描 ' + scanned + ' 个文件，零命中'));
 }
 
-// ── X-2 现行文档（.md；排除 CHANGELOG 与 archive/）──
+// ── X-2 现行文档（.md；排除 CHANGELOG 等历史记录文件）──
 console.log('== X-2 现行文档无操作者绝对路径 ==');
 {
   const files = [];
@@ -106,7 +106,6 @@ console.log('== X-2 现行文档无操作者绝对路径 ==');
     if (path.extname(f) !== '.md') continue;
     if (SKIP_FILE.has(path.basename(f))) continue;
     const rel = path.relative(ROOT, f);
-    if (rel.split(path.sep)[0] === 'archive') continue;
     const hits = realHits(fs.readFileSync(f, 'utf8'));
     if (hits.length) offenders.push(rel + ' :: ' + hits[0]);
   }

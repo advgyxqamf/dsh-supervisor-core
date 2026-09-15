@@ -21,7 +21,6 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 | [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划（历史） | 会话生命周期重构的根因级计划（已完成） |
 | [INCIDENT-2026-09-13-credential-overwrite.md](INCIDENT-2026-09-13-credential-overwrite.md) | 事故复盘 | 凭据被覆盖事故：时间线 / 根因四层 / 加固与重放验证 |
 | [CHANGELOG.md](CHANGELOG.md) | 记录 | 版本变更 |
-| [archive/](archive/) | 归档 | 已完成/被取代的历史文档（见 [archive/README.md](archive/README.md)）|
 
 > **文档可信度不变量**（2026-09-11 确立）：能力声明必须由**可执行断言**支撑；
 > 本仓的文字（注释/审计/文档）**不构成证据**。新增能力请同步 `test/platform-capability-audit-test.js`。
