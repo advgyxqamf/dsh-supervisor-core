@@ -137,21 +137,31 @@ function handle(ctx) {
       return;
     }
 
-    // 守卫自更新：状态检查（GET）与应用更新（POST，仅发行版布局有效）
+    // 内核更新（单写入者 = 壳，见 RELEASE-AND-UPDATE-MECHANISM.md §6）：
+    //   只保留**只读**状态查询；安装/重启守卫归壳，写端点**已下架**。
+    //   下架用 410 Gone + 稳定错误码（而非 404），让任何旧客户端得到可诊断的迁移结论。
     if (req.method === 'GET' && pathname === '/self-update/status') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
       Promise.resolve(sup.guardSelfUpdateStatus()).then((r) => send(r.ok ? 200 : 400, r));
       return;
     }
     if (req.method === 'POST' && pathname === '/self-update/apply') {
-      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      Promise.resolve(sup.guardSelfUpdateApply()).then((r) => send(r.ok ? 200 : 400, r));
-      return;
+      req.resume();
+      return send(410, {
+        ok: false,
+        code: 'KERNEL_UPDATE_SINGLE_WRITER',
+        owner: 'desktop-shell',
+        error: '内核更新由桌面壳执行（单写入者契约）：请在桌面壳的面板中点「更新」，或升级/重装桌面壳。',
+      });
     }
     if (req.method === 'POST' && pathname === '/self-update/restart-guard') {
-      if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
-      const r = sup.guardSelfUpdateRestart();
-      return send(r.ok ? 200 : 400, r);
+      req.resume();
+      return send(410, {
+        ok: false,
+        code: 'KERNEL_UPDATE_SINGLE_WRITER',
+        owner: 'desktop-shell',
+        error: '守卫重启由桌面壳经服务管理器执行（守卫从不重启自己）：更新内核请用桌面壳。',
+      });
     }
 
     if (req.method === 'GET' && pathname === '/env/dsh') {

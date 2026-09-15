@@ -113,5 +113,5 @@ dsh-supervisor-gui --service-plan --service-apply # 实际建立服务定义
       修复在 `master` 上，下次发版自然验证
 - [ ] **用户侧人工项**：删除 `wasi7mglns` 账号中已泄露的 SSH 公钥 `dsh-push-443-20260910`；
       吊销两把已泄露的 PAT
-- [ ] self-update 引擎接 npm 通道（用户：先不急）
+- [x] 内核更新收敛为单写入者=桌面壳（2026-09-15）：内核写端点下架（410），壳 `kernel_update_apply` 为唯一安装路径；旧 manifest 引擎已删除
 - [ ] Windows 真机验收（托盘右键 / 隐形边框 / 守卫拉起）

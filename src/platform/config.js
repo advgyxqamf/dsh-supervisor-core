@@ -51,15 +51,13 @@ const DEFAULTS = {
   logMaxBytes: 5 * 1024 * 1024,
   notifyEnabled: true,
   routerAutostart: false, // 智能路由启动开关（旧键 switcherAutoStart 已迁移）
-  // 守卫自更新（2026-09 收敛：npm 通道取代 manifest）：corePackageName = 内核自身 npm 子包名
-  //（形如 @dsh-sup/dsh-core-linux-x64，按平台/架构发布；null = 不启用自更新）。
+  // 内核更新（单写入者 = 桌面壳）：corePackageName = 内核自身 npm 子包名
+  //（形如 @dsh-sup/dsh-core-linux-x64，按平台/架构发布）。守卫**只读**它来查询版本状态；
+  //安装/升级由桌面壳执行（见 RELEASE-AND-UPDATE-MECHANISM.md §6）。
   corePackageName: null,
-  // ⚠ `selfUpdateManifestUrl` / `selfUpdateDir` 是**旧 manifest 模式的残留键**（2026-09-12 核实）：
-  //   全仓**无任何赋值点**（默认恒 null），其唯一消费方 `env-catalog.selfUpdateEntry()` 已改为
-  //   按 `corePackageName` 判定。保留它们只为兼容既有用户 config.json（读到即忽略，不报错）。
-  //   新代码**不得**再依赖这两个键。
-  selfUpdateManifestUrl: null,
-  selfUpdateDir: null,
+  // ⚠ 2026-09-15：旧 manifest 模式的残留键 `selfUpdateManifestUrl` / `selfUpdateDir` **已删除**
+  //   （全仓无赋值点；其唯一消费方曾改为按 corePackageName 判定）。既有用户 config.json 若仍含
+  //   这两键，加载时忽略即可（未知键不报错）。新代码**不得**再引入 manifest 更新通道。
   pluginsProfileName: 'web',
   packageName: '@deepseek-ai/dsh',
   // **最小兜底**镜像源（2026-09-11 契约化）。

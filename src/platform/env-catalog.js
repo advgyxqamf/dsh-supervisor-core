@@ -128,27 +128,24 @@ class EnvCatalog {
     return out;
   }
 
-  /** 守卫自更新条目。
+  /** 内核更新依赖条目（单写入者契约：安装/重启归桌面壳）。
    *
-   *  ⚠ 2026-09-12 校正（P2）：本条目原先依据 `selfUpdateManifestUrl` / `selfUpdateDir`，
-   *   但**真实机制早已换成 npm 通道**（`corePackageName` + `runNpmInstall`，见 settings-view 的
-   *   `guardSelfUpdateStatus` / `guardCorePkg`）。那两个键**没有任何发行流程赋值**（默认恒为 null），
-   *   于是 `/env/status` 里的「守卫自更新」**恒报 unconfigured**，且把原因归到了无效键上 ——
-   *   用户与排障者据此查 `selfUpdateManifestUrl`，而真正该看的是 `corePackageName`。
-   *
-   *   现改为按 npm 通道的真实开关（`corePackageName`）判定，detail 也给出该键。
+   *  2026-09-15（A 方案）：守卫**不再自更新**，`corePackageName` 只用于查询内核版本状态；
+   *  安装/升级由桌面壳执行（见 RELEASE-AND-UPDATE-MECHANISM.md §6）。
+   *  本条目因此只报告「壳执行内核更新所需的包名」是否就位 —— 不再暗示守卫能自己装。
+   *  id 仍为 `selfUpdate` 以兼容既有 `/env/status` 消费方。
    */
   selfUpdateEntry() {
     const pkg = this.config.corePackageName;
     if (!pkg) {
       return {
-        label: '守卫自更新',
+        label: '内核更新（桌面壳执行）',
         required: false,
         state: 'unconfigured',
-        detail: '未配置 corePackageName（npm 通道；形如 @dsh-sup/dsh-core-<os>-<arch>）',
+        detail: '未配置 corePackageName（形如 @dsh-sup/dsh-core-<os>-<arch>）',
       };
     }
-    return { label: '守卫自更新', required: false, state: 'configured', detail: pkg };
+    return { label: '内核更新（桌面壳执行）', required: false, state: 'configured', detail: pkg };
   }
 
   /** DSH 本体条目（外传判定：bin 可执行 + 已装版本）。 */

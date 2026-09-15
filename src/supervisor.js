@@ -103,7 +103,6 @@ class Supervisor {
     // 显式意图登记簿（RC2）：用户/系统动作发生处 register，收敛循环 consume——
     // 取代旧 _explicitAction 时间窗布尔（漏消费竞态已根治）。词表见 guard/intent.js。
     this.intents = new IntentLedger();
-    this._selfUpdateExpectedVersion = null; // 自更新预期版本（A3：重启后校验达标才报成功）
     this._stopping = false;
     // ── 会话生命周期（契约 ARCHITECTURE-CONTRACT-phase0 §3）：
     //   starting → running → stopping → stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
@@ -705,7 +704,6 @@ class Supervisor {
       backoffUntil: this._mBackoffUntil(),
       lastFailure: this._mLastFailure(),
       lastRestartAt: this._mLastRestartAt(),
-      updatePending: this._selfUpdatePending(), // A3：更新已安装待重启生效
       upgradeHold: this._upgradeHold,
       commandMissing: !!(this._mSpawnBlockedUntil() && Date.now() < this._mSpawnBlockedUntil()),
       dshTokenCaptured: !!(this.tokenService && this.tokenService.get('main')),

@@ -196,9 +196,8 @@ export const supervisorApi = {
   /** 同源单源探活（服务端探测，不受页面 CSP connect-src 'self' 约束）。
    *  ⚠ 2026-09-13：原先由浏览器直连用户填的镜像 → 被 CSP 拦截 → 恒报「探测失败」。 */
   registryProbe: (origin: string) => post<GenericOk & { origin: string; ok: boolean; latencyMs: number | null; probe?: string }>("/dist/registry/probe", { origin }),
+  /** 内核更新状态（只读）：安装/重启由桌面壳执行（单写入者契约，见 kernelUpdateBridge）。 */
   selfUpdateStatus: () => get<SelfUpdateStatus>("/self-update/status"),
-  selfUpdateApply: () => post<SelfUpdateStatus>("/self-update/apply"),
-  selfUpdateRestart: () => post<SelfUpdateStatus>("/self-update/restart-guard"),
   guardVersion: () => get<GuardVersion>("/guard/version"),
   guardVersionCheck: () => post<GuardVersion & { ok?: boolean }>("/guard/version/check"),
   // ── 桌面壳（Tauri 壳）：版本检测 + 重启以应用更新（2026-09-11）──

@@ -153,19 +153,6 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     !/const \[core, pre\] = clean\.split\('-'\)/.test(dsrc), '已改');
 }
 
-// ── J-d：self-update 版本排序用 semver ──
-{
-  const su = read('src/domains/dist/self-update.js');
-  check('J-d prune 用 semverCompare 排序', /sort\(\(a, b\) => semverCompare\(a\.v, b\.v\)\)/.test(su), '已改');
-  check('J-d currentDir 用 semverCompare 比较', /semverCompare\(v, best\[0\]\)/.test(su), '已改');
-  check('J-d 不再用字符串比较版本', !/\.sort\(\(a, b\) => \(a\.v < b\.v/.test(su), '已改');
-  // 行为级：prune 的排序语义（用真实 semverCompare 复现排序结果）
-  const { semverCompare } = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
-  const dirs = ['v0.7.0', 'v0.8.0', 'v0.9.0', 'v0.10.0'].map((v) => ({ v })).sort((a, b) => semverCompare(a.v, b.v));
-  check('J-d 行为：v0.10.0 排在最后（不再被 prune 优先删除）',
-    dirs[dirs.length - 1].v === 'v0.10.0', JSON.stringify(dirs.map((d) => d.v)));
-}
-
 // ── J-e：daemon _spawn 的缺陷防护 ──
 {
   const dl = read('src/guard/proc/daemon-lifecycle.js');

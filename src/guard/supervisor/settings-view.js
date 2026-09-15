@@ -6,7 +6,6 @@
 // 依赖由拆分脚本按块内实际使用自动携带（遗漏会导致运行期 ReferenceError）。
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { execFile } = require('node:child_process');
 const ex = require('../../platform/exec');
@@ -99,146 +98,42 @@ class SettingsView {
     }
   }
 
-  /** 守卫自更新「重启生效」衔接：仅当配置 guardRestartAllowed=true 且存在 systemd 用户单元才执行；
-   *  否则返回明确指引（避免误杀/误起守卫）。 */
-  /** 自更新后的守卫重启（A2）：能力按部署形态自动判定（打包态=systemd 重启闭环；源码形态=拒绝），
-   *  去掉 guardRestartAllowed 人工配置门槛。重启前落盘「预期版本」，重启后 /status 校验自报版本
-   *  达标才算更新成功——闭环可观测，不再出现"装了没生效"的静默失败。 */
-  guardSelfUpdateRestart() {
-    const dep = deploy.detect();
-    if (!dep.updatable) {
-      return { ok: false, error: dep.reason || '当前部署形态不支持自动重启', form: dep.form };
-    }
-    const unit = path.join(os.homedir(), '.config', 'systemd', 'user', 'dsh-supervisor.service');
-    if (!fs.existsSync(unit)) return { ok: false, error: '系统未启用 systemd 用户单元，请手动重启守卫' };
-    // 预期版本落盘：最近一次 apply 的目标版本（restart 后 status 校验用）
-    const swDir = path.dirname(this.config.stateFile);
-    try { fs.writeFileSync(path.join(swDir, 'self-update-expected.json'), JSON.stringify({ expectedVersion: this._selfUpdateExpectedVersion || null, at: Date.now() }), { mode: 0o600 }); } catch {}
-    // 契约 §2/§4：守卫所属单元的所有者是外部（systemd + 壳），守卫**绝不 systemctl restart 自己**——
-    // restart 内部先 stop（等本进程退出），而本进程正阻塞在 execFileSync → 死锁（与 V2 同源）。
-    // 正确做法：守卫进程退出，由 systemd `Restart=always` 拉起新内核（KillMode=process → DSH 不受影响）。
-    // 先回执（HTTP 响应发出）再退出，避免响应丢失。
-    if (this.events) this.events.append('guard_self_update_restart', { expectedVersion: this._selfUpdateExpectedVersion || null, via: 'exit+systemd-restart' });
-    this.logger && this.logger.info && this.logger.info('[self-update] 守卫将退出，由 systemd Restart=always 拉起新内核');
-    // ⚠ 2026-09-12（P1）：等 shutdown 完成再退出（此前 shutdown() 是同步函数、
-    //   内部未 await stopAll → stop 被 process.exit 截断，router/lan 残留成孤儿）。
-    //   同理加 8s 兜底：自更新路径绝不该因某个 stop 卡住而永不退出。
-    setTimeout(() => {
-      const bail = setTimeout(() => process.exit(0), 8000);
-      if (bail.unref) bail.unref();
-      Promise.resolve()
-        .then(() => this.shutdown())
-        .catch((e) => { this.logger && this.logger.warn && this.logger.warn('[self-update] shutdown 异常: ' + ((e && e.message) || e)); })
-        .then(() => { clearTimeout(bail); process.exit(0); });
-    }, 500).unref();
-    return { ok: true, restarted: true, via: 'exit+systemd-restart' };
-  }
-
-  // ---- 守卫自更新（2026-09 收敛：npm 通道取代 manifest/目录翻转）----
+  // ---- 内核更新（单写入者契约：安装/重启归桌面壳）----
   //
-  // ⚠ 此处原有 `guardSelfUpdateDir()` —— 已于 2026-09-12 删除（P2 死代码）：
-  //   全仓**零调用点**，且它所依赖的 `config.selfUpdateDir` 也从未被任何发行流程赋值
-  //   （默认恒为 null）。保留它会造成「自更新仍走 manifest/目录翻转」的错误印象，
-  //   而真实机制是 npm 通道（`guardCorePkg()` + `runNpmInstall`）。
+  // ⚠ 2026-09-15（A 方案）：`guardSelfUpdateApply` 与 `guardSelfUpdateRestart` **已删除** ——
+  //   内核 npm 包的唯一写入者是桌面壳（见 RELEASE-AND-UPDATE-MECHANISM.md §6）；
+  //   守卫只保留只读的 `guardSelfUpdateStatus`，接口 `/self-update/apply|restart-guard` 返回 410。
+  //   （此前 2026-09-12 已删除零调用点的 `guardSelfUpdateDir()`。）
+
   /** 内核 npm 子包名（按当前平台/架构）。corePackageName 可为显式常量或含 {os}/{arch} 占位的模板。 */
   guardCorePkg() {
     const raw = this.config.corePackageName;
     if (!raw) return null;
     // 2026-09-13（跨平台架构规范化）：平台知识收口到 src/platform/matrix.js。
-    //   （此处原有第三份 os 映射表 { win32, linux, darwin } → { win, linux, darwin }。）
     return String(raw).replace(/{os}/g, matrix.osTag()).replace(/{arch}/g, matrix.current().arch) || null;
   }
 
-  /** 守卫自更新（2026-09 收敛：npm 通道）——查 @dsh-sup/dsh-core-<os>-<arch> 全 tag 最高版本（全更新：
-   *  BETA/RC/正式都算更新，任一更高即提示可更新），对本机 guardVersion 比较。 */
+  /** 内核更新状态（**只读**；安装/重启归桌面壳，单写入者契约）。
+   *  查 @dsh-sup/dsh-core-<os>-<arch> 全 tag 最高版本（BETA/RC/正式都算更新），与本机 guardVersion 比较。
+   *  本方法**不写任何东西**：面板据此显示「可更新」，实际安装由桌面壳 kernel_update_apply 执行。 */
   async guardSelfUpdateStatus() {
     const pkg = this.guardCorePkg();
-    if (!pkg) return { ok: false, error: '未配置内核自更新包（corePackageName）' };
+    if (!pkg) return { ok: false, error: '未配置内核包（corePackageName）' };
     if (!this.dist || typeof this.dist.fetchLatestVersion !== 'function') return { ok: false, error: '发布服务未初始化' };
-    // 部署形态判定（A1）：npm 自更新仅适用于标准产品形态（npm 分发的 launcher）。
-    // 源码开发形态（bin 壳 require 源码目录）装新二进制永远不生效——显式拒绝，面板不再假装成功。
+    // 部署形态判定：源码开发形态（bin 壳 require 源码目录）不适用 npm 分发的版本口径——显式说明。
     const dep = deploy.detect();
     if (!dep.updatable) {
       return { ok: false, error: dep.reason, form: dep.form, updatable: false };
     }
     try {
-      // authoritative：内核自更新查官方 registry——镜像同步延迟会把新版本误判为『已是最新』
-      // （实测：npmmirror 对 @dsh-sup scope 包同步滞后，发布后面板『检查更新』漏报）。
+      // authoritative：查官方 registry——镜像同步延迟会把新版本误判为『已是最新』。
       const latest = await this.dist.fetchLatestVersion(pkg, this.config.releaseChannel || 'npm', { authoritative: true });
-      // 双版本口径（A3）：running = 进程启动时固化的编译期常量；disk = 磁盘二进制实况。
-      // 运行中进程不可能装后即变——restartRequired/更新待重启以此判定，不再自相矛盾。
       const installed = this.guardVersion;
       if (!latest) return { ok: false, error: '官方源不可达或未查询到版本' };
       const updateAvailable = semverCompare(latest, installed) > 0;
       if (this.events) this.events.append('guard_self_update_checked', { installed, latest, updateAvailable });
       return { ok: true, pkg, installed, latest, updateAvailable, form: dep.form, updatable: true };
     } catch (e) { return { ok: false, error: e.message }; }
-  }
-
-  /** 应用内核更新（npm 通道，全更新强制语义）：`npm i -g <pkg>@<latest>`。
-   *  安装后由调用方（壳/面板）据 restartRequired 调 /self-update/restart-guard（或手动重启）生效。 */
-  async guardSelfUpdateApply() {
-    const pkg = this.guardCorePkg();
-    if (!pkg) return { ok: false, error: '未配置内核自更新包（corePackageName）' };
-    if (!this.dist || typeof this.dist.runNpmInstall !== 'function') return { ok: false, error: '发布服务未初始化' };
-    if (!this.config.installCommandTemplate || !Array.isArray(this.config.installCommandTemplate)) return { ok: false, error: '未配置安装命令模板（installCommandTemplate）' };
-    // 部署形态门槛（A1）：status 已含判定；updatable=false 直接拒绝（源码形态走 npm 自更新永不生效）
-    const latest = await this.guardSelfUpdateStatus();
-    if (!latest.ok || !latest.latest) return { ok: false, error: (latest && latest.error) || '版本查询失败' };
-    if (latest.updatable === false) return { ok: false, error: latest.error || '当前部署形态不支持自更新', form: latest.form };
-    if (!latest.updateAvailable) return { ok: true, upToDate: true, version: this.guardVersion }; // 已最新，无需更
-    // 全更新语义：latest > 当前即强制安装（无跳过）
-    const target = latest.latest;
-    try {
-      // 下载源强制官方 registry（B）：内核自更新是「真相源+下载源统一」的闭环——
-      // 镜像 tarball 曾出现 stale（拉到旧版本二进制），官方源才有版本一致性保证。
-      // 沙箱安装等大流量场景仍走 selectRegistry 镜像。
-      const registry = 'https://registry.npmjs.org';
-      const r = await this.dist.runNpmInstall({
-        pkg,
-        version: target,
-        commandTemplate: this.config.installCommandTemplate,
-        registry,
-        onLine: (l) => { if (this.logger && this.logger.info) this.logger.info('[self-update] ' + l); },
-      });
-      if (r && r.ok) {
-        // 安装结果校验（A1 闭环）：磁盘上的二进制必须真的变成目标版本——
-        // 防「npm i 成功但装到与运行位无关的位置/镜像 stale」类静默失败（本次生产实测）。
-        let diskVersion = null;
-        try { diskVersion = deploy.detect().runningTarget ? this._readBinarySelfVersion() : null; } catch {}
-        const verified = diskVersion === target;
-        this._selfUpdateExpectedVersion = verified ? target : null; // 重启后 status 校验用（A3）
-        const restartRequired = true;
-        if (this.events) {
-          this.events.append('guard_self_update_applied', { from: this.guardVersion, version: target, pkg, diskVersion, verified });
-        }
-        if (!verified) {
-          return { ok: true, from: this.guardVersion, version: target, diskVersion, verified: false, restartRequired,
-            warn: '已安装但磁盘版本校验未通过（装到非运行位/镜像 stale），请检查部署形态' };
-        }
-        return { ok: true, from: this.guardVersion, version: target, diskVersion, verified: true, restartRequired };
-      }
-      return { ok: false, error: (r && r.error) || 'npm 安装失败' };
-    } catch (e) { return { ok: false, error: e.message }; }
-  }
-
-  /** 自更新「已安装待重启生效」判定（A3）：最近一次 apply 落盘的预期版本存在、
-   *  且进程运行版本仍低于它 → updatePending=true（面板显示重启提示；重启达标后自动清除）。 */
-  _selfUpdatePending() {
-    try {
-      const swDir = path.dirname(this.config.stateFile);
-      const f = path.join(swDir, 'self-update-expected.json');
-      if (!fs.existsSync(f)) return false;
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-      const expected = j && j.expectedVersion;
-      if (!expected) return false;
-      if (this.guardVersion === expected) { // 已达标：清除标记（一次性）
-        try { fs.unlinkSync(f); } catch {}
-        if (this.events) this.events.append('guard_self_update_verified', { version: expected });
-        return false;
-      }
-      return semverCompare(expected, this.guardVersion) > 0; // 预期更新才叫 pending；回退场景不标
-    } catch { return false; }
   }
 
   /** 读磁盘上**运行位**的自报版本（A1 校验用）：spawn `--version`，解析 guardVersion= 行。

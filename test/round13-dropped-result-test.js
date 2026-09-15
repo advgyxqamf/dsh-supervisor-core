@@ -38,32 +38,6 @@ const check = (n, c, x) => {
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13c-'));
 
 (async () => {
-  // ── A sanityCheck 失败路径 ──
-  console.log('== A sanityCheck 必须检查自检结果 ==');
-  {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'self-update.js'), 'utf8');
-    const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-    // 正向：必须有「=== null → throw」的判据
-    check('A sanityCheck 检查 exec.run 返回值（旧实现丢弃 → 恒通过）',
-      /exec\.run\(process\.execPath, \['--check', bin\][^)]*\)[^;]*===\s*null/.test(code)
-      || /sanityCheck 失败/.test(code), '有');
-    check('A 失败即抛（由 apply 按「不动 current」处理）',
-      /throw new Error\('sanityCheck 失败/.test(code), '有');
-
-    // 行为级：造一个语法损坏的 bin，验证 exec.run 确实返回 null（=判据成立）
-    const ex = require(path.join(ROOT, 'src', 'platform', 'exec.js'));
-    const badDir = path.join(TMP, 'bad', 'bin');
-    fs.mkdirSync(badDir, { recursive: true });
-    const badBin = path.join(badDir, 'dsh-supervisor');
-    fs.writeFileSync(badBin, 'this is (( definitely not valid javascript');
-    check('A 行为：损坏 bin 经 exec.run(node --check) 返回 null',
-      ex.run(process.execPath, ['--check', badBin], { stdio: 'pipe' }) === null, 'null');
-    // 反向：合法 bin 必须不为 null（否则判据会把好包也拒了）
-    const goodBin = path.join(TMP, 'good.js');
-    fs.writeFileSync(goodBin, 'console.log(1);\n');
-    check('A 行为：合法文件不为 null（不误拒）',
-      ex.run(process.execPath, ['--check', goodBin], { stdio: 'pipe' }) !== null, 'not-null');
-  }
 
   // ── B router.js 每个链都要有 catch ──
   console.log('== B router.js 异步链必须有 catch ==');
