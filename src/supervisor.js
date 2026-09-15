@@ -425,11 +425,18 @@ class Supervisor {
       });
       server.listen(port, this.config.apiHost, () => {
         this.api = server;
+        const prev = this.config.apiPort;
         // 实际端口 ≠ 配置端口 → 持久化（重启沿用选定端口）
-        if (port !== this.config.apiPort) {
+        if (port !== prev) {
+          // 释放旧端口的登记：否则 ports.json 会同时留旧/新两条 supervisor-api，
+          //   而 discovered_api_port() 取首条 → 壳可能永远等「已废弃的旧端口」→ 判定未就绪。
+          try { ports.release(prev, 'system:supervisor-api'); } catch {}
           this.config.apiPort = port;
           if (this.configPath) this.persistConfigPatch({ apiPort: port });
         }
+        // **登记实际绑定端口**（KERNEL-DAEMON-CONTRACT D3 / KERNEL-LAUNCH-STANDARD P6）：
+        //   壳的唯一就绪判据 =「ports.json 的 supervisor-api 实际值」；绝不能让配置期望值滞留在登记表。
+        try { ports.register('supervisor-api', port); } catch (e) { this.logger.warn('ports.register(actual) 失败: ' + e.message); }
         this.events.append('api_listening', { host: this.config.apiHost, port });
         this.logger.info('api listening on ' + this.config.apiHost + ':' + port);
       });
@@ -959,6 +966,8 @@ class Supervisor {
       server.listen(this.config.apiPort, this.config.apiHost, () => {
         bind._tries = 0;
         this.api = server;
+        // 重绑成功后同样登记**实际端口**（与 start() 的 listen 一致；D3）。
+        try { ports.register('supervisor-api', this.config.apiPort); } catch {}
         this.events.append('api_listening', { host: this.config.apiHost, port: this.config.apiPort });
         this.logger.info('api listening on ' + this.config.apiHost + ':' + this.config.apiPort);
       });

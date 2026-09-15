@@ -29,6 +29,8 @@ class ProxyProvider extends ProviderBase {
     this.kind = 'proxy';
     this.proxyAppId = opts.proxyAppId;
     this.app = opts.app || null;
+    // 数据目录（config.stateFile 派生）：日志落这里；未提供才回退默认（D7：不得各自 os.homedir()）。
+    this.stateDir = opts.stateDir || null;
     this.proxyRunning = false;
     this.instances = [];
     this.selectedAccountKeyId = null;
@@ -277,7 +279,9 @@ class ProxyProvider extends ProviderBase {
     const logFilter = /error|streaming|idle|timeout|ECONN|abort|socket|finish|truncat/i;
     let logStream = null;
     try {
-      const logDir = require('node:path').join(require('node:os').homedir(), '.dsh', 'supervisor', 'logs');
+      // D7：优先用注入的数据目录（config.stateFile 派生），杜绝测试/多实例写进真实 ~/.dsh。
+      const baseDir = this.stateDir || require('node:path').join(require('node:os').homedir(), '.dsh', 'supervisor');
+      const logDir = require('node:path').join(baseDir, 'logs');
       require('node:fs').mkdirSync(logDir, { recursive: true });
       logStream = require('node:fs').createWriteStream(require('node:path').join(logDir, 'proxy-instance-' + this.proxyAppId + '-' + port + '.log'), { flags: 'a' });
     } catch {}

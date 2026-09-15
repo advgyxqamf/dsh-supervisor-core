@@ -86,7 +86,8 @@ class RouterService {
   }
 
   _deserializeProvider(p) {
-    const common = { id: p.id, name: p.name, logger: this.logger, events: this.events, dist: this.dist, onPersist: () => this._save(), apiPort: p.apiPort || null, activated: p.activated === true };
+    // stateDir：数据目录（由 config.stateFile 派生）—— 供 provider 落盘/落日志，**不得**各自 os.homedir()（D7）。
+    const common = { id: p.id, name: p.name, logger: this.logger, events: this.events, dist: this.dist, onPersist: () => this._save(), stateDir: this.config && this.config.stateFile ? path.dirname(this.config.stateFile) : null, apiPort: p.apiPort || null, activated: p.activated === true };
     let prov;
     if (p.kind === 'proxy') {
       prov = new ProxyProvider({ ...common, kind: 'proxy', proxyAppId: p.proxyAppId, app: PROXY_APPS[p.proxyAppId] || null });
