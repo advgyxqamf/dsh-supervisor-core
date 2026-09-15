@@ -55,10 +55,6 @@ const DEFAULT_CONFIG = Object.assign(
 const STATE_FILE = path.join(SUPERVISOR_DIR, 'state.json');
 const EVENTS_FILE = path.join(SUPERVISOR_DIR, 'events', 'guard.events.log');
 const UNIT_PATH = path.join(os.homedir(), '.config', 'systemd', 'user', 'dsh-supervisor.service');
-const UNIT_TEMPLATE = path.join(ROOT, 'systemd', 'dsh-supervisor.service');
-const DESKTOP_DIR = path.join(os.homedir(), '.local', 'share', 'applications');
-const ICON_DIR = path.join(os.homedir(), '.local', 'share', 'icons');
-const DESKTOP_TEMPLATE = path.join(ROOT, 'desktop', 'dsh-supervisor.desktop');
 const AUTOSTART_TEMPLATE = path.join(ROOT, 'desktop', 'dsh-supervisor-gui-autostart.desktop');
 const AUTOSTART_FILE = path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
 // 跨平台命令行入口（P1 审计修复）：
@@ -383,59 +379,13 @@ function cmdInstall() {
     fs.symlinkSync(path.join(ROOT, 'bin', 'dsh-supervisor'), BIN_PATH);
     console.log('[install] 命令行链接: ' + BIN_PATH + ' → ' + __dirname + '/dsh-supervisor');
   }
-  // systemd unit（2026-09-05 修复：npm 平台子包只含 bin/ 无 systemd/desktop 模板 → 降级跳过部署而非 exit 1）
-  if (!fs.existsSync(UNIT_TEMPLATE)) {
-    console.warn('[install] 未找到 systemd 模板（' + UNIT_TEMPLATE + '）——npm 内核包形态，跳过系统服务部署。');
-    console.warn('[install] 如需 systemd 常驻，请从源码仓安装（systemd/dsh-supervisor.service）或手动运行：dsh-supervisor daemon');
-  } else {
-  let unit = fs.readFileSync(UNIT_TEMPLATE, 'utf8');
-  unit = unit.replace('@BIN@', BIN_PATH);
-  const unitDir = path.dirname(UNIT_PATH);
-  fs.mkdirSync(unitDir, { recursive: true });
-  fs.writeFileSync(UNIT_PATH, unit);
-  console.log('[install] systemd unit: ' + UNIT_PATH);
-  // 启用
-  try {
-    execInherit('systemctl', ['--user', 'daemon-reload']);
-    execInherit('systemctl', ['--user', 'enable', 'dsh-supervisor.service']);
-  } catch (e) {
-    console.warn('[install] systemctl 执行失败（可能不在 systemd 会话中）:', e.message);
-  }
-  try {
-    execInherit('loginctl', ['enable-linger', os.userInfo().username]);
-    console.log('[install] loginctl enable-linger 已启用');
-  } catch {
-    console.warn('[install] enable-linger 失败，开机自启可能不生效');
-  }
-    installDesktopEntry();
-    console.log('\n安装完成。启动守卫：\n  systemctl --user start dsh-supervisor');
-    console.log('查看状态：\n  dsh-supervisor status');
-  }
-}
-
-// 桌面菜单入口 + 图标（从仓库模板部署，@HOME@ 占位符替换）
-//
-// 双仓隔离（2026-09-11 清理）：壳源码**不在本仓**，也不再假设它躺在内核仓目录内
-// （旧代码回退到 `<内核仓>/.shell-work/src-tauri` —— 那是双仓拆分未彻底的残留，
-//   等于内核仓隐式依赖一个「壳仓 checkout 恰好放在自己目录下」的布局）。
-// 现只认显式环境变量 DSH_SHELL_DIR；缺失则告警跳过，不阻断（图标非功能项）。
-function installDesktopEntry() {
-  try {
-    if (!fs.existsSync(DESKTOP_TEMPLATE)) return;
-    fs.mkdirSync(ICON_DIR, { recursive: true });
-    const shellDir = process.env.DSH_SHELL_DIR || null;
-    const iconSrc = shellDir ? path.join(shellDir, 'src-tauri', 'icons', '128x128.png') : null;
-    const iconDst = path.join(ICON_DIR, 'dsh-supervisor.png');
-    if (iconSrc && fs.existsSync(iconSrc)) fs.copyFileSync(iconSrc, iconDst);
-    else console.warn('[install] 未找到壳图标（可设 DSH_SHELL_DIR 指向壳 checkout），桌面图标缺失；不影响功能。');
-    fs.mkdirSync(DESKTOP_DIR, { recursive: true });
-    const entry = fs.readFileSync(DESKTOP_TEMPLATE, 'utf8').replace(/@HOME@/g, os.homedir());
-    const dst = path.join(DESKTOP_DIR, 'dsh-supervisor.desktop');
-    fs.writeFileSync(dst, entry);
-    console.log('[install] 桌面菜单入口: ' + dst);
-  } catch (e) {
-    console.warn('[install] 桌面入口部署失败:', e.message);
-  }
+  // 服务定义（systemd/launchd/schtasks）、开机自启、桌面入口的**所有者是桌面壳**
+  //   （KERNEL-DAEMON-CONTRACT D6 / KERNEL-LAUNCH-STANDARD H5）：
+  //   内核 install **不再**写任何服务定义或 autostart —— 否则与壳争夺「谁定义、谁拉起」，
+  //   Windows 上更会形成双启动器（kernel watchdog + 壳计划任务）。
+  //   此处只准备内核本体需要的 config 与命令入口。
+  console.log('[install] 服务定义/开机自启/桌面入口由桌面壳负责（本命令不再部署）。');
+  console.log('[install] 内核本体已就绪。启动由桌面壳或服务管理器发起：dsh-supervisor daemon');
 }
 
 function cmdGuiAutostart(onoff) {

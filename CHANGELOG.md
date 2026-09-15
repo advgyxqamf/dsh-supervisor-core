@@ -8,6 +8,15 @@
 
 （下一版本待记）
 
+### 内核守护进程契约：install 不再部署服务定义（2026-09-15）
+
+按 `KERNEL-DAEMON-CONTRACT.md` D6（内核不建/不启/不停自己的服务定义，唯一所有者=桌面壳）：
+
+- `bin/dsh-supervisor` 的 `install` **不再**写 systemd unit / autostart / 桌面入口
+  （避免与壳争夺「谁定义、谁拉起」；Windows 上更会形成 kernel watchdog + 壳计划任务双启动器）；
+- 删除随之失效的 `installDesktopEntry` 与 `UNIT_TEMPLATE`/`DESKTOP_*` 常量；
+- 门禁：`test/kernel-daemon-contract-test.js`（D-1..D-5，含反向非空转）。
+
 ## [0.1.5-BETA.5]（2026-09-15）
 
 ### 内核读运行期启动契约 —— npm/PATH 与壳同源（Phase 2）
