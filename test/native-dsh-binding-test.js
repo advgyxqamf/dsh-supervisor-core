@@ -51,6 +51,8 @@ function restore() {
 
 const ep = require(path.join(ROOT, 'src', 'platform', 'os', 'exec-path'));
 const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager'));
+// macOS 下 /tmp、/var 是符号链接（realpath 得到 /private/...）——比较前统一规范化，跨平台稳定。
+const canon = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
 const mkNM = (command, npmRoot) => new NativeManager({
   config: { command, packageName: '@deepseek-ai/dsh' },
   npmRoot,
@@ -63,12 +65,12 @@ isolate();
 // 1) resolveDsh：DSH_BIN 显式覆盖（最高优先级）
 process.env.DSH_BIN = JS;
 const d1 = ep.resolveDsh({});
-check('resolveDsh(DSH_BIN) 返回真实 JS 入口', d1 && d1.isJs === true && d1.bin === JS, d1 && d1.bin);
+check('resolveDsh(DSH_BIN) 返回真实 JS 入口', d1 && d1.isJs === true && canon(d1.bin) === canon(JS), d1 && d1.bin);
 
 // 2) resolveDsh：npmRoot 分支（PATH 无 dsh、home 为空）
 delete process.env.DSH_BIN;
 const d2 = ep.resolveDsh({ npmRoot: PREFIX });
-check('resolveDsh(npmRoot) 命中包内 lib/bin.js', d2 && d2.bin === JS, d2 && d2.bin);
+check('resolveDsh(npmRoot) 命中包内 lib/bin.js', d2 && canon(d2.bin) === canon(JS), d2 && d2.bin);
 
 // 3) NativeManager：已绑定绝对入口 → 已安装 + 版本可读
 const bound = mkNM(['node', JS, 'web'], PREFIX);
