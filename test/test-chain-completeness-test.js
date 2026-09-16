@@ -47,7 +47,10 @@ const EXCLUDED = {
 function chainFiles() {
   const s = require(path.join(ROOT, 'package.json')).scripts.test;
   // 每条为 `node --require ./test/_preload.js test/<x>.js`（跨平台隔离预载）——剥掉前缀取文件名。
-  return s.split(' && ').map((x) => x.replace(/^node (-{1,2}require \S+ )?/, '').trim());
+  // ⚠ 前缀可为 `node -r <preload> ` / `node --require <preload> ` / 无。
+  //   首版写成 `-{1,2}require` —— 那匹配 `-require`/`--require`，**匹配不到 `-r`**，
+  //   导致本函数返回空数组、N-a/N-b 全崩；由 CI 实跑发现（node --check 语法通过）。
+  return s.split(' && ').map((x) => x.replace(/^node ((?:-r|--require) \S+ )?/, '').trim());
 }
 
 /** 命名约定：`*-test.js` 为标准测试名。
