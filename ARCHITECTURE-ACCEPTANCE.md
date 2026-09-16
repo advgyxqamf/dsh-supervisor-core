@@ -7,13 +7,37 @@
 
 ---
 
-## 一、验收状态：**待 CI 裁决**
+## 一、验收状态：**通过（CI 四平台全绿）**
 
-**本机自检**（Linux，不构成验收证据）：全部结构门禁在严格模式下 exit 0；
-本机回归 125 条仅 1 项失败，且该项为**本机环境前件不满足**（本机 `$HOME` 存在 `~/.npmrc`），
-在 CI 干净 runner 上预期通过 —— 详见 `ACCEPTANCE-STANDARD.md` §1.2。
+**CI run**：https://github.com/advgyxqamf/dsh-supervisor-core/actions/runs/35158648997 （commit `3cebaed`）
 
-**真正的验收结论以 PR 的 CI 四平台结果为准。**
+| CI job | 结果 |
+|---|---|
+| `test`（ubuntu-latest，127 条测试链经 Xvfb + launcher 产物） | ✅ success |
+| `build` ubuntu-22.04 / linux-x64 | ✅ success |
+| `build` windows-latest / win-x64 | ✅ success |
+| `build` macos-latest / darwin-arm64 | ✅ success |
+| `build` macos-14 / darwin-x64 | ✅ success |
+| `release` | skipped（按预期：无 tag、版本未变动） |
+
+### 取得该结果的过程（CI 抓到的、本机不可能发现的缺陷）
+
+| # | CI 抓到的问题 | 本机能否发现 |
+|---|---|---|
+| 1 | `X-2` 文档含操作者绝对路径（`/home/bowen`） | 能（未跑全链） |
+| 2 | 我自建门禁 `A-5` 的假阳性（按「本机」字面量判） | 能（未跑全链） |
+| 3 | **`windows-latest`：`The command line is too long.`**（cmd.exe 上限 8191，`scripts.test` 8593 字符）——同一提交 ubuntu/macOS **三矩阵全绿** | **不能** |
+| 4 | `chainFiles` 解析式 `-{1,2}require` 匹配不到 `-r`（`node --check` 通过但语义错） | 能（未跑全链） |
+| 5 | `SR-7` 断言链含 `--require` 字面形式 | 能（未跑全链） |
+
+其中第 3 条是**平台原生**问题：只有 Windows 构建能暴露，现已固化为门禁 **N-e**
+（`test-chain-completeness-test.js`），不再依赖 Windows CI 才发现。
+
+### 本机自检数据（不构成验收证据，仅存档）
+
+全部结构门禁在严格模式下 exit 0；本机回归 126 条仅 1 项失败，
+且该项为**本机环境前件不满足**（本机 `$HOME` 存在 `.npmrc`）——
+该项在 CI 干净 runner 上**实际通过**（见上表 `test` job）。详见 `ACCEPTANCE-STANDARD.md` §1.2。
 
 | 门禁 | 结果 | 严格模式 |
 |---|---|---|
