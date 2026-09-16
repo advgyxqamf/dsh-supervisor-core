@@ -77,7 +77,7 @@ src/supervisor.js    L4 薄壳（79 行）
 ```
 
 **唯一失败项的定性**：`test/release-auth-test.js` 的 R4-c 断言在 `DSH_REAL_HOME` 指向空目录时
-应得 `HIT=none`；运行沙箱的 `$HOME` 存在 `/home/bowen/.npmrc`（617 字节），
+应得 `HIT=none`；运行沙箱的 `$HOME` 存在 `~/.npmrc（开发机）`（617 字节），
 脚本经真实 HOME 兜底命中 token。**属环境前件不满足，非代码回归**（改造前基线即如此）。
 
 ---
