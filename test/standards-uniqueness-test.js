@@ -45,6 +45,7 @@ const STANDARDS = {
   '守护域模型': { file: 'GUARD-DOMAIN-MODEL.md', gate: 'test/guard-domain-model-gate-test.js' },
   '供应商网关架构': { file: 'PROVIDER-GATEWAY-ARCHITECTURE.md', gate: 'test/provider-gateway-gate-test.js' },
   '目录结构与分层': { file: 'DIRECTORY-STRUCTURE-DESIGN.md', gate: 'test/directory-structure-gate-test.js' },
+  '验收与测试': { file: 'ACCEPTANCE-STANDARD.md', gate: 'test/acceptance-standard-gate-test.js' },
 };
 
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
