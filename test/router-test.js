@@ -78,11 +78,13 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   check('一账号一实例：重复 ensure 返回同一实例', i1 === i2);
   check('实例列表只有一条', pp.instances.length === 1, 'len=' + pp.instances.length);
 
-  // 5. 冻结/释放（带 resetAt）
-  i1.freeze('1788000000000');
-  check('冻结状态+resetAt', i1.status === 'frozen' && i1.quota.resetsAt === '1788000000000');
-  i1.unfreeze();
-  check('解冻回 registered', i1.status === 'registered');
+  // 5. 实例四态词表（PROVIDER-GATEWAY-ARCHITECTURE §4.1 / PG-3）
+  //   ⚠ 实例级 freeze/unfreeze 已删除：它们是未接线的死代码，且"冻结"是**账号级**语义
+  //     （实例级只有 COLD/WARM/HOT/DEAD）。此处改验四态判定本身。
+  check('实例态为四态词表之一', ['COLD', 'WARM', 'HOT', 'DEAD'].includes(i1.status), i1.status);
+  check('无进程 → isServable=false', i1.isServable() === false, String(i1.isServable()));
+  const insts = require(path.join(ROOT, 'src', 'domains', 'router', 'model'));
+  check('四态常量已导出且唯一', Object.keys(insts.INSTANCE_STATES).length === 4, Object.keys(insts.INSTANCE_STATES).join(','));
 
   const failed = results.filter((r) => !r);
   console.log('\n结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

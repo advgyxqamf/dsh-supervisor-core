@@ -54,7 +54,7 @@ process.on('SIGTERM', () => { killSpawnedSync(); process.exit(143); });
     return r;
   };
   const { keyFingerprint } = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'base'));
-  const ports = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports')).shared;
+  const ports = require(path.join(ROOT, 'src', 'platform', 'service', 'ports')).shared;
   ports.configureFile(path.join(TMP, 'ports-router.json'));
   const log = { info(){}, warn(){}, error(){}, debug(){} };
   const app = { id: 'vm', name: 'VM', command: ['node', mockApp, '--port', '{{port}}', '--api-key', '{{key}}'], healthPath: '/health', upstream: 'http://127.0.0.1:0', real: false, quota: { type: 'commandcode-billing', apiBase: 'http://127.0.0.1:9' } };

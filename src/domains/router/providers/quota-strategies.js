@@ -24,7 +24,7 @@
 // 返回值约定：{ ok, quota }（quota 不含 overallStatus——展示措辞由模式层按统一语义填）。
 // ═══════════════════════════════════════════════════════════════════════════
 
-const { normalizeResetTs } = require('./base');
+const { normalizeResetTs } = require('./policies/quota');
 
 /** Command 默认 API 根（订阅面与 credits 面同主机）。 */
 const DEFAULT_API_BASE = 'https://api.commandcode.ai';

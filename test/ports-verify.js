@@ -72,7 +72,7 @@ const check = (name, cond, extra) => { results.push({ name, ok: !!cond, extra })
   check('main(守卫核心视图)存在且 remoteEnabled', !!instMain && instMain.remoteEnabled === true && insts.every((i) => i.id !== 'main'), JSON.stringify(instMain && { id: instMain.id, remoteEnabled: instMain.remoteEnabled }));
 
   // 2. 端口注册表：固定端口登记 + 动态分配避开
-  const ports = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports')).shared;
+  const ports = require(path.join(ROOT, 'src', 'platform', 'service', 'ports')).shared;
   sup._registerFixedPorts();
   check('固定端口已登记', ports.get('dsh-main') === targetPort && ports.get('supervisor-api') === apiPort);
   const relayPort = await ports.allocate('relay');

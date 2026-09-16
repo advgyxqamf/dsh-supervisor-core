@@ -30,7 +30,10 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const src = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'os', 'autostart.js'), 'utf8');
+// ⚠ 2026-09-17 域结构改造：autostart 拆为目录 —— 按目录聚合读取，转义判据覆盖面不变。
+const AUTO = path.join(ROOT, 'src', 'platform', 'os', 'autostart');
+const src = fs.readdirSync(AUTO).filter((f) => f.endsWith('.js')).sort()
+  .map((f) => fs.readFileSync(path.join(AUTO, f), 'utf8')).join(String.fromCharCode(10));
 
 // ── X-a：XML 转义函数存在，且 & 最先 ──
 const escFn = src.match(/function xmlEscape\(s\) \{[\s\S]{0,220}?\}/);
@@ -63,7 +66,7 @@ check('X-c Exec 行被重写（含引号）', /\^Exec=\.\*\$/m.test(src), '有')
 
 // ── X-d：行为级 —— 含 & 的路径仍生成合法 XML ──
 //   直接 require 模块并调用 macGuiPlist（纯函数，无副作用）
-const auto = require(path.join(ROOT, 'src', 'platform', 'os', 'autostart.js'));
+const auto = require(path.join(ROOT, 'src', 'platform', 'os', 'autostart'));
 check('前置：autostart 模块可加载', typeof auto === 'object' && auto !== null, 'OK');
 
 // 由于 macGuiPlist 未导出，改为在源码层验证转义的**语义正确性**：

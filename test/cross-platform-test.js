@@ -75,7 +75,12 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
   // ── P2 无硬编码 PATH 连接符 ──
   console.log('== P2 PATH 连接符 ==');
-  const instSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', 'index.js'), 'utf8');
+  // ⚠ 2026-09-16 步骤8a：instance 拆为 index/core/ops/upgrade 四文件，
+  //   判据须读**整域**（否则文件拆分即静默失去覆盖面）。见 DIRECTORY-STRUCTURE-DESIGN §4.5。
+  // ⚠ instance 域已拆为 8 文件；按目录聚合读取，新增/改名文件自动纳入覆盖面（不再硬编码文件名）。
+  const instSrc = fs.readdirSync(path.join(ROOT, 'src', 'domains', 'instance')).filter((f) => f.endsWith('.js')).sort()
+    .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', f), 'utf8'))
+    .join(String.fromCharCode(10));
   check("instance 无 join(':') 拼 PATH", !/process\.env\.PATH[^\n]*\.join\(':'\)/.test(instSrc), '');
   check('instance 使用 path.delimiter', instSrc.includes('path.delimiter'), '');
 
@@ -89,7 +94,9 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   console.log('== 分层不变量（平台命令收敛）==');
   {
     const forbidden = ['systemctl', 'systemd-run', 'launchctl', 'schtasks', 'taskkill', 'netstat', 'lsof', 'wmic', 'osascript', 'notify-send', 'xdg-open'];
-    const scanDirs = ['domains', 'guard', 'api'];
+    // ⚠ 2026-09-16 步骤6：guard/ → app/（编排层重组，DIRECTORY-STRUCTURE-DESIGN §2.1）。
+    //   平台命令收敛扫描须覆盖编排层新目录名，否则判据静默失去覆盖面。
+    const scanDirs = ['domains', 'app', 'api'];
     const offenders = [];
     const walk = (dir) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -154,7 +161,12 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     const instTsx = fs.readFileSync(path.join(ROOT, 'ui', 'src', 'features', 'supervisor', 'InstancesPage.tsx'), 'utf8');
     check('A1-e UI 消费 capabilities 并前置提示', instTsx.includes('envStatus()') && instTsx.includes('multiInstance') && instTsx.includes('sandboxUnsupported'), 'ok');
     // 误导性错误指引已修正：不再指向不存在的裸字段路径
-    const instSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', 'index.js'), 'utf8');
+    // ⚠ 2026-09-16 步骤8a：instance 拆为 index/core/ops/upgrade 四文件，
+  //   判据须读**整域**（否则文件拆分即静默失去覆盖面）。见 DIRECTORY-STRUCTURE-DESIGN §4.5。
+  // ⚠ instance 域已拆为 8 文件；按目录聚合读取，新增/改名文件自动纳入覆盖面（不再硬编码文件名）。
+  const instSrc = fs.readdirSync(path.join(ROOT, 'src', 'domains', 'instance')).filter((f) => f.endsWith('.js')).sort()
+    .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', f), 'utf8'))
+    .join(String.fromCharCode(10));
     check('A1-f 沙箱错误指引指向真实端点/字段',
       instSrc.includes('GET /env/status') && instSrc.includes('capabilities.multiInstance'),
       'ok');
@@ -169,7 +181,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     const aboutTsx = fs.readFileSync(path.join(ROOT, 'ui', 'src', 'features', 'supervisor', 'settings', 'AboutCard.tsx'), 'utf8');
     check('A4-c AboutCard 提供更新日志入口', aboutTsx.includes('dshChangelog') && aboutTsx.includes('guardChangelog') && aboutTsx.includes('Dialog'), 'ok');
     // 命名统一：后端话术指向「概览 · 版本与升级」
-    const guardApi = fs.readFileSync(path.join(ROOT, 'src', 'api', 'guard.js'), 'utf8');
+    const guardApi = fs.readFileSync(path.join(ROOT, 'src', 'api', 'domains', 'guard.js'), 'utf8');
     check('A4-d 后端话术命名与 UI 位置统一', guardApi.includes('概览 · 版本与升级'), 'ok');
   }
 

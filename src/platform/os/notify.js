@@ -5,7 +5,8 @@
 // - macOS：osascript display notification；
 // - Windows：PowerShell System.Windows.Forms.NotifyIcon 气泡（无需第三方模块）。
 
-const { spawn } = require('node:child_process');
+// SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）。
+const spawnOS = require('./spawn');
 
 /** AppleScript 字符串字面量转义。
  *  AppleScript 与 JSON 都用反斜杠转义，故 JSON.stringify 恰好等价。 */
@@ -66,7 +67,7 @@ function notify(title, body, onError) {
   try {
     const plan = notifyCommand(process.platform, title, body);
     if (!plan) return false;
-    const c = spawn(plan.cmd, plan.args, { stdio: 'ignore', detached: process.platform === 'linux' });
+    const c = spawnOS.detachedIgnored(plan.cmd, plan.args);
     c.on('error', () => { if (onError) onError(); });
     c.unref();
     return true;

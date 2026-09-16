@@ -184,7 +184,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'platport-'));
   const cmds = {};
   for (const p of ['linux', 'darwin', 'win32']) {
     const out = underFake(p, [
-      "const a = require('./src/platform/os/autostart.js');",
+      "const a = require('./src/platform/os/autostart');",
       "process.stdout.write(a.daemonCommand());",
     ].join(String.fromCharCode(10)), { home: '/H' });
     cmds[p] = out;
@@ -211,7 +211,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'platport-'));
   ];
   for (const [p, wantKind, wantHost] of pairs) {
     const out = underFake(p, [
-      "const a = require('./src/platform/os/autostart.js');",
+      "const a = require('./src/platform/os/autostart');",
       "const idx = require('./src/platform/os/index.js');",
       "const s = a.status();",
       "process.stdout.write(JSON.stringify({ kind: s.kind, on: s.on, host: idx.capabilityProfile().hostService }));",
@@ -226,7 +226,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'platport-'));
   }
   // 未知平台不得触碰 systemctl（否则产生误导性的 ENOENT 噪声）
   const noNoise = underFake('freebsd', [
-    "const a = require('./src/platform/os/autostart.js');",
+    "const a = require('./src/platform/os/autostart');",
     "process.stdout.write(String(a.status().unit));",
   ].join(String.fromCharCode(10)));
   check('X-4 未知平台 status().unit=unsupported（不跑 systemctl 探测）',

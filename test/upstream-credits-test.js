@@ -145,11 +145,13 @@ async function main() {
     check('无 monthlyResetAt → applyDetection 保持 credits/poll', acc.limit && acc.limit.kind === 'credits' && acc.limit.recovery.type === 'poll', acc.limit);
   }
 
-  console.log('== 自动取证：reactToFailure 对上游 >=400 响应经 onEvidence 落证据 ==');
+  // ⚠ 2026-09-16 Phase 5（决策 A5）：取证子系统已整体删除（有产出无消费），
+  //   本块随之从"验证证据内容"改为"验证**分类与动作**"——那才是 reactToFailure 的真实职责，
+  //   且不依赖任何已删除的旁路（原断言的 evidence 内容已无意义）。
+  console.log('== reactToFailure：上游 ≥400 的分类与动作（取证旁路已删除）==');
   {
     const { SwitchEngine } = require(path.join(ROOT, 'src', 'domains', 'router', 'switch'));
-    const evidences = [];
-    const se = new SwitchEngine({ logger: { info(){} }, onEvidence: (r) => evidences.push(r) });
+    const se = new SwitchEngine({ logger: { info(){} } });
     const effects = [];
     const prov = {
       id: 'prov-x', name: 'ProviderX',
@@ -162,19 +164,17 @@ async function main() {
     const r1 = se.reactToFailure(prov, acc, { status: 400, headers: { 'Retry-After': '60', 'set-cookie': ['x=1'], authorization: 'Bearer sk-xxx' }, body: ccBody, attempt: 0, attempts: 3, method: 'POST', path: '/v1/chat/completions' });
     check('credits 400 → action=retry', r1 && r1.action === 'retry' && r1.signal === 'credits', JSON.stringify(r1));
     check('effect 已执行（credits）', effects.length === 1 && effects[0] === 'credits:...k9', String(effects));
-    const ev1 = evidences.find((e) => e.status === 400 && e.signal === 'credits');
-    check('证据：400 credits + action/account/method/path/attempt', !!ev1 && ev1.action === 'retry' && ev1.account === '...k9' && ev1.method === 'POST' && ev1.path === '/v1/chat/completions' && ev1.attempt === 0 && ev1.attempts === 3 && ev1.providerId === 'prov-x', JSON.stringify(ev1));
-    check('证据：白名单头（Retry-After 大小写归一）、剔除敏感头', !!ev1 && ev1.headers && ev1.headers['retry-after'] === '60' && ev1.headers.authorization === undefined && ev1.headers['set-cookie'] === undefined, JSON.stringify(ev1 && ev1.headers));
-    check('证据体有界且含错误原文', !!ev1 && typeof ev1.body === 'string' && ev1.body.includes('insufficient credits'), ev1 && ev1.body && ev1.body.slice(0, 100));
     const r2 = se.reactToFailure(prov, acc, { status: 503, body: 'service unavailable', attempt: 0, attempts: 3 });
-    check('503 transient → retry + 证据带 transient 标记', r2 && r2.action === 'retry' && r2.transient === true && evidences.some((e) => e.status === 503 && e.signal === 'transient' && e.transient === true), JSON.stringify(r2));
+    check('503 transient → retry + transient 标记', r2 && r2.action === 'retry' && r2.transient === true, JSON.stringify(r2));
     const r3 = se.reactToFailure(prov, acc, { status: 403, body: 'forbidden', attempt: 1, attempts: 3 });
-    check('403 无词 banned → passthrough + 证据', r3 && r3.action === 'passthrough' && evidences.some((e) => e.status === 403 && e.signal === 'banned' && e.action === 'passthrough'), JSON.stringify(r3));
+    check('403 无词 banned → passthrough 不误切', r3 && r3.action === 'passthrough' && r3.signal === 'banned', JSON.stringify(r3));
     const r4 = se.reactToFailure(prov, acc, { status: 400, body: '{"error":"context length exceeded"}', attempt: 2, attempts: 3 });
-    check('400 无词 none → passthrough 不误切，也有证据（可核对“不切”合理）', r4 && r4.action === 'passthrough' && r4.signal === 'none' && evidences.some((e) => e.status === 400 && e.signal === 'none'), JSON.stringify(r4));
-    const before = evidences.length;
-    se.reactToFailure(prov, acc, { status: 200, body: 'ok' });
-    check('2xx 不产生证据（仅上游拒绝/限额类）', evidences.length === before, String(evidences.length - before));
+    check('400 无词 none → passthrough 不误切（透传上游原体）',
+      r4 && r4.action === 'passthrough' && r4.signal === 'none' && typeof r4.body === 'string', JSON.stringify(r4));
+    // 反向：取证旁路确已删除（不再有 _capture / onEvidence）
+    const swSrc = require('node:fs').readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'switch.js'), 'utf8');
+    check('取证旁路已删除（switch 无 _capture / onEvidence）',
+      !/_capture|onEvidence/.test(swSrc.split(String.fromCharCode(10)).filter((l) => !/^\s*(\/\/|\*)/.test(l)).join(String.fromCharCode(10))), '已删除');
   }
 
   console.log('== bodyResetMs/headerRetryMs：ISO 绝对重置时间解析（2026-09-05 修复，Command 实测格式）==');

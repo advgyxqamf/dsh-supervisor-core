@@ -19,7 +19,8 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
-  const { FrpManager } = require(path.join(ROOT, 'src', 'domains', 'relay', 'frpmgr'));
+  //  结构改造：进程托管在 frp.js（原 frpmgr.js）。
+  const { FrpManager } = require(path.join(ROOT, 'src', 'domains', 'relay', 'frp'));
 
   // ── R1：配置健壮性 ──
   console.log('== R1 配置健壮性（loginFailExit）==');

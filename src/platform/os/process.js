@@ -1,5 +1,7 @@
 'use strict';
 
+const { execFile } = require('node:child_process');
+
 // 平台进程控制：组信号 / 树杀 / 存活探测。
 // - POSIX（Linux/macOS）：进程组信号（spawn detached 的组）直接 `kill(-pid)`；
 // - Windows：无进程组语义 → 单进程信号 + `taskkill /T` 整树终止（能力等价）。
@@ -31,7 +33,6 @@ function signalProcess(pid, sig) {
 function killTree(pid, sig, cb) {
   if (!Number.isInteger(pid) || pid <= 0) { if (cb) cb(new Error('invalid pid')); return; }
   if (isWindows) {
-    const { execFile } = require('node:child_process');
     execFile('taskkill', ['/PID', String(pid), '/T'], (err, stdout, stderr) => {
       if (cb) cb(err || null);
     });

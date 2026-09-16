@@ -44,7 +44,9 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
   // ── ① 补丁层写队列：异常后不得毒化 ──
   console.log('== ① 补丁层写队列异常不毒化 ==');
   {
-    const M = require(path.join(ROOT, 'src', 'domains', 'plugin', 'plugins.js'));
+    // 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：原 plugins.js 拆为
+    //   index/ops/jobs/store（pluginmarket.js → market.js），此处改指向域门面。
+    const M = require(path.join(ROOT, 'src', 'domains', 'plugin'));
     const PM = M.PluginManager || M;
     const logs = [];
     const pm = new PM({ logger: { error: (m) => logs.push(String(m)), warn() {}, info() {} }, dist: null, tasks: null });
@@ -81,23 +83,47 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     check('① scrub 首次异常如实上报', s1 && s1.ok === false, JSON.stringify(s1));
     check('① scrub 异常后队列未毒化（第二次仍执行）', s2 && s2.ok === true && scrubInner === 2, String(scrubInner));
 
-    // 反向：两条路径必须共用**同一**队列对象（否则丢更新防线失效）
-    const q = pm._bundleOpQueue;
-    pm._setBundleEnabledInner = () => ({ ok: true });
-    await pm.setBundleEnabled('p4', false, 'native');
-    check('① 反向：两条路径共用同一队列实例（仍串行）', pm._bundleOpQueue !== q, '已续链');
+    // 反向：两条路径必须共用**同一**串行队列（否则丢更新防线失效）。
+    // ⚠ 域改造后补丁层写队列随 layers.js 搬移（SSOT §5.4：补丁层写 + 串行队列 + scrub）；
+    //   原判据读私有字段 pm._bundleOpQueue（形态一变即失效/静默失真）→ 改为**行为判据**：
+    //   让 setBundleEnabled 的内层先挂起，再发起 scrub；若共用同一队列，scrub 内层必须
+    //   等 set 内层结束后才启动 —— 不依赖任何私有字段。
+    {
+      let releaseSet;
+      const gate = new Promise((res) => { releaseSet = res; });
+      const seq = [];
+      pm._setBundleEnabledInner = async () => { seq.push('set:start'); await gate; seq.push('set:end'); return { ok: true }; };
+      pm._scrubPluginLayersInner = async () => { seq.push('scrub:start'); return { ok: true }; };
+      const pSet = pm.setBundleEnabled('p4', false, 'native');
+      const pScrub = pm._scrubPluginLayers('native', 'x', null);
+      await new Promise((res) => setTimeout(res, 20));
+      check('① 反向：后一写不得越过前一写（共用串行队列）',
+        seq.length === 1 && seq[0] === 'set:start', JSON.stringify(seq));
+      releaseSet();
+      await Promise.all([pSet, pScrub]);
+      check('① 反向：两条路径共用同一队列（顺序 set→scrub）',
+        seq.join(',') === 'set:start,set:end,scrub:start', JSON.stringify(seq));
+    }
   }
 
   // ── ② 删除实例与在飞作业互斥 ──
   console.log('== ② removeInstance 与在飞作业互斥 ==');
   {
     const { InstanceManager } = require(path.join(ROOT, 'src', 'domains', 'instance'));
-    const mgr = new InstanceManager({ dir: path.join(TMP, 'sup'), logger: { info() {}, warn() {}, error() {} } });
+    // ⚠ 域改造后 tasks/service 均在**构造期**注入（createOps/createLifecycle 捕获 ctx）——
+    //   后置赋值 mgr.tasks 不再生效，且 removeInstance 经注入的 service 停单元；
+    //   必须注入假 provider，绝不触碰开发机 systemd（迁移硬前置，见 SSOT §5.3）。
+    let busy = true;
+    const fakeService = {
+      daemonReload() { return true; }, stopUnit() { return true; }, resetFailed() { return true; },
+      isUnitActive() { return false; }, transientUnitFile() { return null; }, cleanTransient() {}, startTransient() { return true; },
+    };
+    const mgr = new InstanceManager({
+      dir: path.join(TMP, 'sup'), logger: { info() {}, warn() {}, error() {} },
+      tasks: { isBusy: () => busy }, service: fakeService,
+    });
     mgr.instances = [{ id: 'i1', name: 'x', domain: 'sandbox', port: 0, state: { phase: 'STOPPED' } }];
 
-    // 桩一个「在飞作业」
-    let busy = true;
-    mgr.tasks = { isBusy: () => busy };
     const r1 = mgr.removeInstance('i1');
     check('② 有在飞作业 → 拒绝删除（不静默）', r1 && r1.ok === false && /进行中/.test(r1.error || ''), JSON.stringify(r1));
     check('② 拒绝时**未**改动实例列表（不留半删状态）',
@@ -130,13 +156,13 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     const m2 = new InstanceManager({
       dir: path.join(TMP, 'sup2'),
       logger: { info() {}, warn() {}, error() {} },
+      tasks: { isBusy: () => false },
       service: {
         stopUnit() { throw new Error('CapabilityError: 测试注入（模拟 macOS/Windows 不支持用户单元）'); },
         isUnitActive() { return false; },
       },
     });
     m2.instances = [{ id: 'i9', name: 'x', domain: 'sandbox', port: 0, state: { phase: 'STOPPED' } }];
-    m2.tasks = { isBusy: () => false };
     let threw = null; let out = null;
     try { out = m2.removeInstance('i9'); } catch (e) { threw = e; }
     check('②-b stopUnit 抛能力异常时删除不得崩溃（macOS/Windows 真实情形）',
@@ -147,10 +173,12 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
   // ── ③ 令牌恢复文件权限收口 ──
   console.log('== ③ 令牌恢复文件 mode 收口 ==');
   {
-    const T = require(path.join(ROOT, 'src', 'platform', 'token.js'));
-    const cls = Object.values(T).find((v) => typeof v === 'function' && v.prototype && v.prototype._persistTokenFile);
-    check('③ 定位到 DshTokenService._persistTokenFile', !!cls, cls && cls.name);
-    const svc = new cls({ logger: { warn() {}, info() {} } });
+    // 2026-09-16：令牌持久化已随令牌组件目录化迁至 src/platform/service/token/persist.js
+    //   （原 DshTokenService._persistTokenFile 的内部实现 → appendByRotation）。
+    //   本断言的**意图不变**：写后显式 chmod 收口（mode 只对新建生效）+ 超限轮转而非清空。
+    const T = require(path.join(ROOT, 'src', 'platform', 'service', 'token', 'persist.js'));
+    check('③ 定位到令牌持久化实现 appendByRotation', typeof T.appendByRotation === 'function');
+    const appendByRotation = T.appendByRotation;
     const fp = path.join(TMP, 'token.log');
     // ⚠ 2026-09-13：**POSIX 权限位在 Windows 上不存在**。
     //   Node 的 fs.chmodSync 在 Windows 只能切换**只读位**，statSync().mode 恒为 0666/0444 ——
@@ -165,7 +193,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     fs.writeFileSync(fp, 'old-line\n');
     if (POSIX) fs.chmodSync(fp, 0o644);
     if (POSIX) check('③ 前提：预置文件为 0644', (fs.statSync(fp).mode & 0o777) === 0o644, (fs.statSync(fp).mode & 0o777).toString(8));
-    svc._persistTokenFile('main', fp, 'http://127.0.0.1:3080/?token=ABC');
+    appendByRotation(fp, 'http://127.0.0.1:3080/?token=ABC');
     if (POSIX) check('③ 写入既有 0644 文件后 mode 收口为 0600（旧实现仍 644，世界可读）',
       (fs.statSync(fp).mode & 0o777) === 0o600, (fs.statSync(fp).mode & 0o777).toString(8));
     check('③ 令牌行确实追加（功能未受影响）',
@@ -173,7 +201,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
 
     // 场景 B：新建文件也必须 0600
     const fp2 = path.join(TMP, 'token-new.log');
-    svc._persistTokenFile('main', fp2, 'http://127.0.0.1:3080/?token=NEW');
+    appendByRotation(fp2, 'http://127.0.0.1:3080/?token=NEW');
     if (POSIX) check('③ 新建文件为 0600', (fs.statSync(fp2).mode & 0o777) === 0o600, (fs.statSync(fp2).mode & 0o777).toString(8));
     check('③ 新建文件也写入成功（跨平台功能）', /token=NEW/.test(fs.readFileSync(fp2, 'utf8')), 'ok');
 
@@ -181,15 +209,23 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13-'));
     const fp3 = path.join(TMP, 'token-wide.log');
     fs.writeFileSync(fp3, 'x\n');
     if (POSIX) fs.chmodSync(fp3, 0o666);
-    svc._persistTokenFile('main', fp3, 'http://127.0.0.1:3080/?token=W');
+    appendByRotation(fp3, 'http://127.0.0.1:3080/?token=W');
     if (POSIX) check('③ 0666 也收口为 0600', (fs.statSync(fp3).mode & 0o777) === 0o600, (fs.statSync(fp3).mode & 0o777).toString(8));
     // ③-b：**chmod 确实被调用**（平台无关的结构断言）——
     //   弥补 Windows 上无法做权限断言的缺口：只要「写后显式收口」这一纪律还在，
     //   POSIX 平台就会真正收口；Linux/macOS 的行为断言同时保证它没退化。
     // ⚠ 本文件没有 read() 助手（其余门禁文件才有）——直接用 fs 读，避免 ReferenceError。
-    const tokenSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'token.js'), 'utf8');
+    const tokenSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'token', 'persist.js'), 'utf8');
     check('③-b 持久化后显式 chmodSync 收口（mode 选项只对新建生效）',
       /appendFileSync\([\s\S]{0,500}?chmodSync\(fp,\s*0o600\)/.test(tokenSrc), '有');
+    // ③-c（TK-6 配套）：超限必须**轮转**，不得清空式删除——那是唯一持久链路。
+    // ⚠ 判据必须**去注释**：persist.js 的注释里正记录着"旧实现 rmSync(fp) 清空"这一历史缺陷，
+    //   若连注释一起匹配会把"记录教训"误判成"仍在犯"（本仓已有多次此类假阳性）。
+    const tokenCode = tokenSrc.split(String.fromCharCode(10))
+      .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'))
+      .join(String.fromCharCode(10));
+    check('③-c 超限走轮转（rotate*）而非删除',
+      /rotateByBackup/.test(tokenCode) && !/\brmSync\s*\(/.test(tokenCode), '有');
   }
 
   fs.rmSync(TMP, { recursive: true, force: true });

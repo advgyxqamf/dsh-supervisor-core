@@ -37,6 +37,9 @@ const routerApi = () => ({ switchToKey: async () => ({ ok: true, selected: 'k1' 
 const instances = {
   stopInstance: (id) => ({ ok: true, id: typeof id === 'object' ? id.id : null }),
   list: () => [{ id: 'main', port: 3080, name: '主实例', domain: 'native' }],
+  // DG-11 查询接口（消费方不再直读 .instances.instances）
+  find: (id) => [{ id: 'main', port: 3080, name: '主实例', domain: 'native' }].find((x) => x.id === id),
+  all: () => [],
 };
 const pluginManager = { install: async () => ({ ok: true }) };
 const lan = { list: () => ({ items: [], addresses: [] }) };

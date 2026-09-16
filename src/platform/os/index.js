@@ -1,5 +1,7 @@
 'use strict';
 
+const stateRoot = require('../service/state-root');
+
 // ★★★ 平台抽象层（跨平台产品架构的地基）★★★
 // 原则：平台无关域（supervisor/domains/guard/api）**不得直接触碰平台 API**
 // （systemctl/systemd-run/launchctl/schtasks/notify-send/xdg-open/wmic//proc/netstat/lsof…），
@@ -8,6 +10,7 @@
 //
 // 实现形态（务实，不追求形式统一）：
 //   - 能力矩阵 capabilityProfile/capabilities：纯函数 + 工具探测（可测；非 Provider 对象）；
+//     档位纯数据归 ./capability-profile.js（DF-1 拆分），本门面只留按平台选择的分派；
 //   - 服务管理 service：**Provider 分派**（linux→systemd / darwin→launchd / win32→windows-service /
 //     未知→none），未实现能力抛 CapabilityError（显式失败，不静默）；
 //   - 其余（pidlookup/notify/browser/process/autostart/exec-path/file-protect）：函数内按平台分支，
@@ -19,7 +22,9 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const ex = require('../exec');
+const ex = require('../util/exec');
+// 平台静态能力档位（纯数据；本门面只做分派。CP-3 要求门面显式列出三平台分支）。
+const CAPABILITY_PROFILES = require('./capability-profile');
 
 const PLATFORM = process.platform; // 'linux' | 'darwin' | 'win32'
 const ARCH = process.arch;
@@ -33,7 +38,7 @@ const isWindows = PLATFORM === 'win32';
 // ⚠ P2-2 修复（2026-09-12）：**负结果加 TTL**，不再永久缓存。
 //
 //   缺陷：原先 `_toolCache[name] !== undefined` 即返回（**含 false**，无 TTL、无失效入口）；
-//    而 `domains/instance/index.js` 在**构造期**求值一次
+//    而 `domains/instance/core.js` 在**构造期**求值一次
 //       `this.sandboxSupported = caps.multiInstance === true`
 //     之后不再重算。于是若守卫启动时 PATH 缺 systemd 工具（登录早期/服务环境），
 //     该能力会**永久**停在 false，直到守卫重启 —— 而 `capabilities()` 是 `/env/status`
@@ -69,13 +74,13 @@ function dataDir() {
 }
 
 /** 本产品状态目录（**独立于 DSH**）：XDG 状态根/dsh-supervisor/supervisor。
- *  单一事实源 = platform/state-root.js（覆盖 DSH_SUPERVISOR_HOME）。 */
+ *  单一事实源 = platform/service/state-root.js（覆盖 DSH_SUPERVISOR_HOME）。 */
 function supervisorDir() {
-  return require('../state-root').supervisorDir();
+  return stateRoot.supervisorDir();
 }
 
-/** 平台静态能力档位（纯函数，可测——2026-09 审计修复：capabilities 原硬编码全 true
- *  与实际不符，拆为「静态档位 + 实际工具探测」两层）。
+/** 平台静态能力档位（纯函数，可测）。档位纯数据在 ./capability-profile.js（DF-1 拆分），
+ *  本函数只做「按平台选择档位」的分派（CP-3：门面显式列出三平台分支；未知→unknown）。
  *  工具类字段（multiInstance/desktopNotify/autostart/win processTreeKill）在此返回
  *  平台期望值（工具存在时），capabilities() 用 hasTool 实测覆写（缺失才降 false）。
  *  @param platform 可选（默认 process.platform）
@@ -85,72 +90,10 @@ function capabilityProfile(platform, arch) {
   const pl = platform || PLATFORM;
   const ar = arch || ARCH;
   const base = { platform: pl, arch: ar };
-  if (pl === 'linux') {
-    return Object.assign(base, {
-      multiInstance: true,   // 平台期望：有 systemd-run（capabilities 实测覆写）
-      pidAdoption: true,
-      processTreeKill: true,
-      desktopNotify: true,   // 期望 notify-send（实测覆写）
-      autostart: true,       // 期望 systemctl（实测覆写）
-      frpExpose: true,
-      hostService: 'systemd',
-      // ── 服务链自愈/自启（2026-09-11 跨平台能力完整性审计补齐）──
-      // 此前这些**没有能力字段**，消费者（面板/壳）无从得知；而实现层已存在缺陷
-      // （autostart.js 对未实现平台静默返回 ok:true）。补字段 + 审计测试后，声明与实现绑定。
-      guardAutostart: true,  // systemd --user enable + linger
-      guardSelfHeal: true,   // unit Restart=always
-      shellAutostart: true,  // 原生：XDG autostart .desktop（Exec 按实际安装解析）
-      shellSelfHeal: true,   // 守卫看护（domains/shell/watchdog，三平台一套机制）
-    });
-  }
-  if (pl === 'darwin') {
-    return Object.assign(base, {
-      multiInstance: false, // 沙箱 systemd-run 不可用（Phase 3 迁移 launchd 后置 true）
-      pidAdoption: true,    // lsof
-      processTreeKill: true,
-      desktopNotify: true,  // 期望 osascript（实测覆写）
-      autostart: true,      // launchctl/LaunchAgent 恒在
-      frpExpose: true,
-      hostService: 'launchd',
-      guardAutostart: true,  // LaunchAgent RunAtLoad + KeepAlive
-      guardSelfHeal: true,   // KeepAlive
-      // ✅ 2026-09-11 补齐：独立 LaunchAgent com.dsh.supervisor.gui（RunAtLoad）。
-      //   守卫的 plist（com.dsh.supervisor）仍归**桌面壳**建立，内核只 enable/disable —— 见
-      //   platform/os/autostart.js 文件头的所有权矩阵。
-      shellAutostart: true,
-      shellSelfHeal: true,   // 守卫看护（2026-09-11 新增，此前 macOS 完全没有壳自愈）
-    });
-  }
-  if (pl === 'win32') {
-    return Object.assign(base, {
-      multiInstance: false, // 沙箱 systemd-run 不可用（Phase 3 迁移计划任务/NSSM 后置 true）
-      pidAdoption: true,    // netstat
-      // P1-G 修复（2026-09-12）：该声明此前**没有实现产物** —— `killTree` 虽已导出，
-      //   但停止路径只用 `signalProcess`（Windows 上仅单进程）。
-      //   现已接入 `_killTree`（supervisor 的 SIGKILL 升级路径 + 接管实例路径），
-      //   声明与实现一致。回归：test/process-tree-kill-test.js。
-      processTreeKill: true, // taskkill /PID /T（由 hasTool 覆写；使用点见 main-process._killTree）
-      desktopNotify: true,   // 期望 powershell（实测覆写）
-      autostart: true,       // 期望 schtasks（实测覆写）
-      frpExpose: true,
-      hostService: 'windows-service',
-      guardAutostart: true,  // schtasks DSH-Supervisor（ONLOGON）
-      guardSelfHeal: true,   // schtasks DSH-Supervisor-Watchdog 每 5 分钟
-      shellAutostart: true,  // schtasks DSH-Supervisor-GUI（ONLOGON，由 setAutostart 建立）
-      // ✅ 2026-09-11 修复：watchdog 的壳检查已移出 `if (-not $up)` ——
-      //   旧实现只在「守卫也挂了」时才检查壳，而「壳崩、守卫活」正是唯一需要它的场景。
-      //   前置条件：登录自启已启用（watchdog 任务由 setAutostart 建立），
-      //   与 guardSelfHeal 的同一前提一致。
-      shellSelfHeal: true,
-    });
-  }
-  return Object.assign(base, {
-    multiInstance: false, pidAdoption: false, processTreeKill: false,
-    desktopNotify: false, autostart: false, frpExpose: false,
-    hostService: 'none',
-    guardAutostart: false, guardSelfHeal: false,
-    shellAutostart: false, shellSelfHeal: false,
-  });
+  if (pl === 'linux') return Object.assign(base, CAPABILITY_PROFILES.linux);
+  if (pl === 'darwin') return Object.assign(base, CAPABILITY_PROFILES.darwin);
+  if (pl === 'win32') return Object.assign(base, CAPABILITY_PROFILES.win32);
+  return Object.assign(base, CAPABILITY_PROFILES.unknown);
 }
 
 /** 平台能力矩阵 = 静态档位（capabilityProfile）× 实际工具探测（hasTool 覆写）。
@@ -190,3 +133,4 @@ module.exports = {
   //   desktop      —— 图形会话可用性（守卫看护桌面壳的前置条件；Linux 需真判定，见 desktop.js）
   desktop: require('./desktop'),
   autostart: require('./autostart'),};
+

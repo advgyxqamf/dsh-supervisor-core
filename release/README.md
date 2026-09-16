@@ -80,10 +80,10 @@
 
 | 需求 | 唯一入口 |
 |---|---|
-| 取平台事实（platform/arch/osTag）| `src/platform/matrix.js` 的 `current()` / `osTag()` |
-| 取 npm / 产物标签 | `src/platform/matrix.js` 的 `npmTag()` |
-| 取 FRP 官方产物标签 | `src/platform/matrix.js` 的 `frpTag()` |
-| 判断平台能力（如进程组语义）| `src/platform/matrix.js` 的 `supportsProcessGroup()`，或 `platform/os/index.js` 的 `capabilities()` |
+| 取平台事实（platform/arch/osTag）| `src/platform/contract/matrix.js` 的 `current()` / `osTag()` |
+| 取 npm / 产物标签 | `src/platform/contract/matrix.js` 的 `npmTag()` |
+| 取 FRP 官方产物标签 | `src/platform/contract/matrix.js` 的 `frpTag()` |
+| 判断平台能力（如进程组语义）| `src/platform/contract/matrix.js` 的 `supportsProcessGroup()`，或 `platform/os/index.js` 的 `capabilities()` |
 | 需要平台专属行为 | `src/platform/os/*` 的 Provider（`service` / `desktop` / `pidlookup` …）|
 
 **为什么**（本仓付出过的代价）：os/arch→标签 这一事实曾散落 **5 份**
@@ -104,7 +104,7 @@ if (process.platform !== 'win32') { /* POSIX 进程组 */ }
 正确：
 
 ```js
-const matrix = require('../../platform/matrix');
+const matrix = require('../../platform/contract/matrix');
 const os = matrix.osTag();
 if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 ```
@@ -114,7 +114,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 | 步 | 动作 | 由哪道门禁守 |
 |---|---|---|
 | 1 | 在 `package.json#npmPublish.packages` 声明子包 | `platform-matrix-single-source-test` M-a |
-| 2 | 在 `src/platform/matrix.js` 的 `SUPPORTED` 加入该组合 | 同上 M-a / M-b |
+| 2 | 在 `src/platform/contract/matrix.js` 的 `SUPPORTED` 加入该组合 | 同上 M-a / M-b |
 | 3 | 在 `src/platform/os/*` 补该平台 Provider 分支（`capabilityProfile` 显式档位）| `cross-platform-architecture-gate-test` CP-3 |
 | 4 | 在 `.github/workflows/build.yml` 的 build 矩阵加入 runner | `release-auth-test` R6-a2 |
 
@@ -202,7 +202,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 release/
 ├── README.md                  ← 本文件：唯一端到端 SOP（入口）
 ├── runbooks/                  ← 操作手册（已纳入 git 版本管理）
-│   └── publish-and-verify.md  ← 发布与验收：全流程 + 状态追踪
+│   └── publish-and-verify.md  ← 发布与验收：全流程 + 状态追踪（**runbooks/ 下唯一一份**）
 │       （凭据 runbook 见根目录 CREDENTIALS-STANDARD.md；桌面壳的签名密钥手册与 GUI 验收清单
 │        属壳仓资产，见壳仓 docs/UPDATER-SIGNING-KEY.md、docs/DESKTOP-ACCEPTANCE.md）
 └── scripts/                   ← 发布自动化脚本（唯一可执行集）
@@ -263,7 +263,7 @@ release/
 
 - **内核**：唯一事实源 = 根 `package.json`（`bump.sh --core`；tag `v<内核>` 触发 build.yml）。语义化版本 + 两档预览后缀：`-BETA.n` / `-RC.n` / 无后缀=正式。
 - **壳**：独立于内核。版本在壳仓**三处互锁**（`src-tauri/Cargo.toml` / `tauri.conf.json` / `Cargo.lock`），由壳仓 `scripts/verify-shell-versions.js` 校验、`scripts/bump-shell.sh` 提升。
-- npm dist-tag：`-BETA.n` → `beta`；`-RC.n` → `rc`；正式 → `latest`（publish-core.sh 自动判定）。
+- npm dist-tag（2026-09-16 发布通道契约，`RELEASE-CHANNEL-CONTRACT.md` §4）：`-BETA.n` → `beta`；`-RC.n` → `latest`（正式版占 latest），rc 别名在 publish 之后经 `npm dist-tag add ... rc` 补打；无后缀 → `latest`（publish-core.sh 自动判定）。`rollback` / `canary` 不由脚本设置（人工运维）。
 
 ## 端到端发布 SOP
 
@@ -275,7 +275,7 @@ release/
 bash release/scripts/bump.sh --core 0.1.2-BETA.7
 # 3) 一键编排 dry-run（干净树+CHANGELOG 预检 → 委托 ci-core.sh 全部门禁 → 打印发布计划）
 见 `RELEASE-STANDARD.md`（本地只做 S2–S4，S5 起在 CI）
-# 4) 真发（commit + tag v<ver> + push --tags 触发 mac/win CI；随后本机发 linux 子包）
+# 4) 真发（commit + tag v<ver> + push --tags 触发 CI；四个平台全部由 CI 产出并各自 ci-core.sh --publish）
 CI（tag 触发）
 ```
 
@@ -292,16 +292,17 @@ CI（tag 触发）
 | darwin-arm64 | GitHub CI | @dsh-sup/dsh-core-darwin-arm64 |
 | darwin-x64 | GitHub CI | @dsh-sup/dsh-core-darwin-x64 |
 
-**Linux 不经 GitHub**：本地跑完整门禁后直推 npm。因此 .github/workflows/build.yml
-Linux 的 launcher 构建物**不挂 GitHub Release**（npm 即其分发通道）。
+**四平台全部经 GitHub CI**（2026-09-13 硬标准）：`build` job 的 4 runner 矩阵各自构建并（tag + NPM_TOKEN + need_build 时）`ci-core.sh --publish`；
+**本地无任何平台构建/发布路径**。GitHub Release 附件由单独 `release` job 汇总四平台 artifact 挂载。
 
 > ✅ **2026-09-13 已执行**：`ubuntu-22.04` 已加回 CI build 矩阵，**四平台全部由 CI 产出**
 > （`v0.1.5-BETA.2` 的 tag run 实证：precheck + test + 四平台 build + release 全绿）。
-> 本地 `--all-platforms` 退化为「发布前自证 / 离线兜底」。
+> ⚠ **2026-09-16 更正**：本地 `--all-platforms` **不是**「离线兜底」——`build-launcher.sh` 在
+>   `GITHUB_ACTIONS=true` 之外一律 `exit 2`；本地无任何平台构建路径（同节「本地禁止做什么」）。
 
 避免与 CI 形成同平台二次发布（npm 同版本不可重发）。
 
-CI 产线（.github/workflows/build.yml → release/scripts/ci-core.sh）：mac/win 三平台各自
+CI 产线（.github/workflows/build.yml → release/scripts/ci-core.sh）：四平台各自
 `verify --core → build-ui → npm test → build:launcher → 子包 dry-run`；**tag 触发 + 存有 NPM_TOKEN 时**
 `--publish` 真发并挂 GitHub Release。内核 launcher 为纯 JS（Node ≥18），无需 Rust/系统库。
 
@@ -316,7 +317,7 @@ node scripts/verify-shell-versions.js     # 自洽校验
 git add -A && git commit && git tag v<ver> && git push origin main && git push origin v<ver>
 ```
 
-→ tag 触发壳仓 `launcher-build.yml`：四平台 Tauri bundle（deb/rpm/.dmg/.app/.msi/nsis）
+→ tag 触发壳仓 `.github/workflows/build.yml`：四平台 Tauri bundle（deb/rpm/.dmg/.app/.msi/nsis）
 + npm 壳包（`@dsh-sup/shell-*`）+ `shell-manifest.json`。
 壳仓已**自持**打包工具（`shell-release/`）、CI（`.github/workflows/build.yml`）、
 文档（`docs/`）与版本脚本（`scripts/`），不依赖内核仓。
@@ -341,7 +342,7 @@ git add -A && git commit && git tag v<ver> && git push origin main && git push o
 | GitHub PAT | REST 查状态/建 secret/管部署密钥（不用于 git push） | `advgyxqamf` 账号（内核仓）；壳仓用 `wasi7mglns` PAT |
 | SSH key | `git push`（SSH 443，**repo-local `core.sshCommand`**） | **仓库级部署密钥**（非账号级）：内核仓 `~/.ssh/id_ed25519_advgyxqamf`、壳仓 `~/.ssh/id_ed25519_wasi7` |
 | `GITHUB_TOKEN` | CI 挂 Release 附件 | Actions 自动注入（workflow 声明 contents: write） |
-| NPM token | npm 真发子包（CI 发 mac/win；本机发 linux） | `Automation`，仅 `@dsh-sup` scope |
+| NPM token | npm 真发子包（四平台全部由 CI 真发） | `Automation`，仅 `@dsh-sup` scope |
 
 ### npm 认证解析（唯一顺序，`release/scripts/_npm-auth.sh` 单源实现）
 
@@ -379,4 +380,4 @@ scope 单源声明于 `package.json → npmPublish.scope = "@dsh-sup"`（`dsh-co
   `configure-credentials.sh` 共用）；规范位置 = **真实 home** 的 `~/.npmrc`，详见「凭据与令牌」节。
   发布脚本**绝不**执行 `npm config set`（不改开发机全局 registry、不把 token 明文写入 `~/.npmrc`）。
 - **手册入库**：runbooks 随工程纳入 git 版本管理。
-- **跨平台标准**：发布平台各自独立——mac/win 为 CI 独立 job（fail-fast:false），linux 为本地编排单跑。
+- **跨平台标准**：发布平台各自独立——四平台均为 CI 独立 job（fail-fast:false），本地不参与构建/发布。

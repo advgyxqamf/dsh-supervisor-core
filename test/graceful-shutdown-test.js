@@ -35,19 +35,23 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const sup = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
+// ⚠ 2026-09-16 步骤7：shutdown() 已随关停编排下沉 app/session/shutdown.js，
+//   且导出形态改为「host 首参自由函数」function shutdown(host) {...}。
+//   本组静态断言因此改读**新家**并匹配新签名 —— 断言语义不变（仍锁 G-a/G-b）。
+const shutdownSrc = fs.readFileSync(path.join(ROOT, 'src', 'app', 'session', 'shutdown.js'), 'utf8');
 const bin = fs.readFileSync(path.join(ROOT, 'bin', 'dsh-supervisor'), 'utf8');
 
-const m = sup.match(/shutdown\(\) \{[\s\S]*?\n  \}/);
+const m = shutdownSrc.match(/function shutdown\(host\) \{[\s\S]*?\n\}/);
 check('G-a 定位到 shutdown', !!m, m ? 'ok' : '未找到');
 const body = m ? m[0] : '';
 check('G-a shutdown 返回 Promise（_shutdownPromise）', /_shutdownPromise/.test(body), '有');
 check('G-a 重复调用返回同一 Promise（幂等）',
-  /if \(this\._stopping\) return this\._shutdownPromise/.test(body), '有');
+  /if \(host\._stopping\) return host\._shutdownPromise/.test(body), '有');
 check('G-b 内部 await stopAll（不再 fire-and-forget）',
-  /await this\.lifecycleManager\.stopAll\(/.test(body), '有');
+  /await host\.lifecycleManager\.stopAll\(/.test(body), '有');
 // 反向：确认没有未 await 的 stopAll 调用
 check('G-b 无未 await 的 stopAll',
-  !/[^t] this\.lifecycleManager\.stopAll\(/.test(body.replace(/await this\.lifecycleManager\.stopAll\(/g, '')), '已改');
+  !/[^t] host\.lifecycleManager\.stopAll\(/.test(body.replace(/await host\.lifecycleManager\.stopAll\(/g, '')), '已改');
 
 // ── G-d：调用方不得同步 exit ──
 {
@@ -93,9 +97,10 @@ check('G-e SIGTERM/SIGINT 均走 gracefulExit',
 // ── 行为级：shutdown 的幂等与可 await ──
 //   用最小 harness：只验「返回 Promise 且重复调用同一实例」，不触真实模块。
 {
-  const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor.js'));
-  const proto = Supervisor.prototype;
-  const fake = Object.create(proto);
+  // AP1（批 8/10）：shutdown 不再挂 Supervisor.prototype（原型挂载已消除）——
+  //   直接 require 其家园模块，以 host 首参形态调用（新装配下的真实调用形态）。
+  const { shutdown } = require(path.join(ROOT, 'src', 'app', 'session', 'shutdown.js'));
+  const fake = {};
   fake._stopping = false;
   fake._shutdownPromise = null;
   fake.lifecycle = { beginShutdown() {} };
@@ -108,8 +113,8 @@ check('G-e SIGTERM/SIGINT 均走 gracefulExit',
     stopAll: async () => { stopCalls++; await new Promise((r) => setTimeout(r, 5)); },
   };
   fake._routerDaemonActive = () => false;
-  const p1 = proto.shutdown.call(fake);
-  const p2 = proto.shutdown.call(fake);
+  const p1 = shutdown(fake);
+  const p2 = shutdown(fake);
   check('G-a 行为：shutdown 返回 thenable', p1 && typeof p1.then === 'function', typeof p1);
   check('G-c 行为：重复调用返回同一 Promise', p1 === p2, p1 === p2 ? '同一实例' : '不同');
   p1.then(() => {

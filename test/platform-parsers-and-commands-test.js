@@ -38,7 +38,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const ROOT = path.join(__dirname, '..');
-const pid = require(path.join(ROOT, 'src', 'platform', 'os', 'pidlookup.js'));
+const pid = require(path.join(ROOT, 'src', 'platform', 'os', 'pidlookup'));
 const notify = require(path.join(ROOT, 'src', 'platform', 'os', 'notify.js'));
 
 const results = [];

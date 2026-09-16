@@ -10,7 +10,7 @@
 //
 // 而壳无法监督自己 —— 它的监督者会随它一起死。
 // 守卫是抗重启的那个（systemd Restart=always / launchd KeepAlive / schtasks Watchdog），
-// 且**已在读取** `~/.dsh/shell/identity.json`、**已实现** `restartShell()`。
+// 且**已在读取** `<产品状态根>/shell/identity.json`、**已实现** `restartShell()`。
 // 故由守卫承担壳看护，且**三平台一套机制**、无需新增服务定义。
 //
 // ## 修复的历史缺口
@@ -31,63 +31,9 @@
 // 6. **决策是纯函数**（`decide()`）：可脱离进程/时钟/文件系统单测。
 // ═══════════════════════════════════════════════════════════════════════════
 
-const DEFAULTS = {
-  enabled: true,
-  intervalMs: 20000,        // 检查周期
-  graceMs: 90000,           // 壳缺失多久才动作（避让自更新/自重启空窗）
-  updateGraceMs: 300000,    // 壳正处于更新/重启预期态时的宽限（5 分钟）
-  maxRestarts: 5,           // 窗口内拉起次数上限
-  windowMs: 1800000,        // 30 分钟窗口
-  // P2 修复：identity.phase 的**时效上限**——超过这个时长未更新，视为陈旧（壳已崩），
-  //  不再当作「预期缺席」，让看护按正常宽限期介入。取值需 > 正常更新耗时（含下载+校验+重启）。
-  phaseMaxAgeMs: 600000,    // 10 分钟
-  procPattern: 'dsh-supervisor-gui',
-};
-
-/** 判定一个进程是否**桌面壳主程序**（而非本仓的无头自检进程）。 */
-function isShellProcess(proc) {
-  const c = String((proc && proc.cmdline) || '');
-  // 无头自检入口会同时匹配进程名，必须排除 —— 否则看护会把自检当成壳。
-  if (/--shell-update-plan|--core-plan|--node-plan|--mirror-plan|--env-plan|--service-plan/.test(c)) return false;
-  return /dsh-supervisor-gui(\.exe)?/.test(c);
-}
-
-/**
- * 纯决策函数（不碰进程/时钟/文件系统 —— 便于穷举单测）。
- *
- * @param {object} i
- *   - alive            壳进程数（>0 视为存活）
- *   - absentForMs      已连续缺失多久（alive=false 时有效；null = 首次发现缺失）
- *   - expectedAbsence  壳是否处于「预期缺席」（自更新/重启中/更新待确认）
- *   - sessionAvailable 当前是否有图形会话
- *   - restartsInWindow 窗口内已拉起次数
- *   - hasExe           能否定位壳可执行文件
- *   - config           { graceMs, updateGraceMs, maxRestarts }
- * @returns {{action:'alive'|'record'|'wait'|'skip'|'restart', reason:string, needMs?:number}}
- */
-function decide(i) {
-  const c = i.config || {};
-  if (i.alive > 0) return { action: 'alive', reason: '壳在运行' };
-  if (i.absentForMs === null || i.absentForMs === undefined) {
-    return { action: 'record', reason: '首次观察到壳缺失，开始计时' };
-  }
-  const needMs = i.expectedAbsence
-    ? (c.updateGraceMs || DEFAULTS.updateGraceMs)
-    : (c.graceMs || DEFAULTS.graceMs);
-  if (i.absentForMs < needMs) {
-    return { action: 'wait', reason: i.expectedAbsence ? '壳处于预期缺席（更新/重启）' : '未达宽限期', needMs };
-  }
-  if (!i.sessionAvailable) {
-    return { action: 'skip', reason: '无图形会话（注销/纯终端），拉起 GUI 必失败' };
-  }
-  if ((i.restartsInWindow || 0) >= (c.maxRestarts || DEFAULTS.maxRestarts)) {
-    return { action: 'skip', reason: '窗口内拉起次数已达上限，停止重试（防风暴）' };
-  }
-  if (!i.hasExe) {
-    return { action: 'skip', reason: '无法定位壳可执行文件（identity.json 未记录 exe）' };
-  }
-  return { action: 'restart', reason: '壳缺失且已过宽限期', needMs };
-}
+// 纯决策（DEFAULTS / decide / isShellProcess / isUpdatePhase）下沉 core.js —— 本文件只保留
+//   **有状态看护**（B12/B13/B14 共享同一组模块状态字段，切出去等于经 ctor 传 8 字段 = 文件搬家）。
+const { DEFAULTS, decide, isShellProcess, isUpdatePhase } = require('./core');
 
 /**
  * 创建壳看护实例。
@@ -151,7 +97,7 @@ function createShellWatchdog(deps) {
   function updatePhaseTracking(t) {
     let phase = "";
     try { const id = shell.identity(); phase = String((id && id.phase) || ""); } catch {}
-    const inUpdate = (phase === "restarting" || phase.indexOf("shell-update") === 0);
+    const inUpdate = isUpdatePhase(phase);
     if (!inUpdate) { expectedSince = null; phaseStale = false; return; }
     if (expectedSince === null) expectedSince = t;
     const maxAge = config.shellWatchdogPhaseMaxAgeMs || DEFAULTS.phaseMaxAgeMs;
@@ -179,7 +125,7 @@ function createShellWatchdog(deps) {
   function expectedAbsence() {
     let phase = '';
     try { const id = shell.identity(); phase = String((id && id.phase) || ''); } catch {}
-    const inUpdate = (phase === "restarting" || phase.indexOf("shell-update") === 0);
+    const inUpdate = isUpdatePhase(phase);
     if (inUpdate && !phaseStale) return true;
     try {
       const j = shell.readJournal && shell.readJournal();
@@ -279,4 +225,4 @@ function createShellWatchdog(deps) {
   return { tick, status, _reset, intervalMs: config.shellWatchdogIntervalMs || DEFAULTS.intervalMs };
 }
 
-module.exports = { createShellWatchdog, decide, isShellProcess, DEFAULTS };
+module.exports = { createShellWatchdog };

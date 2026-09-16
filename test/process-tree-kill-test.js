@@ -33,8 +33,21 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const processSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'os', 'process.js'), 'utf8');
-const mainProc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'supervisor', 'main-process.js'), 'utf8');
-const osIndex = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'os', 'index.js'), 'utf8');
+// ⚠ 2026-09-16 步骤7：main-process.js 拆为 app/main/{process,signals}.js；
+//   判据须读**两者**（进程机制 + 信号序列），否则拆分即静默失去覆盖面。
+const mainProc = ['process.js', 'signals.js']
+  .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'app', 'main', f), 'utf8'))
+  .join(String.fromCharCode(10));
+// 2026-09-16（§4.5 测试指针同步）：os/index.js 已缩为平台分派门面，
+//   能力档位纯数据下沉到 os/capability-profile.js —— 聚合整个 os/ 目录，覆盖面不缩小。
+const _osDir = path.join(ROOT, 'src', 'platform', 'os');
+const osIndex = (function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).map((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return walk(p);
+    return e.name.endsWith('.js') ? fs.readFileSync(p, 'utf8') : '';
+  }).join(String.fromCharCode(10));
+})(_osDir);
 
 const pc = require(path.join(ROOT, 'src', 'platform', 'os', 'process.js'));
 

@@ -18,7 +18,7 @@
 ## 1. 分层（`src/`）
 
 ```
-root        src/supervisor.js（组装根）、src/core.cjs（打包入口）
+root        src/supervisor.js（组装根；build-launcher.sh 经 esbuild 打成 core.cjs）
   ^
 api         HTTP/WS 契约面
   ^
@@ -181,13 +181,45 @@ bash release/scripts/ci-core.sh   # CI 等价预演（本仓自包含，无需�
 > 血泪案例（务必读）：`INCIDENT-2026-09-13-credential-overwrite.md` ——
 > 我用「破坏隔离」去证明门禁有效，而那道隔离保护的正是不可逆操作，结果覆盖了真令牌。
 
+### 5.3 运行时禁区（**源码开发绝不触碰系统安装版**）
+
+> 血泪案例（2026-09-16）：清理临时文件时执行 `rm -rf /tmp/dsh-*`，而 **DSH 自身正在用
+> `/tmp/dsh-subprocess-<随机>/` 存放子进程输出** —— 目录被删后 DSH 写日志 `ENOENT` **崩溃退出（code=1）**，
+> 由守卫 6 分钟后才重新拉起。**源码开发绝不应该影响系统正在运行的 DSH 与已安装的 supervisor。**
+
+#### 铁律 R-1：开发只作用于工作区
+
+| 允许 | 禁止 |
+|---|---|
+| 读写**本仓工作区**（当前工作目录）内文件 | 改/删 `~/.local/state/dsh-supervisor/`（系统的状态根） |
+| 跑本仓测试（`npm test`，自带隔离 tmp） | 停/启/改 `dsh-supervisor.service`（系统已安装的服务） |
+| 读系统状态用于**诊断**（只读） | 覆盖 `/usr/bin/dsh-supervisor-gui`、`~/.npm-global/lib/node_modules/@dsh-sup/*` |
+| 操作 `/tmp` 下**自己创建的具名路径** | 触碰 `~/.dsh`（DSH 自身的数据目录） |
+
+#### 铁律 R-2：`/tmp` 清理必须**逐路径具名**，禁止通配符
+
+DSH 与 AI 运行时**都在** `/tmp` 用 `dsh-*` / `dsh-spill-*` / `dsh-subprocess-*` 作为**活动目录**。
+一个 `/tmp/dsh-*` 通配符会**同时命中**它们 → 直接打崩正在运行的进程。
+
+- **禁止**：`rm -rf /tmp/dsh-*`、`/tmp/tmp.*`、`/tmp/*.log` 之类**通配/前缀**删除；
+- **必须**：只删**自己明确创建、且知道其全名**的具体路径；
+- **删除前先核对**：执行 `ls -d <pattern>` 看清匹配到谁，再决定；
+- 测试临时物一律经 `mkdtemp`（或经 `test/_preload.js` 注入的隔离 `DSH_SUPERVISOR_HOME`）创建**自己的前缀**，**自带清理**，不依赖外部扫 `/tmp`。
+
+#### 铁律 R-3：发现「好像动了系统」时，先取证再行动
+
+只读取证优先：`systemctl --user show dsh-supervisor.service -p NRestarts -p ActiveEnterTimestamp`、
+系统状态根下的 `events/*.log` / `log/dsh.log`。**不得**用「重启服务」作为排查手段。
+
+> 门禁：`test/dev-runtime-safety-gate-test.js` 扫描仓内脚本/文档，禁止出现对系统路径的破坏性命令与 `/tmp` 通配删除。
+
 ## 6. 提交规范
 
 - 中文 commit message；
 - 说明**缺陷 -> 修法 -> 验证**；注入验证要列出「注入什么 -> 哪条 FAIL」；
 - 修缺陷的提交必须包含**回归锚点**（防同一形态再犯）；
 - 两仓（内核/壳）**不得共享代码**，只经文件契约：`registry.json` / `identity.json` /
-  `update-guard.json` / `update-journal.json`。契约**新增**须向后兼容；
+  / `update-journal.json`。契约**新增**须向后兼容；
   **删除/语义变更**须**内核先行**，保留一个发布周期的跨版本容忍。
 ---
 
@@ -285,3 +317,66 @@ git switch master && git pull --ff-only
 | enforce_admins | `true` |
 | required_conversation_resolution | `true` |
 | allow_force_pushes / allow_deletions | `false` |
+
+---
+
+## 8. 域内结构归一化（2026-09-17 起 · **执行中**）
+
+> 跨层问题（上一轮步骤 1–10）已收口；本轮解决**域内部高耦合**（巨型文件 / 隐式 `this` / 原型 mixin / 职责错位）。
+
+### 8.1 规则来源（三份，不可互相替代）
+
+| 文件 | 角色 |
+|---|---|
+| `DOMAIN-STRUCTURE-DESIGN.md` | **域内结构唯一权威（SSOT）**：DF-1..DF-7 + R1..R12 + 五域/app 逐文件目标结构 + DG-1..DG-14 + §8 须同步改的门禁 |
+| `EXECUTION-CONTRACT.md` | **并行施工接口冻结书**：判据 + 硬约束 + 冻结的内部导出面/依赖 + 迁移纪律（所有执行子代理逐条遵守） |
+| `design-notes/*.md` | 逐域详细设计（router / relay / instance / plugin / shell / app / gates） |
+
+### 8.2 判据（取严值，与 DS-9 一致）
+
+| 编号 | 判据 | 阈值 |
+|---|---|---|
+| DF-1 | 门面 `index.js` 只做组合与导出 | **≤150 行** |
+| DF-2 | 任何单文件 | **≤400 行** |
+| DF-3 | 纯计算与副作用（IO/定时/进程）不混同一文件 | — |
+| DF-4 | 零隐式 `this` 跨文件 | **0 处** |
+| DF-5 | 域内依赖图无环（且禁方法集合并到同一 this） | 0 环 |
+| DF-6 | 非门面文件可独立 `require` 可测 | — |
+| DF-7 | 依赖单向：`index → ops/scheduler → core/policies → model/store` | — |
+
+### 8.3 施工方式
+
+- **主代理 + 12+ 子代理并行**；子代理**文件归属互斥**，须完整转达执行契约，**验证自己做**（不外包）。
+- **批 0–10**（先立门禁后重构；每批：`node --check` → `require` 加载 → 跑相关测试 → 再提交）：
+
+| 批 | 内容 |
+|---|---|
+| 0 | 立 `test/domain-structure-gate-test.js`（report-only，记录 RED 基线） |
+| 1 | shell（最接近达标，验证方法论） |
+| 2 | plugin（破环示范：model/cli/jobs 三层断链） |
+| 3 | instance（先改 `instance-upgrade-test` 的 owner 补丁） |
+| 4 | relay（入口错位修正） |
+| 5 | router-ops / router-forward（先纯后 IO） |
+| 6 | router-facade（门面纯化 + 写权闸单源） |
+| 7 | router-providers（最大文件） |
+| 8 | app 级 1（停跨文件挂原型 + 兼容门面） |
+| 9 | app 级 2（按切面 ctor 注入） |
+| 10 | 门禁转硬失败 + 删除兼容门面 |
+
+- **行为变更步**（如 router `inflight.end()` 统一）**必须独立提交**，不与纯结构步混。
+
+### 8.4 迁移时同步维护的登记（文档/门禁）
+
+| 项 | 要求 |
+|---|---|
+| `DIRECTORY-STRUCTURE-DESIGN.md` DS-9 | 已取严为 **门面 ≤150 / 单文件 ≤400**（R3/R11），与 DF-1/DF-2 逐字一致 |
+| `DIRECTORY-STRUCTURE-DESIGN.md` DS-G3 | 除 `Object.defineProperties` 外，**同时禁 `Object.assign(X.prototype, ...)`**（R6；右值不限、须先剥注释） |
+| README 文档索引 | 根级 md **全部登记**（`standards-uniqueness-test` U-4）；`EXECUTION-CONTRACT.md` 已登记 |
+| `CROSS_LAYER`（`layering-and-dependency-gate-test.js`）| 域改造**只在同层内搬文件**，理论不新增跨层边；确因新边（如 `app/domain-actions/*` → 域）报 L-2 失败时**按实跑报错补登记**，**不得放宽判据**、不得凭猜测预登记 |
+| 源内容钉死的门禁 | SSOT §8 列出的 10 处随方法与家园同步改指向（否则静默失效） |
+
+### 8.5 本轮验证门禁
+
+`standards-uniqueness`、`test-chain-completeness`、`layering-and-dependency-gate`、
+`directory-structure-gate`、`no-dev-path`、`no-cross-repo`；
+以及每域相关测试（改哪域跑哪域）。

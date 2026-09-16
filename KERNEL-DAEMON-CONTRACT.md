@@ -4,7 +4,7 @@
 > 壳侧对应规范见壳仓 `docs/KERNEL-LAUNCH-STANDARD.md`（壳如何把内核拉起来）。
 > 两文件互锁：内核不满足其中任何一条，壳的启动即失败并如实报 stage。
 >
-> 适用四平台：linux-x64 / darwin-arm64 / darwin-x64 / win-x64（见 `src/platform/matrix.js` SUPPORTED）。
+> 适用四平台：linux-x64 / darwin-arm64 / darwin-x64 / win-x64（见 `src/platform/contract/matrix.js` SUPPORTED）。
 
 ---
 

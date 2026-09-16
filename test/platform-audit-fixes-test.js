@@ -41,7 +41,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 // ── H-a：loghub 的 _log ──
 {
-  const src = read('src/platform/loghub.js');
+  const src = read('src/platform/service/log/hub.js');
   check('H-a EventHub 定义了 _log 方法', /\n  _log\(level, msg\) \{/.test(src), '有');
   // ⚠ 剥离注释行再统计 —— 说明文字里会引用 `this._log('warn', …)`（我第一版就数成 5）。
   const codeOnly = src.split(String.fromCharCode(10))
@@ -50,7 +50,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   const calls = (codeOnly.match(/this\._log\(/g) || []).length;
   check('H-a 4 处调用仍在（仅补定义，未删调用）', calls === 4, calls + ' 处');
   // 行为级：pushGuard 写盘失败时不得抛异常，且告警到达 logger
-  const { EventHub } = require(path.join(ROOT, 'src', 'platform', 'loghub.js'));
+  const { EventHub } = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'hub.js'));
   const os = require('node:os');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubh-'));
   const warned = [];
@@ -69,7 +69,10 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 // ── H-b：readCmdline 回退可达 ──
 {
-  const src = read('src/platform/os/pidlookup.js');
+  // ⚠ 2026-09-17 域结构改造：pidlookup 拆为目录 —— 按目录聚合读取（H-b 覆盖面不变）。
+  const PID_DIR = path.join(ROOT, 'src', 'platform', 'os', 'pidlookup');
+  const src = fs.readdirSync(PID_DIR).filter((f) => f.endsWith('.js')).sort()
+    .map((f) => fs.readFileSync(path.join(PID_DIR, f), 'utf8')).join(String.fromCharCode(10));
   const i = src.indexOf('if (isWindows) {');
   const seg = src.slice(i, i + 1600);
   check('H-b wmic 解析不中时不再直接 return null',
@@ -112,7 +115,12 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   const osIdx = read('src/platform/os/index.js');
   check('H-d hasTool 负结果有 TTL（_NEG_TTL_MS）', /_NEG_TTL_MS/.test(osIdx), '有');
   check('H-d 正结果仍永久缓存（工具装好不会自己消失）', /if \(hit === true\) return true/.test(osIdx), '有');
-  const inst = read('src/domains/instance/index.js');
+  // ⚠ 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：instance 域已拆为
+  //   core/ops/upgrade + index 门面（getter 留在 core.js 的 class 内）。本组断言的对象
+  //   是「域」的 sandboxSupported 纪律，故按域聚合读取，判据不搬走。
+  const inst = fs.readdirSync(path.join(ROOT, 'src', 'domains', 'instance')).filter((f) => f.endsWith('.js')).sort()
+    .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', f), 'utf8'))
+    .join(String.fromCharCode(10));
   check('H-d sandboxSupported 是实时 getter', /get sandboxSupported\(\)/.test(inst), '有');
   check('H-d 不再是构造期冻结字段',
     !/this\.sandboxSupported = /.test(inst.replace(/\/\/.*/g, '')), '已改');
@@ -122,7 +130,8 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 // ── H-e：.desktop 的 % 转义 ──
 {
-  const src = read('src/platform/os/autostart.js');
+  // ⚠ 2026-09-17 域结构改造：execQuote 落 autostart/linux.js（Linux XDG 自启）。
+  const src = read('src/platform/os/autostart/linux.js');
   const i = src.indexOf('const execQuote');
   const j = src.indexOf(";", src.indexOf("+ '\"'", i));
   check('H-e execQuote 应用了 %% 转义', src.slice(i, j).includes("replace(/%/g, '%%')"), '有');

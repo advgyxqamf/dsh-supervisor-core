@@ -24,16 +24,18 @@
 //        未登记的新跨层依赖 → 失败（要求开发者显式声明意图）
 //
 //   L-2 而不是"禁止一切逆向依赖"，是因为本仓存在**刻意的**跨层共享：
-//     · `domains → api/identity`：relay 复用回环/RFC1918 判定，**不得重写第二份**
-//       （由 test/relay-source-gate-test.js S-a 主动要求）。
+//     · `domains → shared/ip`（原 `domains → api/identity`）：relay 复用回环/RFC1918 判定，
+//       **不得重写第二份**（由 test/relay-source-gate-test.js S-a 主动要求）；
+//       步骤 1/2 拆分后该反向边已归零，现为 domains→shared 的合法依赖。
 //     · `domains → guard/lifecycle/ports`（9 处）：ports.js 自称"**系统级**统一端口管理"，
 //       instance/router/relay 都靠它登记端口。这是**有意的共享基础设施**。
-//     · `guard → domains/dist`：native 卸载要读镜像契约。
+//     · `root → platform/distribution`：组装根实例化分发能力（步骤3 后 DistributionManager
+//       已从 domains/dist 上移 platform/distribution，guard→domains 反向边随之消失）。
 //     · `api → platform`、`root → 全部`：正常向下组装。
 //     把这些写成"禁止"，门禁会在第一次运行就红，然后被人加白名单绕过 —— 那就成了摆设。
 //     **登记 + 理由 + 变更可见**才是能长期活下去的形态。
 //
-//   L-3  `src/platform/deploy.js` 对 `../core.cjs` 的引用是**有意的 best-effort**
+//   L-3  `src/platform/contract/deploy.js` 对 `../core.cjs` 的引用是**有意的 best-effort**
 //        （打包产物存在时才启用，见该文件注释），单列白名单并注明。
 //
 // ## 怎么加新的跨层依赖（**开发轨道**）
@@ -63,81 +65,83 @@ const check = (n, c, x) => {
  *  ⚠ 新增条目必须写理由；门禁会检查"登记了的确实被引用"。 */
 const CROSS_LAYER = {
   'api -> platform': {
-    'src/platform/loghub': 'api 记录生命周期事件到统一日志中枢',
-    'src/platform/os': 'api 读平台能力/数据目录',
+    'src/platform/os': '平台抽象层（能力/执行/路径）',
+    'src/platform/security': '请求身份判定（HTTP 层）',
+    'src/platform/service': '平台服务（配置/状态根/任务/环境目录/监控/日志/端口/令牌）',
   },
-  'domains -> api': {
-    'src/api/identity': 'relay 复用回环/RFC1918 判定 —— 不得重写第二份（relay-source-gate S-a 要求）',
+  'api -> shared': {
+    'src/shared/ip': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
   },
-  'domains -> guard': {
-    'src/guard/lifecycle': 'ports.js 是"系统级统一端口管理"，instance/router/relay 都靠它登记端口',
-    'src/guard/monitor': '实例/relay 探活复用同一监督探针',
-    'src/guard/guardian': '实例守卫（超时/重启）由 domains 触发',
+  'app -> platform': {
+    'src/platform/contract': '外部既定事实（矩阵/部署形态/镜像契约/运行期契约）',
+    // ⚠ 步骤 7（2026-09-16）：DistributionManager 由 app/assembly/compose.js 实例化
+    //   （原 domains/dist 上移 platform/distribution）——补登记，否则登记表与实际图脱节。
+    'src/platform/distribution': '包发布/安装/更新通用能力（DistributionManager，装配期实例化）',
+    'src/platform/os': '平台抽象层（能力/执行/路径）',
+    'src/platform/service': '平台服务（配置/状态根/任务/环境目录/监控/日志/端口/令牌）',
+    'src/platform/util': '无状态纯工具（执行器/文件工具/路径解析/端口探测）',
+  },
+  // ⚠ 步骤 7（2026-09-16）：构造期装配随 supervisor.js#constructor 下沉到 app/assembly/compose.js
+  //   ——它是「唯一知道全局对象图的地方」，实例化各业务域。§2.2 依赖矩阵明示 app→domains = ✓，
+  //   故这是**合法**的装配边，补登记即可（不是放宽判据）。
+  'app -> domains': {
+    'src/domains/router': '装配期实例化智能路由域（RouterService）',
+    'src/domains/relay': '装配期实例化远程控制域（LanManager）',
+    'src/domains/instance': '装配期实例化沙箱实例域（InstanceManager）',
+    'src/domains/plugin': '装配期实例化插件域（PluginManager/PluginMarket）',
+    'src/domains/shell': '装配期实例化桌面壳协同域（shellDomain/createShellWatchdog）',
+  },
+  'app -> shared': {
+    'src/shared/guardian': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
+    'src/shared/version': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
   },
   'domains -> platform': {
-    'src/platform/os': '平台抽象层（能力/执行/路径）—— 正常向下依赖',
-    'src/platform/matrix': '平台标签矩阵（跨平台架构规范唯一事实源）',
-    'src/platform/config': '读统一配置（数据目录/端口段等）',
-    'src/platform/fs-utils': '文件工具（原子写/目录准备）',
-    'src/platform/logcore': '日志核心（结构化事件写入）',
-    'src/platform/registry-contract': '镜像目录契约（domains/dist 消费）',
-    'src/platform/runtime-contract': '运行期启动契约（domains/dist 消费壳投放的 npm/PATH）',
-    'src/platform/state-root': '产品状态根（domains 的 supervisor|shell 路径单一事实源）',
-    'src/platform/tasks': '任务注册表（异步任务可观测）',
+    'src/platform/contract': '外部既定事实（矩阵/部署形态/镜像契约/运行期契约）',
+    'src/platform/ctl': 'daemon 控制通道 dispatcher（通用基础设施）',
+    'src/platform/distribution': '包发布/安装/更新通用能力（DistributionManager）',
+    'src/platform/os': '平台抽象层（能力/执行/路径）',
+    'src/platform/service': '平台服务（配置/状态根/任务/环境目录/监控/日志/端口/令牌）',
+    'src/platform/util': '无状态纯工具（执行器/文件工具/路径解析/端口探测）',
   },
-  'guard -> domains': {
-    'src/domains/dist': 'native 卸载需读镜像契约（domains/dist 是契约持有者）',
+  'domains -> shared': {
+    'src/shared/guardian': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
+    'src/shared/ip': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
+    'src/shared/version': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
   },
-  'guard -> platform': {
-    'src/platform/os': '平台抽象层 —— 正常向下依赖',
-    'src/platform/matrix': '平台标签矩阵（跨平台架构规范唯一事实源）',
-    'src/platform/config': '读统一配置（数据目录/端口段等）',
-    'src/platform/deploy': '部署形态判定（打包/源码）',
-    'src/platform/env-catalog': '环境目录目录（设置面展示）',
-    'src/platform/exec': '有界执行器（统一超时/输出上限）',
-    'src/platform/log': '日志（组件级 logger）',
-    'src/platform/loghub': '统一日志中枢（跨组件日志汇聚）',
-    'src/platform/srcpath': '源码路径解析（控制面展示）',
-    'src/platform/state-root': '产品状态根（guard 的 ports 等路径单一事实源）',
-    'src/platform/version': '版本自报（内核/契约版本）',
+  'platform -> shared': {
+    'src/shared/ip': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
+    'src/shared/version': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
   },
-  // 注：曾以为 platform/deploy.js 会 require('../core.cjs') —— 实测那 4 处**全在注释里**
-  //   （产品形态说明），无真实 import。故此处**不留条目**（留了就是死条目，由 L-2b 抓出）。
-  'root -> api': { 'src/api/index': '组装根挂载 API 面' },
+  'root -> api': {
+    'src/api/index': '跨层依赖 —— 见 DIRECTORY-STRUCTURE-DESIGN',
+  },
+  // ⚠ AP1（批 8/10，2026-09-17）收口后的 root 实际出边：src/supervisor.js 是**真薄壳**，
+  //   编排层各切面由 app/assembly/facets.js 装配到实例（root 不再逐个 require 各子目录）。
+  //   旧条目（session/state/self/control/main/daemons/ctl/facade/domain-actions/audit）随
+  //   批量挂原型一并失效 —— 不删即 L-2b 死条目（登记表与实际图必须一致）。
+  //   现存 root→app：① assembly（组装/装配入口）；② settings（root 兼容门面注入域配置键声明）。
+  'root -> app': {
+    'src/app/assembly': '薄壳调 app/assembly/compose 组装、assembly/facets 切面装配到实例',
+    'src/app/settings': 'root 兼容门面 normalize 注入业务域配置键声明（app/settings/domain-config）',
+  },
   'root -> domains': {
-    'src/domains/router': '组装根实例化各业务域',
-    'src/domains/relay': '组装根实例化各业务域（relay：远程控制/FRP）',
-    'src/domains/instance': '组装根实例化各业务域（instance：实例生命周期）',
-    'src/domains/plugin': '组装根实例化各业务域（plugin：插件管理）',
-    'src/domains/dist': '组装根实例化各业务域（dist：发布/镜像/自更新）',
-    'src/domains/shell': '组装根实例化各业务域（shell：桌面壳协同/看护）',
-  },
-  'root -> guard': {
-    'src/guard/lifecycle': '组装根装配守护各子系统',
-    'src/guard/supervisor': '组装根装配守护各子系统（supervisor：总控视图）',
-    'src/guard/monitor': '组装根装配守护各子系统（monitor：探活）',
-    'src/guard/health': '组装根装配守护各子系统（health：健康快照）',
-    'src/guard/host-service': '组装根装配守护各子系统（host-service：宿主常驻）',
-    'src/guard/intent': '组装根装配守护各子系统（intent：意图/期望态）',
-    'src/guard/native': '组装根装配守护各子系统（native：原生安装/卸载）',
-    'src/guard/proc': '组装根装配守护各子系统（proc：进程/daemon 生命周期）',
-    'src/guard/guardian': '组装根装配守护各子系统（guardian：实例守卫）',
+    // 仅 get lan()（非 daemon 模式惰性创建 LanManager）——沙箱实例/插件/路由域
+    // 现由 app/assembly/compose.js 实例化，不再从薄壳直接 require。
+    'src/domains/relay': '薄壳 get lan() 惰性实例化远程控制域（LanManager）',
   },
   'root -> platform': {
-    'src/platform/os': '组装根读平台事实（数据目录/能力矩阵）',
-    'src/platform/matrix': '平台标签矩阵（跨平台架构规范唯一事实源）',
-    'src/platform/config': '配置（日志/端口/数据目录等统一配置）',
-    'src/platform/logcore': '日志核心（结构化事件写入）',
-    'src/platform/tasks': '任务注册表（异步任务可观测）',
-    'src/platform/token': '令牌服务（会话凭据采集与恢复）',
-    'src/platform/version': '版本自报（内核/契约版本）',
+    // startApi() 的端口登记（supervisor-api 就绪判据）——唯一留下的 root→platform 边。
+    'src/platform/service': '薄壳 startApi() 登记/释放 supervisor-api 端口（就绪判据）',
   },
 };
 
 function layerOf(rel) {
+  // ⚠ 2026-09-16 结构设计（DIRECTORY-STRUCTURE-DESIGN §2）：新增 shared 层
+  //   （纯函数：version/ip/guardian）——出度恒为 0，与 platform 并列 L0。
+  if (rel.startsWith('src/shared/')) return 'shared';
   if (rel.startsWith('src/platform/')) return 'platform';
   if (rel.startsWith('src/domains/')) return 'domains';
-  if (rel.startsWith('src/guard/')) return 'guard';
+  if (rel.startsWith('src/app/')) return 'app';  // 2026-09-16 步骤6：guard/ 重组为 app/（编排层）
   if (rel.startsWith('src/api/')) return 'api';
   if (rel.startsWith('src/')) return 'root';
   return null;
@@ -188,8 +192,12 @@ const edges = collect();
 // ── L-1：platform 不得依赖上层 ──
 {
   // platform -> root 只在有登记时允许（core.cjs 的有意 best-effort）
-  const bad = edges.filter((e) => e.from === 'platform' && e.to !== 'root');
-  check('L-1 platform/ 不依赖 domains/guard/api（它是地基）',
+  // ⚠ 2026-09-16 步骤 2：L-1 原文写于 shared/ 层出现之前，判据 `to !== 'root'` 把
+  //   **platform -> shared** 也误判为越界。而 §2.2 依赖矩阵明示 platform→shared = ✓
+  //   （shared 是与 platform 并列的 L0 纯函数层，出度恒 0，不构成"依赖上层"）。
+  //   故此处只禁止**向上**依赖 domains/guard/api；platform→shared 由 L-2 登记约束。
+  const bad = edges.filter((e) => e.from === 'platform' && e.to !== 'root' && e.to !== 'shared');
+  check('L-1 platform/ 不依赖 domains/guard/api（它是地基；platform->shared 为合法 L0 依赖）',
     bad.length === 0,
     bad.length ? bad.map((e) => e.file + ':' + e.line + ' -> ' + e.to).join(', ') : '未发现');
   const platRoot = edges.filter((e) => e.from === 'platform' && e.to === 'root');
@@ -250,14 +258,18 @@ const edges = collect();
   check('L-4 反向：layerOf 对真实路径分组正确',
     layerOf('src/platform/os/index.js') === 'platform'
     && layerOf('src/domains/router/index.js') === 'domains'
-    && layerOf('src/guard/proc/daemon-lifecycle.js') === 'guard'
+    && layerOf('src/app/daemons/process.js') === 'app'
     && layerOf('src/api/index.js') === 'api'
     && layerOf('src/supervisor.js') === 'root', 'ok');
   check('L-4 反向：unitOf 归并到单元而非文件',
-    unitOf('src/guard/lifecycle/ports.js', 'guard') === 'src/guard/lifecycle'
+    // ⚠ unitOf 的语义是"**前 3 段**"（src/<层>/<子单元>）—— 不是"到目录为止"。
+    //   故 src/platform/service/ports/index.js 的单元是 src/platform/service（前 3 段）。
+    //   本用例验证"跨层依赖登记到**单元**粒度，而非逐文件"。
+    unitOf('src/platform/service/ports/index.js', 'platform') === 'src/platform/service'
+    && unitOf('src/domains/router/index.js', 'domains') === 'src/domains/router'
     && unitOf('src/core.cjs', 'root') === 'src/core.cjs', 'ok');
   check('L-4 反向：扫描确实发现了跨层边（非空集，否则门禁空转）',
-    edges.length >= 40, edges.length + ' 条跨层边');
+    edges.length >= 30, edges.length + ' 条跨层边');
 }
 
 const failed = results.filter((r) => !r);

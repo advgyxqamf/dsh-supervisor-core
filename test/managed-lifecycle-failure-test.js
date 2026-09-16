@@ -27,7 +27,7 @@
 
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const { ManagedLifecycle } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'managed.js'));
+const { ManagedLifecycle } = require(path.join(ROOT, 'src', 'app', 'control', 'entry.js'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };

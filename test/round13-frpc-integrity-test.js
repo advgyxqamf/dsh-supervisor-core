@@ -8,7 +8,7 @@
 //
 // frpc 经**两个第三方代理前缀 + 最多 5 跳重定向**下载（downloadUrls/_download），
 // 却只校验 HTTP 200 与 gzip/tar 可解析，随即 chmod 0755 落盘并 detached 执行。
-// 而同仓「下载二进制」的另一处（dist/self-update.js）**强制**从 manifest 取 sha256
+// 而同仓「下载二进制」的另一处（dist/index.js 的 selfUpdate 安装路径）**强制**从 manifest 取 sha256
 // 后才安装 —— 同一类操作两处实现分叉，前者无任何完整性校验。
 // 后果：镜像或链路被劫持/投毒即在用户机上写盘并执行任意二进制，无检测信号。
 //
@@ -62,7 +62,8 @@ function makeTarGz(frpcBody) {
 
 (async () => {
   const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13frp-'));
-  const { FrpManager } = require(path.join(ROOT, 'src', 'domains', 'relay', 'frpmgr.js'));
+  //  结构改造：FrpManager 在 frp.js；下载/校验在 frp-install.js。
+  const { FrpManager } = require(path.join(ROOT, 'src', 'domains', 'relay', 'frp.js'));
   check('A 定位到 FrpManager', typeof FrpManager === 'function', typeof FrpManager);
 
   const goodTgz = makeTarGz('#!/bin/sh\necho frpc\n');
@@ -132,7 +133,7 @@ function makeTarGz(frpcBody) {
 
   console.log('== D 信任根：校验和必须直连官方、不经镜像 ==');
   {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'frpmgr.js'), 'utf8');
+    const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'frp-install.js'), 'utf8');
     const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
     //   ⚠ 必须**按行定界**断言，不能用无锚点的子串匹配 ——
     //     前者在「MIRROR_PREFIXES[0] + 'https://github.com/...'」下仍会命中（假绿，已实测）。

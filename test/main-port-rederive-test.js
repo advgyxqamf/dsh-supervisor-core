@@ -20,7 +20,7 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.o
 
 (async () => {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
-  const { shared: ports } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports'));
+  const { shared: ports } = require(path.join(ROOT, 'src', 'platform', 'service', 'ports'));
   const realPort = await freePort();
   const cfgPort = await freePort();
   const child = spawn(process.execPath, [MOCK, 'web', '--port', String(realPort)], { stdio: 'ignore' });

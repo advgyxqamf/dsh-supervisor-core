@@ -141,7 +141,7 @@ function npxBin(opts) {
  *   **不做 PATHEXT 解析**（`.cmd`/`.bat` 必须由 cmd.exe 承载；自 CVE-2024-27980 起
  *   Node 也不再隐式代跑 `.cmd`）→ 传裸 `'npm'` 一律 `ENOENT`。
  *
- *   旧实现在**三处**各自硬编码 `'npm'`（`domains/dist`、`guard/native`、`platform/config`），
+ *   旧实现在**三处**各自硬编码 `'npm'`（原 `domains/dist`（步骤3 上移 `platform/distribution`）、`guard/native`、`platform/service/config`），
  *   于是 Windows 用户的「升级内核 / 安装 / 卸载 DSH」全部失败，且错误只是含糊的 ENOENT。
  *   壳仓早已正确实现同一事实（`core.rs` 的 `npm_exe()` → `npm.cmd`），两仓答案不一致。
  *

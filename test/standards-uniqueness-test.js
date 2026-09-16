@@ -9,8 +9,8 @@
 //   硬要求：**任何领域的规范只能有一份**，且必须被机器校验。
 
 // ## 锁定不变量
-//   U-1  三个规范（发布/凭据/改代码）存在，且各自被门禁引用
-//   U-2  README 文档索引把这三者标为「唯一事实源」
+//   U-1  全部规范（发布/凭据/改代码/令牌/无窗口/发布通道）存在，且各自被门禁引用
+//   U-2  README 文档索引把**每一份**已登记规范标为「唯一事实源」
 //   U-3  其它文档**不得**自称为发布流程规范（不得出现「唯一事实源」标记）
 //   U-4  根级文档清单与 README 索引**一一对应**（无未登记文档、无悬空条目）
 //   U-5  反向：判据能识别缺失规范 / 未登记文档（门禁非空转）
@@ -26,16 +26,30 @@ const check = (n, c, x) => {
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : ''));
 };
 
-// 三个唯一规范：领域 → { 文件, 校验它的门禁 }
+// 唯一规范登记表：领域 → { 文件, 校验它的门禁 }
+// 不变量：**每个领域只能有一份规范**，且每份规范都必须有机器校验（U-1）。
+// 2026-09-16：新增两个域级规范（令牌 / 无控制台窗口）—— 它们各自是本领域的唯一事实源，
+//   分别由 token-contract-gate / no-console-window-gate 机器校验；登记在此即受本门禁保护
+//   （其它文档仍不得自称规范）。
+// 2026-09-16：再新增「发布通道/选版」（RELEASE-CHANNEL-CONTRACT.md）—— canary/beta/rc/
+//   latest/rollback 五通道与选版算法的唯一事实源，由 release-channel-gate 机器校验。
+//   与「发布/构建流程」（RELEASE-STANDARD.md）是**两个域**：前者管「版本如何被选择」，
+//   后者管「怎么构建与发布」，故不违反一域一规范。
 const STANDARDS = {
   '发布/构建流程': { file: 'RELEASE-STANDARD.md', gate: 'test/release-spec-consistency-test.js' },
   '凭据管理': { file: 'CREDENTIALS-STANDARD.md', gate: 'test/credential-hygiene-test.js' },
   '改代码规则': { file: 'DEVELOPMENT-TRACK.md', gate: 'test/layering-and-dependency-gate-test.js' },
+  '令牌管理': { file: 'DSH-TOKEN-CONTRACT.md', gate: 'test/token-contract-gate-test.js' },
+  '无控制台窗口': { file: 'NO-CONSOLE-WINDOW-STANDARD.md', gate: 'test/no-console-window-gate-test.js' },
+  '发布通道/选版': { file: 'RELEASE-CHANNEL-CONTRACT.md', gate: 'test/release-channel-gate-test.js' },
+  '守护域模型': { file: 'GUARD-DOMAIN-MODEL.md', gate: 'test/guard-domain-model-gate-test.js' },
+  '供应商网关架构': { file: 'PROVIDER-GATEWAY-ARCHITECTURE.md', gate: 'test/provider-gateway-gate-test.js' },
+  '目录结构与分层': { file: 'DIRECTORY-STRUCTURE-DESIGN.md', gate: 'test/directory-structure-gate-test.js' },
 };
 
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
-// ── U-1：三个规范存在且被门禁引用 ──
+// ── U-1：全部规范存在且被门禁引用 ──
 {
   const missing = [];
   const ungated = [];
@@ -43,7 +57,7 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
     if (!fs.existsSync(path.join(ROOT, s.file))) { missing.push(domain + ' -> ' + s.file); continue; }
     if (!fs.existsSync(path.join(ROOT, s.gate))) ungated.push(domain + ' -> ' + s.gate);
   }
-  check('U-1 三个唯一规范文件都存在', missing.length === 0,
+  check('U-1 全部唯一规范文件都存在', missing.length === 0,
     missing.length ? missing.join(', ') : Object.values(STANDARDS).map((x) => x.file).join(', '));
   check('U-1 每个规范都有对应的机器校验门禁', ungated.length === 0,
     ungated.length ? ungated.join(', ') : Object.values(STANDARDS).map((x) => x.gate).join(', '));
@@ -57,7 +71,7 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
     const line = readme.split(String.fromCharCode(10)).find((l) => l.includes(s.file));
     if (!line || !line.includes('唯一事实源')) bad.push(domain);
   }
-  check('U-2 README 把三个规范标为「唯一事实源」', bad.length === 0, bad.length ? bad.join(', ') : 'ok');
+  check('U-2 README 把全部规范标为「唯一事实源」', bad.length === 0, bad.length ? bad.join(', ') : 'ok');
 }
 
 // ── U-3：其它文档不得自称规范 ──
@@ -69,7 +83,7 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
     const head = fs.readFileSync(path.join(ROOT, f), 'utf8').split(String.fromCharCode(10)).slice(0, 80).join(String.fromCharCode(10));
     if (head.includes('唯一事实源') || head.includes('唯一规范')) offenders.push(f);
   }
-  check('U-3 只有三个规范可自称「唯一事实源」', offenders.length === 0, offenders.join(', ') || 'ok');
+  check('U-3 只有已登记的规范可自称「唯一事实源」', offenders.length === 0, offenders.join(', ') || 'ok');
 }
 
 // ── U-4：根级文档与 README 索引一一对应 ──

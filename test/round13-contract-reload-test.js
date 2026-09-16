@@ -41,14 +41,17 @@ const check = (n, c, x) => {
 };
 
 (async () => {
-  const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+  // ⚠ 2026-09-17（域结构第三轮）：distribution 已拆为 release/policies/registry/install + index 门面；
+  //   断言对象是「分发能力」而非单文件，故按目录聚合读取（读取面随文件搬移同步，判据语义不变）。
+  const distDir = path.join(ROOT, 'src', 'platform', 'distribution');
+  const src = fs.readdirSync(distDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(distDir, f), 'utf8')).join(String.fromCharCode(10));
   const code = src.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
   console.log('== A 结构 ==');
   check('A 存在 TTL 常量', /CONTRACT_TTL_MS\s*=/.test(code), '有');
   check('A 存在重载入口 _reloadContractIfStale', /_reloadContractIfStale\(\)\s*\{/.test(code), '有');
-  check('A selectRegistry 读入口调用重载', /async selectRegistry[\s\S]{0,400}?_reloadContractIfStale\(\)/.test(code), '有');
-  check('A registryInfo 读入口调用重载', /async registryInfo\(\)\s*\{\s*\n\s*this\._reloadContractIfStale\(\);/.test(code), '有');
+  check('A selectRegistry 读入口调用重载', /async function selectRegistry[\s\S]{0,400}?reloadContractIfStale\s*\(/.test(code), '有');
+  check('A registryInfo 读入口调用重载', /async function registryInfo\([^)]*\)\s*\{\s*\n\s*reloadContractIfStale\(state\);/.test(code), '有');
 
   console.log('== B 行为：TTL 内不重载 / TTL 过后重载 ==');
   {
@@ -59,7 +62,7 @@ const check = (n, c, x) => {
       catalog: [cat], probe: { kind: 'package-metadata', pathTemplate: probe, timeoutMs: 6000 },
     }));
     write('https://boot.example', 'pkg-a');
-    const { DistributionManager } = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
+    const { DistributionManager } = require(path.join(ROOT, 'src', 'platform', 'distribution', 'index.js'));
     const dm = new DistributionManager({ registryFile: rf, registries: ['https://boot.example'] });
     check('B 构造时读到启动契约', dm.contract.catalog[0] === 'https://boot.example', JSON.stringify(dm.contract.catalog));
 

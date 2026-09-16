@@ -5,7 +5,7 @@
 // 产品状态根门禁（SR-1..SR-6；2026-09-15 架构纠偏）
 //
 // 本产品**管控 DSH**，状态不得寄在被管控对象的 ~/.dsh 下。内核侧单一事实源 =
-//   src/platform/state-root.js（XDG + DSH_SUPERVISOR_HOME 覆盖 + 前向自愈迁移）。
+//   src/platform/service/state-root.js（XDG + DSH_SUPERVISOR_HOME 覆盖 + 前向自愈迁移）。
 //   · SR-1 schema=1（与壳 env.rs 的 STATE_ROOT_SCHEMA 握手）
 //   · SR-2 DSH_SUPERVISOR_HOME 覆盖优先
 //   · SR-3 默认根**不在** ~/.dsh 之下（独立于 DSH）
@@ -22,7 +22,7 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : '')); };
 
-const sr = require(path.join(ROOT, 'src', 'platform', 'state-root.js'));
+const sr = require(path.join(ROOT, 'src', 'platform', 'service', 'state-root.js'));
 
 // ── SR-1：schema 握手 ──
 check('SR-1 schema = 1（与壳 STATE_ROOT_SCHEMA 握手）', sr.SCHEMA === 1, String(sr.SCHEMA));
@@ -44,7 +44,7 @@ check('SR-3 默认根不在 ~/.dsh 之下', !def.startsWith(path.join(realHome, 
 check('SR-3 默认根不是 ~/.dsh 本身', def !== path.join(realHome, '.dsh'), def);
 
 // ── SR-4：source 断言（默认值也走 state-root 单一入口）──
-const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'config.js'), 'utf8');
+const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'config.js'), 'utf8');
 check('SR-4 config 默认路径经 state-root', /require\('\.\/state-root'\)\.supervisorDir\(\)/.test(cfg), 'ok');
 check('SR-4 config 不再硬编码 ~/.dsh/supervisor', !/stateFile:\s*'~\.dsh\/supervisor/.test(cfg), 'ok');
 

@@ -41,7 +41,16 @@ const check = (n, c, x) => {
   results.push(!!c);
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : ''));
 };
-const raw = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
+// ⚠ 2026-09-16 步骤7：心跳装配已从 src/supervisor.js（组装根）下沉
+//   app/assembly/bootstrap.js 的 _bootstrap()，且该模块按 STEP7-INTERFACE-CONTRACT §2
+//   的「host 首参自由函数」形态导出（内部一律 `host.xxx`，不再 `this.xxx`）。
+//   故本门禁改读**新家**，并把 host 首参归一成 this 使原有断言逐条保持有效
+//   （断言语义不变：仍锁 A 兜底结构 / C 可观测字段 / D 拍宽求值顺序）。
+const raw = [
+  fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8'),
+  fs.readFileSync(path.join(ROOT, 'src', 'app', 'assembly', 'bootstrap.js'), 'utf8')
+    .split('host.').join('this.'), // host 首参 → this：仅为复用同一组断言，不改判定语义
+].join('\n');
 const code = raw.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
 (async () => {

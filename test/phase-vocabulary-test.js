@@ -31,8 +31,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const ROOT = path.join(__dirname, '..');
 
-const managed = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'managed.js'));
-const objects = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'objects.js'));
+const managed = require(path.join(ROOT, 'src', 'app', 'control', 'entry.js'));
+const objects = require(path.join(ROOT, 'src', 'app', 'control', 'registry.js'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
@@ -74,12 +74,13 @@ for (const f of files) {
   }
 }
 check('K3-d 全仓只有一处 PHASES 字面量定义',
-  defs.length === 1 && defs[0].endsWith(path.join('lifecycle', 'objects.js')),
+  // ⚠ 2026-09-16 步骤6：guard/lifecycle/objects.js → app/control/registry.js（编排层重组）
+  defs.length === 1 && defs[0].endsWith(path.join('app', 'control', 'registry.js')),
   defs.length ? defs.join(', ') : '（无）');
 
 // ── K3-e `_setPhase` 的静默丢弃行为被文档化 ──
 {
-  const src = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'managed.js'), 'utf8');
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'app', 'control', 'entry.js'), 'utf8');
   check('K3-e _setPhase 静默丢弃的行为有注释说明（防被误改）',
     /静默丢弃/.test(src) && /PHASES\.includes/.test(src),
     '注释与实现都在');

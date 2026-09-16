@@ -26,8 +26,11 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 // 取真实 mixin 的 `_daemonLifecycle` 描述符。
-const desc = require(path.join(ROOT, 'src', 'guard', 'supervisor', 'control-view.js'));
-const fn = desc._daemonLifecycle && desc._daemonLifecycle.value;
+// ⚠ 2026-09-16 步骤7：_daemonLifecycle 已从 control-view.js 拆到 app/daemons/runtime.js；
+//   导出形态从属性描述符改为 { methods }。
+const mod = require(path.join(ROOT, 'src', 'app', 'daemons', 'runtime.js'));
+const { installCollaborators } = require(path.join(ROOT, 'src', 'app', 'assembly', 'collaborators'));
+const fn = mod.methods._daemonLifecycle;
 check('K1 取到真实 _daemonLifecycle 方法', typeof fn === 'function', typeof fn);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'k1daemon-'));
@@ -36,14 +39,14 @@ fs.writeFileSync(cfgPath, JSON.stringify({ stateFile: path.join(tmp, 'state.json
 
 /** 最小上下文：只提供 `_daemonLifecycle` 真正读取的字段。 */
 function ctx(configPath) {
-  return {
+  return installCollaborators({
     configPath,
     config: { stateFile: path.join(tmp, 'state.json') },
     logger: { warn() {}, info() {}, error() {} },
     _routerCtlPort: () => 43107,
     _lanCtlPort: () => 43108,
     _lc: null,
-  };
+  });
 }
 
 for (const kind of ['router', 'lan']) {

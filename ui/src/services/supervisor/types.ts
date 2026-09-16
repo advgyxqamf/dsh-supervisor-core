@@ -57,6 +57,8 @@ export interface SupervisorStatus {
   phase?: DshPhase;
   sessionState?: SessionState;
   guardVersion?: string;
+  /** 安装标识（UUID v4）：灰度名单的匹配依据，面板底部外显供用户申请灰度（契约 §5.2）。 */
+  installId?: string | null;
   dshPid?: number | null;
   dshPort?: number | null;
   adopted?: boolean;
@@ -201,7 +203,7 @@ export interface FrpStatus {
 // ── router ──────────────────────────────────────────────
 export type ProviderKind = "direct" | "proxy";
 export type AccountStatus =
-  | "registering" | "review" | "frozen" | "banned" | "discarded" | "ready" | "normal" | string;
+  | "registering" | "frozen" | "banned" | "discarded" | "ready" | "normal" | string;
 export interface QuotaWindow {
   status?: string;
   percent?: number;
@@ -536,7 +538,9 @@ export interface LifecycleModuleState {
   monitoring?: boolean;
   error?: string | null;
   startedAt?: string | null;
-  restartCount?: number;
+  // 无 restartCount：它是「用户意图被守护触发了几次」的语义（域 A），
+  //   而本接口描述的是托管生命周期项的视图；域 A 计数在别处
+  //   （/status 的 restartCount = dsh；instance.state.restartCount = 沙箱）。
   detail?: unknown;
 }
 

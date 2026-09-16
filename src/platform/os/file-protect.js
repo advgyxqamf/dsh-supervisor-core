@@ -3,7 +3,7 @@
 // ★ 跨平台文件/目录访问保护（P1 修复）★
 //
 // 问题：产品大量使用 `fs.writeFileSync(f, data, { mode: 0o600 })` 保护敏感文件
-// （config.json 含 lanToken、dsh-main-token.log 含 DSH 访问令牌、registry.json、state.json）。
+// （config.json 含 apiAccessKey、dsh-main.json 含 remoteToken、dsh-main-token.log 含 DSH 会话令牌）。
 // 但 **POSIX mode 在 Windows 被忽略**（NTFS 用 ACL，与 mode 无关）→ 这些文件对同机其他用户可读。
 //
 // 跨平台规范：
@@ -17,7 +17,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const ex = require('../exec');
+const ex = require('../util/exec');
 
 const IS_WINDOWS = process.platform === 'win32';
 let _icacls = null; // 缓存 icacls 可用性

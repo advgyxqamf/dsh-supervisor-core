@@ -33,7 +33,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- 版本比较单测 ----
 function testCmp() {
-  const { semverCompare } = require(path.join(ROOT, 'src', 'domains', 'dist'));
+  const { semverCompare } = require(path.join(ROOT, 'src', 'platform', 'distribution'));
   const cases = [
     ['1.0.0', '2.0.0', -1],
     ['2.0.0', '1.0.0', 1],

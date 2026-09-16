@@ -36,12 +36,18 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const base = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'base.js'), 'utf8');
+// ⚠ providers 改造后 applyDetection 状态机下沉 policies/freeze.js（base 只剩薄委托）——
+//   E-a 判据必须读**实现文件**，否则文件一搬即静默假绿。
+const freezePolicySrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'policies', 'freeze.js'), 'utf8');
 const idx = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'index.js'), 'utf8');
-const ops = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'router-ops.js'), 'utf8');
+// ⚠ 域改造后运维能力从 router-ops.js 拆到 ops/*（EXECUTION-CONTRACT §3.2）。
+const opsAdmin = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'ops', 'admin.js'), 'utf8');
+const opsApps = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'ops', 'apps-registry.js'), 'utf8');
+const opsOauth = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'ops', 'oauth.js'), 'utf8');
 
 // ── E-a：失败分支必须补 nextResetAt ──
 {
-  const m = base.match(/applyDetection\(acc, det\) \{[\s\S]*?\n  \}/);
+  const m = freezePolicySrc.match(/function applyDetection\(acc, det, provider\) \{[\s\S]*?\n\}/);
   check('E-a 定位到 applyDetection', !!m, m ? 'ok' : '未找到');
   const body = m ? m[0] : '';
   const failBranch = body.slice(0, body.indexOf('acc.lastProbeError = null;') + 1);
@@ -51,19 +57,22 @@ const ops = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'router-
     /!acc\.nextResetAt/.test(failBranch), '有守卫');
 }
 
-// ── E-b：取证默认关（opt-in）──
-check('E-b evidence 构造受 evidenceEnabled 控制',
-  /this\.evidenceEnabled = opts\.evidenceEnabled === true/.test(idx), '已改');
-check('E-b 默认不构造（findable：evidenceFile && evidenceEnabled）',
-  /this\.evidenceFile && this\.evidenceEnabled/.test(idx), '已改');
-check('E-b 仍保留显式启用能力（evidenceEnabled 可传 true）',
-  /evidenceEnabled: true/.test(idx), '文档化');
+// ── E-b：取证子系统已删除（2026-09-16 Phase 5 / 决策 A5）──
+//   ⚠ 旧断言要求"取证受 evidenceEnabled 控制（opt-in 默认关）"——但该子系统整链"有产出无消费"，
+//     属半成品脚手架。按 §6.1 P2-4「要么接线，要么删除」，现已**整体删除**。
+//     断言随之改为"确认已删除"（反向：源码中不得再出现取证构造）。
+check('E-b 取证子系统已删除（不再构造 UpstreamEvidence）',
+  !/evidenceEnabled|evidenceFile/.test(idx), '已删除');
+//   判据须**去注释**后检查——否则"已删除"的说明注释本身会被误判为残留。
+const idxCode = idx.split(String.fromCharCode(10)).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join(String.fromCharCode(10));
+check('E-b 转发主路径不再有取证 append（同步 I/O 已移出）',
+  !/_capture|evidence\.append/.test(idxCode), '已删除');
 
 // ── E-c：release 的 owner 校验 ──
 check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
-  fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports.js'), 'utf8')), '已改');
+  fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'ports', 'pool.js'), 'utf8')), '已改');
 {
-  const portsMod = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports.js'));
+  const portsMod = require(path.join(ROOT, 'src', 'platform', 'service', 'ports', 'index.js'));
   const { PortRegistry } = portsMod;
   const os = require('node:os');
   const tmp = path.join(os.tmpdir(), 'p4-port-owner-' + process.pid + '.json');
@@ -87,7 +96,7 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
 
 // ── E-d：setProviderKeys 删除路径的收尾 ──
 {
-  const m = ops.match(/setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);
+  const m = opsAdmin.match(/setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);
   check('E-d 定位到 setProviderKeys', !!m, m ? 'ok' : '未找到');
   const body = m ? m[0] : '';
   check('E-d 删反代账号时停止实例', /p\.stopInstance\(/.test(body), '有');
@@ -99,7 +108,7 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
 // ── E-e：applyProxyUpdate 的进度必须写进 task（P2-1）──
 //   行为级：task 的 steps 能被子实例登记并推进 —— 这是前端读到的那个事实源。
 {
-  const { TaskRegistry } = require(path.join(ROOT, 'src', 'platform', 'tasks.js'));
+  const { TaskRegistry } = require(path.join(ROOT, 'src', 'platform', 'service', 'tasks.js'));
   const os = require('node:os');
   const tmpT = path.join(os.tmpdir(), 'p21-task-' + process.pid + '.json');
   const reg = new TaskRegistry({ file: tmpT });
@@ -117,15 +126,20 @@ check('E-c release 签名接受第二参', /release\(port, ownerId\)/.test(
   try { fs.rmSync(tmpT, { force: true }); } catch {}
 }
 // 源码级：确认 update 流程真的调了 tasks.step / tasks.stepState（而非只维护 job.steps）
-check('E-e 源码调用 tasks.step 登记步骤', /this\.tasks\.step\(task\.id/.test(ops), '有');
-check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(task\.id/.test(ops), '有');
+check('E-e 源码调用 tasks.step 登记步骤', /tasks\.step\(task\.id/.test(opsApps), '有');
+check('E-e 源码调用 tasks.stepState 推进状态', /tasks\.stepState\(task\.id/.test(opsApps), '有');
 
 // ── E-h：daemon 模式下守卫**不得**写 providers.json（三条路径全覆盖）──
 //   缺陷：`setPersistEnabled(false)` 此前只在 supervisor.js 的一处 daemon 分支执行，
 //         而 `_ensureRouterRuntime` 还有另两条返回 daemon 的路径 → 双写覆盖。
 {
-  const sv = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'supervisor', 'supervise-view.js'), 'utf8');
-  const sup = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
+  // ⚠ 2026-09-16 步骤7：_ensureRouterRuntime/_disableRouterPersist 已从 supervise-view.js
+  //   迁到 app/daemons/runtime.js —— 判据读取路径随之更新（否则判据静默失去覆盖面）。
+  const sv = fs.readFileSync(path.join(ROOT, 'src', 'app', 'daemons', 'runtime.js'), 'utf8');
+  // ⚠ 2026-09-16 步骤7 收尾：routerAutostart 启动路径（含「进入 daemon 即关写权」的幂等兜底）
+  //   已从 src/supervisor.js 下沉；2026-09-17 R7 再下沉 app/domain-actions/router.js#setRouterRunning
+  //   （facade 只读）—— 判据改读新模块。
+  const sup = fs.readFileSync(path.join(ROOT, 'src', 'app', 'domain-actions', 'router.js'), 'utf8');
   check('E-h 抽出 _disableRouterPersist 集中处置', /_disableRouterPersist\(\) \{/.test(sv), '有');
   // 三条 daemon 路径：① 已在跑 ② 拉起/接管成功 ③ supervisor.js 的兜底
   const n = (sv.match(/_disableRouterPersist\(\);/g) || []).length;
@@ -134,7 +148,7 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
     /res\.mode === 'daemon'\).*_disableRouterPersist|_disableRouterPersist.*res\.mode/.test(sv)
       || /if \(res && res\.mode === 'daemon'\) this\._disableRouterPersist\(\);/.test(sv), '有');
   check('E-h supervisor.js 兜底改用同一方法（不再内联）',
-    /this\._disableRouterPersist\(\);/.test(sup), '有');
+    /this\.(?:daemons\.)?disableRouterPersist\(\);/.test(sup), '有');
   // 反向：确认不再有内联的 setPersistEnabled(false) **代码**（方法本体保留一处）。
   //   ⚠ 必须剥离注释行 —— 说明文字里会引用该写法（我第一版就踩了这个假阳性）。
   const stripComments = (s) => s.split(String.fromCharCode(10))
@@ -150,7 +164,7 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
 //         `catch { release(port) }` 回退 —— 那会绕过 owner 判定（误删他人登记）。
 //   现已真正支持 owner 校验，回退必须删除。
 {
-  const objSrc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'objects.js'), 'utf8');
+  const objSrc = fs.readFileSync(path.join(ROOT, 'src', 'app', 'control', 'registry.js'), 'utf8');
   const body = objSrc.match(/_releasePort\(port, ownerId\) \{[\s\S]*?\n  \}/);
   check('E-i 定位到 _releasePort', !!body, body ? 'ok' : '未找到');
   const code = body ? body[0] : '';
@@ -162,7 +176,7 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
 // ── E-g：`setProviderKeys(add)` 的 added 必须反映真实结果（P2-5）──
 //   行为级用不到（需真供应商），故做源码级不变量 + 契约字段检查。
 {
-  const m = ops.match(/async setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);
+  const m = opsAdmin.match(/async (?:function )?setProviderKeys\(id, opts\) \{[\s\S]*?\n  \}/);
   check('E-g setProviderKeys 为 async（需 await 检测结果）', !!m, m ? 'ok' : '未找到');
   const body = m ? m[0] : '';
   check('E-g 等待 addAccount 结果（不再 fire-and-forget）',
@@ -178,10 +192,10 @@ check('E-e 源码调用 tasks.stepState 推进状态', /this\.tasks\.stepState\(
 //   成功与超时/异常分支都必须清 `_ccLoginResolve`/`_ccLoginReject`；
 //   否则残留的 reject 会被上一轮浏览器的退出回调取到，误杀**下一次**登录。
 {
-  const n = (ops.match(/_ccLoginResolve = this\._ccLoginReject = null/g) || []).length;
+  const n = (opsOauth.match(/_ccLoginResolve = st\._ccLoginReject = null/g) || []).length;
   check('E-f 成功与失败分支都清理 resolve/reject（两处）', n === 2, n + ' 处');
   // 反向：确认 "只清 promise" 的不对称写法已不存在（该写法恰是缺陷本体）
-  const bad = /this\._ccLoginPromise = null;\s*\n\s*return \{ ok: false/.test(ops);
+  const bad = /st\._ccLoginPromise = null;\s*\n\s*return \{ ok: false/.test(opsOauth);
   check('E-f 失败分支不再只清 promise 就返回', !bad, '已对称');
 }
 

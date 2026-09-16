@@ -22,7 +22,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 (async () => {
   const { ProxyProvider } = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'proxy'));
   const { keyFingerprint } = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'base'));
-  const ports = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports')).shared;
+  const ports = require(path.join(ROOT, 'src', 'platform', 'service', 'ports')).shared;
   ports.configureFile(path.join(TMP, 'ports-router.json'));
   const log = { info(){}, warn(){}, error(){}, debug(){} };
 

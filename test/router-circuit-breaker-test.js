@@ -33,7 +33,8 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const proxy = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'proxy.js'), 'utf8');
-const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward-core.js'), 'utf8');
+const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'handlers', 'forward.js'), 'utf8');
+const inflight = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'model', 'inflight.js'), 'utf8');
 
 // ── R-a：清零时机 ──
 {
@@ -45,7 +46,7 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
   // ⚠ 断言「调用了 markRequestOk」而不绑定具体实参名 ——
   //   P2 双事实源修复后实参已改为 instOf(...) 的结果（okInst），
   //   写死 `acc.instance` 会让「纯重构」误报（我第一版就踩了这个）。
-  check('R-a forward-core 在 2xx 成功路径调用 markRequestOk',
+  check('R-a handlers/forward 在 2xx 成功路径调用 markRequestOk',
     /markRequestOk\(\w+\)/.test(fwd), '已接入');
 }
 
@@ -55,7 +56,7 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
   const strip = (s) => s.split(String.fromCharCode(10))
     .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
     .join(String.fromCharCode(10));
-  check('R-b forward-core 不再调用不存在的 markNetFail',
+  check('R-b handlers/forward 不再调用不存在的 markNetFail',
     !/\.markNetFail\s*\(/.test(strip(fwd)), '已改');
   check('R-b 改用真实存在的 markInstanceNetFail',
     /markInstanceNetFail/.test(strip(fwd)), '已改');
@@ -71,8 +72,14 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
     || /const\s+\w+\s*=\s*inst\._restartPending/.test(proxy);
   check('R-c _restartPending 存在读取点（不再只写不读）', hasRead, '有');
   check('R-c 存在 flushRestartPending 消费方法', /flushRestartPending\(inst\)/.test(proxy), '有');
-  check('R-c forward-core 在 inflight 归零时调用它',
-    /prov\.flushRestartPending\(\w+\)/.test(fwd), '已接入');
+  check('R-c handlers/forward 在 inflight 归零时执行 flushRestartPending',
+    /prov\.flushRestartPending\([^)]+\)/.test(fwd), '已接入');
+  // ★ 行为修复锁（PG-D3-4）：单一 end() 产生 flushRestartPending effect，
+  //   且流式成功/中断两条路径共用 endInflight（旧缺陷：成功路径漏补重启）。
+  check('R-c 单一 end() 生成 flushRestartPending effect',
+    /kind:\s*'flushRestartPending'/.test(inflight), '有');
+  check('R-e 流式成功与中断路径共用 endInflight（修复漏补重启）',
+    (fwd.match(/endInflight\(acc,\s*prov\)/g) || []).length >= 2, '共用');
 }
 
 // ── R-d：退避置位时机 ──

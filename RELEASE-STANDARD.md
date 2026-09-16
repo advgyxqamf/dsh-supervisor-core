@@ -48,7 +48,7 @@
 | `release/README.md` | 发布工程**目录结构**与脚本索引 | 流程细节（指向本文件）|
 | `RELEASE-AND-UPDATE-MECHANISM.md` | 机制**原理**（为何这样设计） | 操作步骤 |
 | `CROSS-PLATFORM-BUILD-AND-UPDATE.md` | 跨平台**方案论证** | 操作步骤 |
-| `release/runbooks/*.md` | 专项操作（签名密钥/桌面验证） | 通用流程 |
+| `release/runbooks/publish-and-verify.md` | 发布与验收全流程（runbooks/ 下唯一一份）| 通用流程 |
 | 壳仓 `docs/RELEASE-AND-BUILD-DECISION.md` | **壳仓**发布（安装程序） | 内核流程 |
 
 ---
@@ -110,7 +110,7 @@
 | job | 何时跑 | 作用 |
 |---|---|---|
 | `precheck` | 总是 | 探测「该版本是否已在 npm 全平台发布」→ 输出 `need_build` |
-| `test` | 总是 | 前端产物 + Xvfb + 壳仓检出 + `npm test`（全部门禁）|
+| `test` | 总是 | 前端产物 + Xvfb + `npm test`（全部门禁；**不检出壳仓**，见 §0 跨仓隔离）|
 | `build` | **总是**（**不受** need_build 门控）| 四平台矩阵各自 `ci-core.sh`：**完整构建 + 验证**（上传制品）；**发布**仅当 tag + NPM_TOKEN + need_build 才执行 |
 | `release` | tag `v*` **且** `need_build` | 挂 GitHub Release 附件 |
 

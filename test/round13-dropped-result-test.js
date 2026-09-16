@@ -12,7 +12,7 @@
 //    把 current 翻转到**语法错误**的版本并 prune 掉旧版本 → 守卫再也起不来且无回滚。
 //    生产调用点为零，只有 guard-update-test.js 覆盖，而它从未断言失败路径。
 //
-// ② P2 src/api/router.js 多处 `.then((r)=>send(...))` **无 .catch** → ctl 拒绝时请求永久挂起
+// ② P2 src/api/domains/router.js 多处 `.then((r)=>send(...))` **无 .catch** → ctl 拒绝时请求永久挂起
 //    daemon 监督模式下 routerApi() 是 ctl 门面，超时/ECONNREFUSED 会 reject；
 //    这些链无 catch，api/index.js 的外层也接不住（那是另一条链）→
 //    unhandledRejection + **客户端永久挂起**（无超时的 curl/TUI）。同文件其它链都有 catch。
@@ -42,7 +42,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13c-'));
   // ── B router.js 每个链都要有 catch ──
   console.log('== B router.js 异步链必须有 catch ==');
   {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'api', 'router.js'), 'utf8');
+    const src = fs.readFileSync(path.join(ROOT, 'src', 'api', 'domains', 'router.js'), 'utf8');
     const offenders = src.split('\n')
       .map((l, i) => ({ l, n: i + 1 }))
       .filter((x) => x.l.indexOf('.then((r) => send(') >= 0 && x.l.indexOf('.catch(') < 0);
@@ -70,7 +70,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13c-'));
   // ── C 行为级：ctl 拒绝 → 恰好应答一次 500 ──
   console.log('== C 行为：ctl 拒绝必须应答而不是挂起 ==');
   {
-    const api = require(path.join(ROOT, 'src', 'api', 'router.js'));
+    const api = require(path.join(ROOT, 'src', 'api', 'domains', 'router.js'));
     const sent = [];
     let unhandled = 0;
     const onUnhandled = () => { unhandled++; };

@@ -1,0 +1,40 @@
+'use strict';
+
+// 插件市场 —— 条目构造（纯，无 IO）。
+// 从 market.js 抽出：npm / github 条目对象工厂，保持 indexNpm/indexGithub 的循环体浅嵌套。
+
+const { pickAuthor } = require('./classify');
+
+/** npm 源条目（纯构造）。 */
+function npmEntry(name, meta) {
+  return {
+    name,
+    version: meta.version,
+    description: (meta.description || '').slice(0, 200),
+    author: pickAuthor(meta),
+    homepage: meta.homepage || null,
+    repository: meta.repository && meta.repository.url || null,
+    keywords: meta.keywords || [],
+    stars: 0,
+    source: 'npm',
+    hasBundle: true,
+  };
+}
+
+/** GitHub 源条目（纯构造）。 */
+function githubEntry(meta, r) {
+  return {
+    name: meta.name || r.name,
+    version: meta.version || null,
+    description: (meta.description || r.description || '').slice(0, 200),
+    author: (r.owner && r.owner.login) || null,
+    homepage: r.homepage || null,
+    repository: r.html_url || null,
+    keywords: meta.keywords || [],
+    stars: r.stargazers_count || 0,
+    source: 'github',
+    hasBundle: true,
+  };
+}
+
+module.exports = { npmEntry, githubEntry };

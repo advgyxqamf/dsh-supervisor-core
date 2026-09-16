@@ -7,7 +7,9 @@
 // **平台差异**（mac 的 `open -na`、Windows 的 `cmd start` 与参数转义、Linux 的候选二进制顺序）
 // 收敛到平台层；调用方（router-ops）只提供策略参数，不再出现 process.platform 分支与二进制名。
 
-const { spawn } = require('node:child_process');
+// SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）。
+// 浏览器打开是“完全脱离本进程”的语义 → 用 detachedIgnored（detached + stdio 'ignore'）。
+const spawnOS = require('./spawn');
 
 /** 平台 → 打开 URL 的命令（**纯函数，可穷举**；不 spawn）。
  *
@@ -27,7 +29,7 @@ function openCommand(platform, url) {
 function open(url) {
   try {
     const c = openCommand(process.platform, url);
-    const p = spawn(c.cmd, c.args, { detached: true, stdio: 'ignore' });
+    const p = spawnOS.detachedIgnored(c.cmd, c.args);
     p.on('error', () => {});
     p.unref();
     return true;
@@ -36,7 +38,7 @@ function open(url) {
 
 function _spawnDetached(bin, args, env, onExit) {
   let child;
-  try { child = spawn(bin, args, { detached: true, stdio: 'ignore', env: env || process.env }); }
+  try { child = spawnOS.detachedIgnored(bin, args, { env: env || process.env }); }
   catch { return null; }
   child.on('error', () => {});
   if (typeof onExit === 'function') child.on('exit', () => { try { onExit(); } catch {} });
@@ -110,7 +112,7 @@ function launchIsolated(url, o) {
       const c = plan.candidates[idx++];
       const env = c.envKind === 'anti' ? antiEnv : sysEnv;
       let child;
-      try { child = spawn(c.bin, c.args, { detached: true, stdio: 'ignore', env: env || sysEnv }); }
+      try { child = spawnOS.detachedIgnored(c.bin, c.args, { env: env || sysEnv }); }
       catch { return tryNext(); }
       // bin 不存在 → 下一个候选（error 事件同步触发，故递归前先注册）
       child.on('error', () => { tryNext(); });

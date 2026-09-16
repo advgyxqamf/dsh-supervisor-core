@@ -19,7 +19,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const { DaemonLifecycle } = require(path.join(ROOT, 'src', 'guard', 'proc', 'daemon-lifecycle'));
+const { DaemonLifecycle } = require(path.join(ROOT, 'src', 'app', 'daemons', 'process'));
 // 端口统一取自 test/_ports.js（避开 OS ephemeral 与生产池，防跨文件撞号）
 const { safePort } = require(path.join(__dirname, '_ports'));
 const FAKE = path.join(ROOT, 'test', 'fixtures', 'fake-ctl-daemon.js');

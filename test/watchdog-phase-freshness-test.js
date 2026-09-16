@@ -142,7 +142,7 @@ const GUI = '/usr/bin/dsh-supervisor-gui';
 
   // ── 默认窗口存在 ──
   {
-    const { DEFAULTS } = require(path.join(ROOT, 'src', 'domains', 'shell', 'watchdog.js'));
+    const { DEFAULTS } = require(path.join(ROOT, 'src', 'domains', 'shell', 'core.js'));
     check('默认 phaseMaxAgeMs = 10 分钟', DEFAULTS.phaseMaxAgeMs === 600000, String(DEFAULTS.phaseMaxAgeMs));
   }
 

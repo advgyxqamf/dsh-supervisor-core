@@ -13,7 +13,7 @@
 //   · 且**不报错**（静默降级），用户只看到「开着开关但没有地址」
 //
 // 这同时是**两处**违约：平台差异泄漏到业务层（应在 platform/os/），
-// 以及裸 execFileSync 无超时（应经 platform/exec）。
+// 以及裸 execFileSync 无超时（应经 platform/util/exec）。
 //
 // ## 平台实现
 //
@@ -26,10 +26,10 @@
 //   · 过滤虚拟网桥（virbr/veth/docker/vmnet/br-/lo）与回环/链路本地
 //   · 同网卡有多个地址时静态优先（DHCP 动态地址优先排除）
 //
-// 全部经 `platform/exec`（默认 15s 硬超时 + SIGKILL）。
+// 全部经 `platform/util/exec`（默认 15s 硬超时 + SIGKILL）。
 // ═══════════════════════════════════════════════════════════════════════════
 
-const ex = require('../exec');
+const ex = require('../util/exec');
 
 const PLATFORM = process.platform;
 

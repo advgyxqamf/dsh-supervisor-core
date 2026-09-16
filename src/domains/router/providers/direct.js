@@ -20,9 +20,20 @@ class DirectProvider extends ProviderBase {
     this.officialPricing = {};
   }
 
+  /** **能力声明**（PROVIDER-GATEWAY-ARCHITECTURE §5.1）：key-pool 无实例能力。
+   *  显式声明"不支持"，使转发层不再靠 typeof 猜测，也让差异可被静态校验。 */
+  supports(_cap) { return false; }
+
   async detectAccount(acc) {
     const quota = (this.adapter && this.adapter.quota) || {};
     const strategy = quota && getQuotaStrategy(quota.type);
+    // ⚠ P3-4 修复（PROVIDER-GATEWAY-ARCHITECTURE §5.2「不支持的能力必须显式拒绝，不得静默降级」）：
+    //   此前任何非 window-usage 策略（含 official-billing）都**静默返回 quota:null**，
+    //   使用者会误以为"该供应商无配额"，而实际是"direct 模式不支持该配额面"。
+    //   现如实返回不支持，并注明应改用 process-pool（反代）模式的对应策略。
+    if (strategy && strategy.kind === 'official-billing') {
+      return { ok: true, quota: null, unsupported: 'official-billing（direct 模式不支持直连官方 billing 面；该配额策略需 process-pool 模式）' };
+    }
     if (!strategy || strategy.kind !== 'window-usage') return { ok: true, quota: null };
     const base = (this.baseUrl || '').replace(/\/$/, '');
     const url = base + (quota.usagePath || '/usage');

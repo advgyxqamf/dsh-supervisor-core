@@ -1,10 +1,18 @@
 'use strict';
 
+const stateRoot = require('../../platform/service/state-root');
+const { normalize } = require('../../platform/service/config');
+const { LanManager } = require('./ops');
+const ports = require('../../platform/service/ports').shared;
+const { createCtlServer } = require('../../platform/ctl/server');
+const hub = require('../../platform/service/log/hub');
+const logcore = require('../../platform/service/log/logcore');
+
 // ═══════════════════════════════════════════════════════════════════════════
 // lan-daemon —— 远程控制（relay/frpc）独立进程（L3b 进程解耦，2026-09）。
 //
 // 定位：LanManager 从守卫进程解耦为独立生命周期，守卫只做监测与按策略拉起。
-// 守卫重启/停止不影响本进程 → 远程控制（40000 主 relay + 4000x 实例 relay + frpc 公网暴露）
+// 守卫重启/停止不影响本进程 → 远程控制（relay 端口取自 managed 池 20000-23999 + frpc 公网暴露）
 // 不再随守卫中断（守卫重启只短暂影响新增/变更对账）。
 //
 // 运行方式（config.lanDaemon=true 时由守卫 spawn detached；或手动调试）：
@@ -22,33 +30,48 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
-const os = require('node:os');
 const fs = require('node:fs');
 
-const HOME = os.homedir();
 const DEFAULT_CTL_PORT = 43108;
 const POLL_MS = 2000;
+
+// ── lan（远程控制）域的 ctl 控制面（步骤4：dispatcher 上移 platform/ctl，白名单留在本域）──
+// ⚠ 白名单是**域知识**，必须由本域自带：通用 dispatcher 不再内置 router 的表。
+//   此前共用 dispatcher 时若「缺省回退 router 表」，本进程的 ctl 端口就能调到 router 的
+//   方法（反之亦然）——既非必要也扩大攻击面（PROVIDER-GATEWAY-ARCHITECTURE §5.3 PG-5）。
+//   `eventsTail` 须显式登记（dispatcher 内置特例，守卫 EventHub 增量拉事件）。
+const LAN_CTL_METHODS = Object.freeze([
+  'list', 'setFrp', 'frpStatus', 'frpAction', 'syncFrpc',
+  'eventsTail',
+]);
 
 function loadConfig() {
   const cfgPath = process.argv.indexOf('-c') >= 0
     ? process.argv[process.argv.indexOf('-c') + 1]
-    : (process.env.DSH_SUPERVISOR_CONFIG || path.join(require('../../platform/state-root').supervisorDir(), 'config.json'));
+    : (process.env.DSH_SUPERVISOR_CONFIG || path.join(stateRoot.supervisorDir(), 'config.json'));
   const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  const { normalize } = require('../../platform/config');
+  // ⚠ DS-G4（§4.2 反转法）：platform 的 DEFAULTS 不再含业务域键（lanCtlPort 等）。
+  //   本进程**无需**注入：端口以本域常量 DEFAULT_CTL_PORT 兜底（见下方 createCtlServer 处）；
+  //   且 domains→app 属非法依赖边（L-2），域侧不得反向依赖编排层。
   return { cfgPath, ...normalize(raw) };
 }
 
 function main() {
-  const { LanManager } = require('./manager');
-  const ports = require('../../guard/lifecycle/ports').shared;
-  const { createRouterCtlServer } = require('../router/ctl'); // 通用 dispatcher（POST /ctl {method,args}）
+  // 通用 dispatcher（POST /ctl {method,args}）——白名单**按域注入**（PROVIDER-GATEWAY-ARCHITECTURE §5.3 PG-5）：
+  //   lan 只应暴露自己的方法面，不得因共用 dispatcher 而能调到 router 域的方法。
+  //   dispatcher 已上移 L0（platform/ctl），本域至此**不再反向 require router 域**（跨域边归零）。
 
   const config = loadConfig();
-  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : require('../../platform/state-root').supervisorDir();
+  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : stateRoot.supervisorDir();
   const stateFile = path.join(swDir, 'lan-state.json');
   // 系统日志框架（历史设计文档）：lan-daemon 经每进程唯一 LogCore 取日志/事件
   // （自有独立文件，不共享守卫文件；单例 init 幂等）。
-  const core = require('../../platform/logcore').init({
+  // DS-G4（§4.2 反转法）：本进程**自己声明**它的日志汇聚源 —— 域名词留在域内。
+  //   ⚠ 为何不 require app/assembly/log-sources：那会构成 domains → app 的**上行**依赖
+  //     （契约 DS-3/依赖矩阵禁止 domains 依赖编排层）。注入方向必须是「下层接受上层/同层注册」：
+  //     每个进程注册自己那一个源，守卫进程（compose.js）再注册全部三源以做汇聚。
+  hub.registerSource("lan-daemon", { key: "lan" });
+  const core = logcore.init({
     process: 'lan-daemon',
     logFile: config.lanLogFile || path.join(swDir, 'log', 'lan-daemon.log'),
     eventFile: config.lanEventsFile || path.join(swDir, 'events', 'lan.events.log'),
@@ -109,8 +132,8 @@ function main() {
       }
       // 令牌 diff → 热换既有 relay cookie（无 relay 时仅刷新 tokenOf 供后续会话使用）
       if (snapshot.tokens) {
-        for (const [id, tok] of Object.entries(snapshot.tokens)) {
-          try { lan.applyToken(id, tok || ''); } catch {}
+        for (const id of Object.keys(snapshot.tokens)) {
+          try { lan.applyToken(id); } catch {}
         }
       }
       return true;
@@ -138,7 +161,7 @@ function main() {
   tick();
   const timer = setInterval(tick, POLL_MS);
 
-  const ctl = createRouterCtlServer({ router: lan, logger, events });
+  const ctl = createCtlServer({ target: lan, allowMethods: LAN_CTL_METHODS, logger, events });
   const ctlPort = Number(config.lanCtlPort) || DEFAULT_CTL_PORT;
   ctl.listen(ctlPort, '127.0.0.1', () => logger.info('[lan-daemon] ctl listening on 127.0.0.1:' + ctlPort));
   ctl.on('error', (e) => logger.error('[lan-daemon] ctl 监听失败(' + ctlPort + '): ' + e.message));
@@ -149,7 +172,7 @@ function main() {
   // ⚠ 2026-09-12（P1 修复）：优雅停机必须**等 SIGKILL 兜底窗口走完**再退出。
   //
   //   缺陷：`lan.shutdown()` → `frpmgr.stop()` 是**同步**函数 —— 它只发 SIGTERM（立即返回），
-  //     SIGKILL 兜底由内部 250ms 间隔轮询在 3s 后执行（frpmgr.js:259-266）。
+  //     SIGKILL 兜底由内部 250ms 间隔轮询在 3s 后执行（frpmgr.js 的 stop()）。
   //     而此处紧接着 `process.exit()` 会**终止该定时器** → 忽略 SIGTERM 的 frpc
   //     **永久存活成孤儿**，占用公网隧道端口。
   //
@@ -157,8 +180,7 @@ function main() {
   //
   //   修法：等 frpmgr 的子进程真正退出（或 3.5s 兜底）再 exit。
   const waitFrpcExit = () => new Promise((resolve) => {
-    const fm = lan && lan.frpmgr;
-    const child = fm && fm.child;
+    const child = lan && lan.frpChild ? lan.frpChild() : null;
     if (!child || child.exitCode !== null) return resolve();
     const t0 = Date.now();
     const iv = setInterval(() => {
@@ -176,7 +198,7 @@ function main() {
     try { clearInterval(timer); } catch {}
     try { ctl.close(); } catch {}
     let frpc = null;
-    try { frpc = lan && lan.frpmgr ? lan.frpmgr.child : null; } catch {}
+    try { frpc = lan && lan.frpChild ? lan.frpChild() : null; } catch {}
     try { lan.shutdown(); } catch {}
     // 等 frpc 真正退出（SIGTERM → 3s 后 SIGKILL 兜底），再落事件并退出。
     void waitFrpcExit().then(() => {
@@ -191,4 +213,5 @@ function main() {
   process.on('unhandledRejection', (e) => logger.error('[lan-daemon] unhandledRejection: ' + ((e && (e.stack || e.message)) || e)));
 }
 
-main();
+// ⚠ 2026-09-16（Phase 5 收尾）：同 router/daemon —— 入口守卫，require 时不得启动真实 daemon。
+if (require.main === module) main();

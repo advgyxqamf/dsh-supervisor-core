@@ -11,7 +11,7 @@
 // → 传裸 `'npm'` 一律 `ENOENT`。
 //
 // 旧实现在**三处**各自硬编码：
-//   · domains/dist/index.js        let bin = 'npm'          （唯一安装执行器）
+//   · platform/distribution/index.js   let bin = 'npm'      （唯一安装执行器；步骤3 前为 domains/dist）
 //   · guard/native/manager.js      ex.runOut('npm', ...)    （版本/root 探测）
 //   · guard/native/manager.js      spawn('npm', ...)        （卸载）
 // 后果：Windows 用户的「升级内核 / 安装 / 卸载 DSH」全部失败，错误只是含糊的 ENOENT。
@@ -102,7 +102,9 @@ check("C-e 非 Windows 返回 'npx'", npxBin({ platform: 'linux' }) === 'npx', n
 
 // ── C-d：模板路径也解析 ──
 {
-  const dist = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+  // ⚠ 2026-09-17（域结构第三轮）：distribution 已拆分，按目录聚合读取（安装执行器落在 install.js）。
+  const distDir = path.join(ROOT, 'src', 'platform', 'distribution');
+  const dist = fs.readdirSync(distDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(distDir, f), 'utf8')).join(String.fromCharCode(10));
   check('C-d commandTemplate 首项为 npm 时经统一 npm 解析（runtimeContract.npmBin(npmBin)）',
     /argv\[0\] === 'npm'\s*\)\s*\?\s*runtimeContract\.npmBin\(npmBin\)/.test(dist),
     '已接入');

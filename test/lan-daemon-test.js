@@ -61,10 +61,16 @@ function ctlCall(method, payload, timeout = 8000) {
 }
 
 async function main() {
-  // ── 环境准备：config（自生成最小配置 + DEFAULTS 兜底——测试隔离，绝不依赖本机真实配置）──
+  // ── 环境准备：config（自生成最小配置 + 平台默认值兜底——测试隔离，绝不依赖本机真实配置）──
+  // ⚠ DS-G4（§4.2 反转法）：业务域键（routerCtlPort/lanCtlPort/routerAutostart）不再位于
+  //   platform 的模块级 DEFAULTS；launcher 模板用的是「平台 BASE_DEFAULTS + 域注入声明」合成。
+  //   本测试的 config.json 是给 **lan-daemon 进程**读的，且下面显式给了 lanCtlPort ——
+  //   但为与生产模板同形，仍按 buildDefaults(注入) 取完整默认值。
   let realCfg = {};
   try { realCfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.dsh', 'supervisor', 'config.json'), 'utf8')); } catch {}
-  const cfg = Object.assign(require('../src/platform/config').DEFAULTS, realCfg, {
+  const { buildDefaults } = require('../src/platform/service/config');
+  const { extension } = require('../src/app/settings/domain-config');
+  const cfg = Object.assign(buildDefaults(extension()), realCfg, {
     command: ['node', path.join(__dirname, 'mock-target.js'), String(TARGET_A)],
     healthUrl: 'http://127.0.0.1:' + TARGET_A + '/',
     stateFile: path.join(TMP, 'state.json'),

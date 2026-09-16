@@ -17,6 +17,7 @@ import {
 import { CheckCircle2, Menu, Plus, Trash2 } from "lucide-react";
 import { Button } from "../../framework/ui";
 import skiffLogo from "../../assets/dsh-logo.svg";
+import { toast } from "sonner";
 import { supervisorStore, useSupervisorData } from "../../services/supervisor";
 import { SUPERVISOR_NAV, type SupervisorViewKey } from "./nav";
 
@@ -140,9 +141,52 @@ export function SupervisorApp() {
               </>
             }
             right={
-              // 会话生命周期优先（契约 §3，INV-S4）：stopping/stopped 时明确表达「退出中/已退出」——
-              // 这是整个服务链的运行相位，比单看 main phase 更准确（退出中 main 可能已 STOPPED）。
-              sessionState === "stopping" ? (
+              // 安装标识（UUID）显示在**运行状态之前**（用户确认的落点）：
+              //   灰度名单按它匹配（RELEASE-CHANNEL-CONTRACT §5.2），用户需要能直接读到并报给我们。
+              //   故**完整显示、不截断**，并支持点击复制，省去手工选中一段长 UUID。
+              // ⚠ 外层 StatusBar 的 right 容器是 overflow-hidden + text-ellipsis（通用框架行为，
+              //   所有页面共用，不应为一个页面改它）。故这里让 **UUID 自身 shrink-0 不可压缩**，
+              //   否则中等窗口宽度下它会被截断成 "550e8400-e29b-41d4-a716-…"（用户要求完整显示）。
+              //   代价：极窄窗口下是**运行状态文字**被压缩（它是可读摘要，且缩窄时整体转为纵向布局）。
+              <span className="inline-flex min-w-0 items-center gap-2">
+                {status?.installId ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = String(status.installId);
+                      // 127.0.0.1 在浏览器规范中属 secure context，clipboard 通常可用；
+                      // 但面板也可能经局域网别名/非常规来源打开，故保留回退路径。
+                      const fallback = () => {
+                        try {
+                          const ta = document.createElement("textarea");
+                          ta.value = id;
+                          ta.style.position = "fixed";
+                          ta.style.opacity = "0";
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                          toast.success("已复制 UUID");
+                        } catch {
+                          toast.error("复制失败，请手动选择");
+                        }
+                      };
+                      if (navigator.clipboard?.writeText) {
+                        navigator.clipboard.writeText(id).then(() => toast.success("已复制 UUID"), fallback);
+                      } else {
+                        fallback();
+                      }
+                    }}
+                    className="shrink-0 font-mono text-xs leading-tight text-muted-foreground transition-colors hover:text-foreground"
+                    title={"本机安装标识（灰度测试用）：" + String(status.installId) + "\n点击复制"}
+                  >
+                    {String(status.installId)}
+                  </button>
+                ) : null}
+                {
+                  // 会话生命周期优先（契约 §3，INV-S4）：stopping/stopped 时明确表达「退出中/已退出」——
+                  // 这是整个服务链的运行相位，比单看 main phase 更准确（退出中 main 可能已 STOPPED）。
+                  sessionState === "stopping" ? (
                 <span className="inline-flex items-center gap-1.5 text-xs leading-tight text-muted-foreground">
                   <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
                   管家正在退出（停止全部服务）…
@@ -168,6 +212,8 @@ export function SupervisorApp() {
                   管家离线
                 </span>
               )
+                }
+              </span>
             }
           />
         </section>

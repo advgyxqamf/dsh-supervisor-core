@@ -14,7 +14,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const exec = require('../exec');
+const exec = require('../util/exec');
 
 /** 平台不具备该能力时抛出（调用方据此给出明确提示，而非 catch 后误报「启动失败/端口冲突」）。 */
 class CapabilityError extends Error {

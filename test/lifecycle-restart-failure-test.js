@@ -14,7 +14,7 @@
 //     if (wasDesired === 'running') await this.start();   // 返回值丢弃
 //     return { ok: true };             // ← 无条件成功
 //
-// 于是 `POST /lifecycle/{id}/restart`（api/lifecycle.js:73）在「停不掉」或「起不来」时
+// 于是 `POST /lifecycle/{id}/restart`（api/domains/lifecycle.js）在「停不掉」或「起不来」时
 // 仍报成功 → 面板显示「已重启」而模块实际是死的/还活着。
 //
 // 这是 K4 修复（start/stop 尊重 `{ok:false}`）的**对称面被遗漏**：
@@ -30,7 +30,7 @@
 
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const { ManagedLifecycle } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'managed.js'));
+const { ManagedLifecycle } = require(path.join(ROOT, 'src', 'app', 'control', 'entry.js'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };

@@ -1,0 +1,53 @@
+'use strict';
+
+// app/facade/lan.js —— lan(relay) 域**只读门面**（R7：facade 只留只读视图）。
+//
+// 步骤 7 迁移：自 control-view.js 逐字搬出；2026-09-17 R7 纯化：写动作 setLanFrp / lanFrpc /
+//   syncFrpc 下沉 app/domain-actions/lan.js —— 本文件只保留 listLan / frpStatus。
+// 导出契约不变：module.exports = { methods }；方法内部仍走 this。
+//
+// ⚠ 只读白名单（DG-14 强制）：listLan（读触发对账，见 FACADE_EXCEPTIONS）/ frpStatus。
+//   daemon 模式经 43108 ctl 委托；内嵌模式走 LanManager 只读方法。
+
+module.exports = { methods: {
+
+  // ---- 远程控制委托：全部转发给 LanManager ----
+  // L3b：daemon 监督模式 → 经 43108 ctl 委托（异步）；本地模式 → LanManager（同步）
+  // 令牌收敛（2026-09）：listLan 输出剔除 token/dshToken——
+  // /lan-access 允许 LAN/私网 Host 访问，直出 dshToken 会把 DSH 会话令牌泄漏给局域网；
+  // 权威仍在 DshTokenService（relay 经 tokenOf 内部读取，无需经此透传）。返回形如 {items,addresses}。
+  listLan() {
+    // 白名单外显（2026-09 可诊断层）：只放行结构字段与注入状态 inject；任何令牌字段都不外传。
+    const sanitize = (r) => {
+      if (!r || !r.items) return r;
+      return { items: r.items.map((it) => {
+        const out = {
+          id: it.id, name: it.name, dshPort: it.dshPort, wanPort: it.wanPort,
+          enabled: !!it.enabled, localPort: it.localPort || null, running: !!it.running,
+          // FRP 修复：公网暴露状态（非机密）必须过白名单，否则 UI 无法呈现开关与远端端口。
+          frpEnabled: it.frpEnabled === true,
+          frpRemotePort: it.frpRemotePort || null,
+          // 令牌**状态**（布尔，不泄明文）——公网暴露的安全闸要求已设令牌，UI 据此引导。
+          tokenSet: !!String(it.token || '').trim(),
+        };
+        if (it.inject) {
+          out.inject = {
+            tokenSet: !!it.inject.tokenSet,
+            cookieReady: !!it.inject.cookieReady,
+            lastOkAt: it.inject.lastOkAt || null,
+            lastError: it.inject.lastError || null,
+            lastErrorAt: it.inject.lastErrorAt || null,
+          };
+        }
+        return out;
+      }), addresses: r.addresses || [] };
+    };
+    if (this.daemons.enabled() /* daemon 启用即 ctl */) return this.ctl.lanCall('list').then(sanitize).catch(() => ({ items: [], addresses: [] }));
+    try { return sanitize(this.lan.list()); } catch { return { items: [], addresses: [] }; }
+  },
+
+  frpStatus() {
+    if (this.daemons.enabled() /* daemon 启用即 ctl */) return this.ctl.lanCall('frpStatus');
+    return this.lan.frpStatus();
+  },
+} };

@@ -1,0 +1,201 @@
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// app/assembly/collaborators.js —— 具名协作方装配（级 2：真 ctor 注入）。
+//
+// ## 级 2 走完了什么
+//   批 9 的薄委托（协作方方法转发 host[既有方法]）已按切面逐批替换为**工厂 + deps**：
+//     · state   → state/collaborator.createStateStore(deps)（实现真在 state 里）
+//     · session → session/machine.createSession(deps)
+//     · control → control/collaborator.createControlPlane(deps)
+//   这三个协作方**自己持有实现**，可只 require 对应模块 + 假 deps 直接断言（DF-6）。
+//   host 只保留**兼容外壳**：旧方法名（_mPhase/_mSetPhase/…）是转发到 host.state/session 的
+//   薄方法，公共面（api/测试）不变。
+//
+// ## 未迁移的切面（薄委托仍在）
+//   ctl / daemons / main / views / audit / ui：其模块仍以 { methods } 形式装到 host；
+//   本文件的 THIN_SPEC 把它们收敛为具名协作方（转发到 host 上的既有实现）。
+//   后续批按同样手法逐个改为工厂即可（见 design-notes/EXEC3-app-ctor-injection.md 遗留）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+const { createStateStore } = require('../state/collaborator');
+const { createSession } = require('../session/machine');
+const { createControlPlane } = require('../control/collaborator');
+const { ENTRY_FIELDS, PROC_FIELDS } = require('../state/field-tables');
+
+// 薄委托切面 → { 协作方公开名: host 上的既有方法名 }
+const THIN_SPEC = {
+  ctl: {
+    call: '_ctlCall', lanCall: '_lanCtlCall',
+    lanPort: '_lanCtlPort', routerPort: '_routerCtlPort', routerFacade: '_makeRouterFacade',
+  },
+  daemons: {
+    enabled: 'lanDaemonEnabled',
+    routerActive: '_routerDaemonActive', lanActive: '_lanDaemonActive',
+    lifecycle: '_daemonLifecycle',
+    disableRouterPersist: '_disableRouterPersist',
+    ensureLanRuntime: '_ensureLanRuntime', ensureRouterRuntime: '_ensureRouterRuntime',
+    syncLanState: '_syncLanState', warnOccupied: '_warnOccupied',
+    managed: '_daemonManaged', lanManaged: '_lanManaged',
+    writeLanLock: '_writeLanLock', clearLanLock: '_clearLanLock',
+    writeRouterDaemonLock: '_writeRouterDaemonLock', clearRouterDaemonLock: '_clearRouterDaemonLock',
+  },
+  main: {
+    converge: '_dshConverge',
+    decideAction: '_decideMainAction', stateSnapshot: '_mainStateSnapshot',
+    applyHealthCheck: '_applyHealthCheck', bumpCrashWindow: '_bumpCrashWindow',
+    adopt: '_adopt', adoptObserved: '_adoptObserved',
+    applyPort: '_applyMainPort', beginRestart: '_beginRestart', enterRunning: '_enterRunning',
+    findManagedPort: '_findManagedDshPort',
+    startProcess: '_startProcess', stopProcess: 'stopProcess',
+    isManagedProcess: '_isManagedProcess', killAdopted: '_killAdopted', killSequence: '_killSequence',
+    actNote: '_actNote', shadowHeartbeat: '_shadowHeartbeatBeat', shadowTickNote: '_shadowTickNote',
+  },
+  views: {
+    dshMain: 'dshMainView', exposurePeers: 'exposurePeers',
+    routerDaemonActive: 'routerDaemonActive', routerStatus: 'routerStatus',
+    status: 'statusSummary',
+  },
+  audit: { orphan: '_orphanAudit' },
+  ui: { notify: 'notify' },
+};
+const THIN_NAMES = Object.keys(THIN_SPEC);
+
+/** 装配期校验：薄委托接口表里每个公开名都指向 host 上真实存在的函数。 */
+function assertCollaboratorTargets(host) {
+  const missing = [];
+  for (const name of THIN_NAMES) {
+    for (const [pub, src] of Object.entries(THIN_SPEC[name])) {
+      if (typeof host[src] !== 'function') missing.push(name + '.' + pub + ' -> ' + src);
+    }
+  }
+  if (missing.length) throw new Error('app/assembly/collaborators: 接口表指向缺失方法: ' + missing.join(', '));
+}
+
+/** 字段 helper（_mXxx/_mSetXxx）兼容外壳：委托到 state 协作方。 */
+function installFieldHelpers(host, state) {
+  for (const [suf, field] of ENTRY_FIELDS) {
+    host['_m' + suf] = function () { return state.field(field); };
+    host['_mSet' + suf] = function (v) { state.field(field, v); return host; };
+  }
+  for (const [suf, field, isBool] of PROC_FIELDS) {
+    host['_m' + suf] = function () { return state.procField(field); };
+    host['_mSet' + suf] = function (v) { state.procField(field, isBool ? v === true : v); return host; };
+  }
+}
+
+/** 安装 State 协作方 + 旧方法名兼容外壳。 */
+function installState(host) {
+  const state = createStateStore({
+    getConfig: () => host.config, getConfigPath: () => host.configPath,
+    getLogger: () => host.logger, getEvents: () => host.events,
+    getManagedObjects: () => host.managedObjects, getInstances: () => host.instances,
+    getViews: () => host.views, getIntents: () => host.intents,
+    getCrashHalted: () => host._crashHalted, setCrashHalted: (v) => { host._crashHalted = v; },
+    getManualRestart: () => host.manualRestart, setManualRestart: (v) => { host.manualRestart = v; },
+    getHold: () => host._upgradeHold, setHold: (v) => { host._upgradeHold = v; },
+    getSince: () => host._upgradeHoldSince, setSince: (v) => { host._upgradeHoldSince = v; },
+    stopProcess: (why) => host.stopProcess(why), tick: () => host.tick(),
+  });
+  host.state = state;
+
+  host._legacyToEntryPhase = (ph) => state.legacyToEntryPhase(ph);
+  host._entryToLegacyPhase = (ph) => state.entryToLegacyPhase(ph);
+  host._mPhase = () => state.phase();
+  host._mSetPhase = (u) => { state.setPhase(u); return host; };
+  host._mGuardian = () => state.guardian();
+  host.mainGuardian = () => state.mainGuardian();
+  host._mDesired = () => state.desired();
+  host._mSetDesired = (v) => { state.setDesired(v); return host; };
+  host._dshEntry = () => state.dshEntry();
+  host._mainFallbackEntry = () => state.fallbackEntry();
+  host._persistCrashField = () => state.persistCrashField();
+  host._mStore = () => state.store();
+  host._mField = function (name, v) {
+    return arguments.length >= 2 ? state.field(name, v) : state.field(name);
+  };
+  host._mProcField = function (name, v) {
+    return arguments.length >= 2 ? state.procField(name, v) : state.procField(name);
+  };
+  host._dshMainFile = () => state.mainMetaFile();
+  host._registryFileName = () => state.registryFileName();
+  host._readDshMain = () => state.readMainMeta();
+  host._readDshMainFile = () => state.readMainMetaFile();
+  host._writeDshMain = (meta) => state.writeMainMeta(meta);
+  host.writeState = (force) => state.write(force);
+  host.loadState = () => state.loadState();
+  host._migrateMainRecord = () => state.migrateMainRecord();
+  host.setDesired = (v) => state.setDesiredPublic(v);
+  host.requestRestart = () => state.requestRestart();
+  host.persistConfigPatch = (patch) => state.persistConfigPatch(patch);
+  host._enterUpgradeHold = () => state.enterUpgradeHold();
+  host._enterUpgradeHoldAsync = () => state.enterUpgradeHoldAsync();
+  host._exitUpgradeHold = (explicit) => state.exitUpgradeHold(explicit);
+  installFieldHelpers(host, state);
+  // 兼容访问器（phase/desired/child/…）安装到 host 实例（非 prototype）。
+  for (const name of Object.keys(state.accessors)) Object.defineProperty(host, name, state.accessors[name]);
+}
+
+/** 安装 Session 协作方 + 旧方法名/字段兼容外壳。 */
+function installSession(host) {
+  const session = createSession({
+    events: () => host.events,
+    desired: () => host.state.desired(),
+    crashHalted: () => host._crashHalted,
+  });
+  host.session = session;
+  host.sessionState = () => session.state();
+  host._setSessionState = (s) => { session.setState(s); };
+  host._sessionHalting = () => session.halting();
+  host._shouldRun = () => session.shouldRun();
+  Object.defineProperty(host, '_sessionState', {
+    get: () => session.state(),
+    set: (s) => { session.setState(s); },
+  });
+}
+
+/** 安装 Control 协作方 + 旧方法名兼容外壳。 */
+function installControl(host) {
+  const control = createControlPlane({
+    getLifecycleManager: () => host.lifecycleManager,
+    getState: () => host.state,
+    getManagedObjects: () => host.managedObjects,
+    getInstances: () => host.instances,
+    getConfig: () => host.config,
+    getCtl: () => host.ctl,
+    getDaemons: () => host.daemons,
+    getLogger: () => host.logger,
+  });
+  host.control = control;
+  host._syncDshLifecycleView = () => control.syncDshView();
+  host._syncRouterLifecycleView = (o) => control.syncRouterView(o);
+  host._syncInstancesLifecycleView = () => control.syncInstancesView();
+  host._managedSandboxSpec = (inst) => control.sandboxSpec(inst);
+  host._upsertManaged = (spec) => control.upsert(spec);
+  host._unregisterManaged = (id) => control.unregister(id);
+  host._managedMainSpec = () => control.mainSpec();
+  host._syncManagedRegistry = () => control.syncManagedRegistry();
+}
+
+/** 安装其余薄委托协作方（ctl/daemons/main/views/audit/ui）。 */
+function installThin(host) {
+  for (const name of THIN_NAMES) {
+    const obj = {};
+    for (const [pub, src] of Object.entries(THIN_SPEC[name])) {
+      obj[pub] = function (...args) { return host[src](...args); };
+    }
+    host[name] = obj;
+  }
+}
+
+/** 把协作方落到 host 实例（先真 ctor，后薄委托；validate 时校验薄委托目标存在）。 */
+function installCollaborators(host, options) {
+  installState(host);
+  installSession(host);
+  installControl(host);
+  installThin(host);
+  if (options && options.validate) assertCollaboratorTargets(host);
+  return host;
+}
+
+module.exports = { THIN_SPEC, SPEC: THIN_SPEC, THIN_NAMES, assertCollaboratorTargets, installCollaborators };

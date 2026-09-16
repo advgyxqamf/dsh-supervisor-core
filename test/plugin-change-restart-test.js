@@ -17,7 +17,9 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const ROOT = path.join(__dirname, '..');
-const { PluginManager } = require(path.join(ROOT, 'src', 'domains', 'plugin', 'plugins'));
+// 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：plugin 域补 index.js，
+// 原 plugins.js 拆为 index/ops/jobs/store（market.js 由 pluginmarket.js 改名）。
+const { PluginManager } = require(path.join(ROOT, 'src', 'domains', 'plugin'));
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x ? '  ← ' + x : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

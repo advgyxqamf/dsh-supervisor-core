@@ -141,9 +141,11 @@ registerDryRunApp();
   r = await api('POST', '/router/proxy/update/check', {});
   check('P14 更新检查端点', r.code === 200 && r.body.ok === true, r.code + ' ' + JSON.stringify(r.body));
 
-  // 13. account confirm/discard（不存在 id → 合理错误）
+  // 13. account discard（不存在 id → 合理错误）
+  //   ⚠ P15 原测 /router/providers/account/confirm —— 该端点已随 review 状态删除
+  //     （2026-09-16 Phase 5 / 决策 A6）。现断言"已不存在（404）"以锁住设计意图。
   r = await api('POST', '/router/providers/account/confirm', { id: 'nope', keyId: 'x' });
-  check('P15 confirm 未知供应商', r.code === 400 && r.body.ok === false, r.code + ' ' + JSON.stringify(r.body));
+  check('P15 confirm 端点已删除（404，review 状态已移除）', r.code === 404, r.code + ' ' + JSON.stringify(r.body));
   r = await api('POST', '/router/providers/account/discard', { id: 'nope', keyId: 'x' });
   check('P16 discard 未知供应商', r.code === 400 && r.body.ok === false, r.code + ' ' + JSON.stringify(r.body));
 

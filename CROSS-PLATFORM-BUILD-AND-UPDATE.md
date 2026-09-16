@@ -196,7 +196,7 @@ $ bash ci/check-glibc.sh <binary> 2.35
 
 ---
 
-## 四、完整构建矩阵（GitHub，三平台）
+## 四、完整构建矩阵（GitHub；壳**四平台**（linux/mac arm64/mac x64/win），见壳仓 `docs/RELEASE-STANDARD.md`）
 
 ### 4.1 目标产物矩阵
 
