@@ -24,7 +24,7 @@
 
 | # | CI 抓到的问题 | 本机能否发现 |
 |---|---|---|
-| 1 | `X-2` 文档含操作者绝对路径（`/home/bowen`） | 能（未跑全链） |
+| 1 | `X-2` 文档含操作者家目录绝对路径 | 能（未跑全链） |
 | 2 | 我自建门禁 `A-5` 的假阳性（按「本机」字面量判） | 能（未跑全链） |
 | 3 | **`windows-latest`：`The command line is too long.`**（cmd.exe 上限 8191，`scripts.test` 8593 字符）——同一提交 ubuntu/macOS **三矩阵全绿** | **不能** |
 | 4 | `chainFiles` 解析式 `-{1,2}require` 匹配不到 `-r`（`node --check` 通过但语义错） | 能（未跑全链） |
