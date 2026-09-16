@@ -22,6 +22,8 @@
 //   N-b  排除表里的文件必须真实存在（防排除表腐化为死引用）
 //   N-c  助手/fixture（`_` 前缀或非 `*-test.js`）不被误报
 //   N-d  反向：判据能识别"未入链的测试"（门禁非空转）
+//   N-e  scripts.test 长度 < 8000（Windows cmd.exe 命令行 8191 上限；
+//        实测只有 windows-latest 会因此失败，Linux/macOS 不受限）
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -45,7 +47,7 @@ const EXCLUDED = {
 function chainFiles() {
   const s = require(path.join(ROOT, 'package.json')).scripts.test;
   // 每条为 `node --require ./test/_preload.js test/<x>.js`（跨平台隔离预载）——剥掉前缀取文件名。
-  return s.split(' && ').map((x) => x.replace(/^node (--require \S+ )?/, '').trim());
+  return s.split(' && ').map((x) => x.replace(/^node (-{1,2}require \S+ )?/, '').trim());
 }
 
 /** 命名约定：`*-test.js` 为标准测试名。
@@ -105,6 +107,21 @@ function isTestFile(name) {
     && inChain.includes('test/round13-csp-probe-test.js'), 'ok');
   check('N-d 反向：isTestFile 不把助手当测试',
     !isTestFile('_ports.js') && !isTestFile('mock-target.js') && isTestFile('core-test.js'), 'ok');
+}
+
+// ── N-e：Windows 命令行长度守卫 ──
+//   Windows cmd.exe 命令行上限 8191 字符。scripts.test 是单条 && 巨链，
+//   一旦超过该上限，**只有 Windows 构建会失败**（Linux/macOS 的 shell 不受此限）——
+//   2026-09-17 CI 实测：windows-latest 报 "The command line is too long."，
+//   而 ubuntu-22.04 / macos-latest / macos-14 三个矩阵同时全绿。
+//   本判据把该平台差异固化为门禁，不再依赖 Windows CI 才发现。
+{
+  const len = require(path.join(ROOT, 'package.json')).scripts.test.length;
+  const LIMIT = 8000; // 8191 上限留 ~190 字符余量
+  check('N-e scripts.test 长度 < 8000（Windows cmd 命令行 8191 上限）', len < LIMIT, len + ' 字符');
+  // 反向：判据非空转（构造超长样本必须被检出）
+  const longSample = 'x'.repeat(9000);
+  check('N-e 反向：超长样本被检出', !(longSample.length < LIMIT), 'hit');
 }
 
 const failed = results.filter((r) => !r);

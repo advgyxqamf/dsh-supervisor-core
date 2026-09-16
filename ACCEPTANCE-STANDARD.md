@@ -36,6 +36,14 @@
    再 npm run build:launcher:all 且 DSH_LAUNCHER_REQUIRED=1（否则 all-platforms 的
    T6-d/T6-e **静默 SKIP = 该断言在 CI 永不检查**）。本机跑 npm test **不含这些步骤**。
 
+5. **平台原生的命令行上限**（2026-09-17 CI 实证）：`scripts.test` 是单条 `&&` 巨链，
+   增长到 8593 字符后，**`windows-latest` 报 `The command line is too long.`**
+   （cmd.exe 上限 8191），而同一提交的 `ubuntu-22.04` / `macos-latest` / `macos-14`
+   **三个矩阵同时全绿**，且 `test` job 也全绿。
+   本机 Linux 跑一万遍**都不可能**发现这条 —— 修法是 `--require` → `-r` 缩短到 7711，
+   并把该平台差异固化为门禁 **N-e**（`test-chain-completeness-test.js`），
+   使其不再依赖 Windows CI 才发现。
+
 **结论：本机 npm test 的绿/红都不构成任何交付证据。**
 
 ---
