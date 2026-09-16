@@ -72,18 +72,28 @@ const ciText = fs.existsSync(path.join(ROOT, CI)) ? fs.readFileSync(path.join(RO
     !/needs:\s*precheck[\s\S]{0,400}?if:\s*[^\n]*need_build/.test(ciText), 'ok');
 }
 
-// ── A-5：根级文档不得把「本机」结果写成「验收」结论 ──
+// ── A-5：含验收结论的根级文档必须同时指向 CI ──
 {
-  // 违规句式：「本机」与「验收/已完成/通过」出现在同一行；规范自身与 README 除外。
+  // 判据：**给出验收结论**的根级文档，必须同时**指向 CI**——否则即「以本机结果作验收」。
+  // ⚠ 不按「本机」字面量判：正确的免责声明（如「本机自检，不构成验收证据」）
+  //   本就同时出现「本机」与「验收」两词，按字面量判会造成假阳性
+  //   （首版即因此误报 ARCHITECTURE-ACCEPTANCE.md，由 CI 发现）。
+  const VERDICT = /验收结论|验收通过|已验收|交付完成|验收状态/;
+  const CIREF = /(待 CI|CI 裁决|以 CI 为准|CI 四平台|CI 结果|CI 绿)/;
   const offenders = [];
   for (const f of fs.readdirSync(ROOT).filter((x) => x.endsWith('.md') && x !== 'README.md' && x !== STD)) {
     const s = fs.readFileSync(path.join(ROOT, f), 'utf8');
-    for (const line of s.split(String.fromCharCode(10))) {
-      if (/本机/.test(line) && /(验收|已完成|交付)/.test(line)) offenders.push(f);
-    }
+    if (VERDICT.test(s) && !CIREF.test(s)) offenders.push(f);
   }
-  check('A-5 根级文档未把本机结果写成验收结论', offenders.length === 0,
-    offenders.length ? offenders.join(', ') : 'ok');
+  check('A-5 含验收结论的根级文档均指向 CI（不得以本机结果作结论）',
+    offenders.length === 0, offenders.length ? offenders.join(', ') : 'ok');
+  // 反向：判据非空转（构造样本必须能被检出/不误报）
+  const badSample = '验收结论：本机全部测试通过。';
+  const goodSample = '验收状态：待 CI 裁决。本机自检完成，验收以 CI 为准。';
+  check('A-5 反向：以本机结果作结论的样本被检出',
+    VERDICT.test(badSample) && !CIREF.test(badSample), 'hit');
+  check('A-5 反向：指向 CI 的样本不误报',
+    !(VERDICT.test(goodSample) && !CIREF.test(goodSample)), 'miss');
 }
 
 // ── A-6：反向（门禁非空转） ──
