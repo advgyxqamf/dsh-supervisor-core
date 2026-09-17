@@ -31,7 +31,9 @@
 3. util/exec.js `DEFAULT_MAX_BUFFER`：仅 options() 内部使用。保留常量声明（门禁 G9-d 需要源码含 maxBuffer），去掉导出。
 4. util/srcpath.js `resolveSrcRoot`：仅 resolve()/describe() 内部使用。保留函数体，去掉导出。
 5. contract/registry.js `REASON`：仅 read() 内部使用；消费者 platform/distribution/registry.js 只调 read()。去掉导出。
-6. contract/runtime.js `file`：仅 read() 内部使用。去掉导出。
+6. contract/runtime.js `file`：曾按「仅 read() 内部使用」去掉导出，**该判断错误** ——
+   test/native-dsh-binding-test.js:123 调 `rc.file()` 定位契约写入路径（消费漏检）。
+   CI run 35196507963 以 `rc.file is not a function` 检出，已恢复导出并加注释。
 
 保留不动的、易被误判为死代码的项：
 - supervisor.js、各 daemon.js 为入口；各 contract.js 被门禁以 fs 读取。本范围内无孤儿文件：12 个文件全部有生产或门禁引用。
