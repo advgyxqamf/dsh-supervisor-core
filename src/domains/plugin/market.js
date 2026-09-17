@@ -75,14 +75,32 @@ class PluginMarket {
       return this._cache;
     }
     if (this._inFlight) return this._inFlight;
-    this._inFlight = this.buildIndex().finally(() => { this._inFlight = null; });
-    return this._inFlight;
+    return this._startBuild();
+  }
+
+  /** 启动一次构建并登记为并发去重引用，返回**原始** promise。
+   *  两条不变量必须同时成立：
+   *    (a) 无消费者的后台刷新失败不得成为进程级 unhandledRejection —— 靠给 raw **挂一个
+   *        no-op handler「标记已处理」**实现，而不是把 promise 消化掉；
+   *    (b) 被消费者取走时仍须如实失败 —— raw 的 reject 语义不变（api/domains/plugins.js 的
+   *        GET /plugins/market 分支据此回答 500）。
+   *  若改成「消化后存回 _inFlight」，则并发的 force 请求会取到这个已消化的 promise，
+   *  失败时 resolve 成 undefined → 200 + 空体，正是本仓最忌讳的「假成功」。 */
+  _startBuild() {
+    const raw = this.buildIndex();
+    raw.catch(() => {}); // 标记已处理：无人 await 时否则就是 unhandledRejection
+    this._inFlight = raw;
+    raw.then(() => {}, () => {}).then(() => { if (this._inFlight === raw) this._inFlight = null; });
+    return raw;
   }
 
   _refreshIfStale() {
     if (Date.now() - this._ts < this.ttl) return;
     if (this._inFlight) return;
-    this._inFlight = this.buildIndex().finally(() => { this._inFlight = null; });
+    // 后台刷新无消费者：额外接一个 warn（不静默）；raw 自身的 reject 语义不变（见 _startBuild）。
+    this._startBuild().catch((e) => {
+      this.logger.warn && this.logger.warn('market: 后台刷新索引失败（沿用旧缓存）: ' + ((e && e.message) || e));
+    });
   }
 
   async buildIndex() {

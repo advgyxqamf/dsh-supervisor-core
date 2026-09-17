@@ -19,7 +19,7 @@ const { IntentLedger } = require('../../../app/state/intents');
 // DS-G4（§4.2 反转法）：日志汇聚业务源名单 / 令牌分类的唯一声明处，require 即注入 platform。
 // 必须在 LogCore.init（构造 EventHub）与 new DshTokenService 之前。
 require('../log-sources');
-require('../../../app/settings/token-kinds');
+const { TOKEN_FILE_NAME } = require('../../../app/settings/token-kinds');
 
 function composeCore(host, rawConfig, configPath) {
     host.config = normalize(rawConfig, domainConfigExtension());
@@ -145,7 +145,7 @@ function composeCore(host, rawConfig, configPath) {
     host.tokenService = new DshTokenService({ logger: host.logger, events: host.events });
     // main 统一守卫 spawn（已废弃 systemd 托管）；纯 stdout 源 + 本地原文恢复文件（0600）：
     // 守卫重启后从文件尾恢复令牌，免重建 main 的会话中断。
-    host.tokenService.attach('main', { file: path.join(path.dirname(host.config.stateFile), 'dsh-main-token.log') });
+    host.tokenService.attach('main', { file: path.join(path.dirname(host.config.stateFile), TOKEN_FILE_NAME) });
     host.tokenService.onChange((id, token) => {
       if (host.lanDaemonEnabled()) { try { host._syncLanState(); } catch {} return; }
       if (host.lan) { try { host.lan.applyToken(id, token); } catch (e) { host.logger.warn && host.logger.warn('lan applyToken(' + id + '): ' + e.message); } }

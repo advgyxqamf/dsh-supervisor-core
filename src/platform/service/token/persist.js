@@ -147,26 +147,12 @@ function readTailLines(file, opts) {
   finally { try { if (fd !== undefined) fs.closeSync(fd); } catch { /* 关闭失败无影响 */ } }
 }
 
-// DS-G4：恢复文件名注入（platform 去域名词）。
-// 平台不硬编码业务文件名；默认名由 app/ 装配期经 configureTokenFileName 注入，未注入时为通用名 token.log，生产路径始终注入。
-const DEFAULT_TOKEN_FILE_NAME = 'token.log';
-let _tokenFileName = DEFAULT_TOKEN_FILE_NAME;
-
-/** 注入令牌恢复文件名（装配期调用；非空字符串才生效，幂等）。 */
-function configureTokenFileName(name) {
-  if (typeof name === 'string' && name) _tokenFileName = name;
-}
-
-/** 目标状态目录下的令牌恢复文件名（路径规则集中一处）。文件名来自注入，未注入时为通用默认名。 */
-function tokenFileName(stateFile) {
-  return path.join(path.dirname(path.resolve(stateFile)), _tokenFileName);
-}
-
+// 恢复文件名的声明处已上移到 app/settings/token-kinds.js 的 TOKEN_FILE_NAME，由
+//   assembly/compose/core.js 直接取用拼装 attach 路径；platform 侧不再持有文件名
+//   注入链（积压 #24：原注入链写而不读，已删）。
 module.exports = {
   PERSIST_LIMITS,
   writeAtomic,
   appendByRotation,
   readTailLines,
-  tokenFileName,
-  configureTokenFileName,
 };

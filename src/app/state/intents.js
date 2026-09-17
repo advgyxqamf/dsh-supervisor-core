@@ -30,16 +30,6 @@ class IntentLedger {
     return p;
   }
 
-  /** 非破坏性（不消费）；收敛循环决策用。 */
-  has(intent) {
-    return this._pending.has(intent);
-  }
-
-  /** 守护 gate 的"显式动作穿透"判定。 */
-  any() {
-    return this._pending.size > 0;
-  }
-
   /** 仅测试/守卫 shutdown 用。 */
   clear() {
     this._pending.clear();

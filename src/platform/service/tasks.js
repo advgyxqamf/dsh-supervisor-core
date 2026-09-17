@@ -4,6 +4,8 @@
 // 统一状态机 pending -> running -> succeeded|failed|skipped|canceled；任何时刻有可观测状态 + step 级进度
 // + 有界日志；持久化到 <产品状态根>/supervisor/tasks.json，守卫重启后仍可查看。
 // 各业务模块只保留执行逻辑，任务生命周期统一交给本注册表。
+// 注：canceled 现为防御性保留的识别态 —— 生产者（原 cancel()）因全仓无取消路径已删（积压 #22），
+//   _finish 仍接受该值、下游映射仍按 canceled -> failed 归类，不要再据本行恢复 cancel()。
 
 const path = require('node:path');
 const taskStore = require('./task-store');
@@ -209,11 +211,6 @@ class TaskRegistry {
   /** 任务跳过（无需执行，如已是最新）。 */
   skip(taskId, reason, extra) {
     return this._finish(taskId, 'skipped', reason, extra);
-  }
-
-  /** 任务取消。 */
-  cancel(taskId, reason) {
-    return this._finish(taskId, 'canceled', reason, null);
   }
 
   _finish(taskId, state, error, extra) {

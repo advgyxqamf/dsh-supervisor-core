@@ -8,7 +8,6 @@ const execPath = require('../../platform/os/exec-path');
 const path = require('node:path');
 const fs = require('node:fs');
 const ports = require('../../platform/service/ports').shared;
-const { registerAll } = require('../../app/control/adapters');
 const { createShellWatchdog } = require('../../domains/shell/watchdog');
 const pidlook = require('../../platform/os/pidlookup');
 const platform = require('../../platform/os/index');

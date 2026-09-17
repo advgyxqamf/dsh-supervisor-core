@@ -2,12 +2,12 @@
 
 // LogCore：每进程唯一日志/事件核心（platform 层一等原语）。进程入口调用一次
 // LogCore.init(opts)，此后统一经 LogCore.get() 消费 logger/events/dshWriter/hub，
-// 消灭散落的 new Events/createLogger/Rotator/LineBuffer（守卫侧另有 EventHub 汇聚）。
+// 消灭散落的 new Events/createLogger/Rotator（守卫侧另有 EventHub 汇聚）。
 // 单例语义：Node 模块缓存按进程天然唯一；init 同 process 幂等、异 process 抛错（防误用）。
 
 const path = require('node:path');
 const Events = require('./events');
-const { createLogger, Rotator, LineBuffer } = require('./log');
+const { createLogger, Rotator } = require('./log');
 const { EventHub, EventReader } = require('./hub');
 
 // DS-G4 生产装配注入（反转法）：platform 层代码字面量不得含业务域名词；业务源名单

@@ -1,14 +1,15 @@
 'use strict';
 
 // app/settings/token-kinds.js —— 令牌分类/恢复文件名/源推断的业务声明（DS-G4 §4.2 反转法唯一声明处）。
-// platform 令牌组件只保留注册接口（kinds/pool/persist），值须与 platform 同名字面量逐字一致。
+// platform 令牌组件只保留注册接口（kinds/pool），值须与 platform 同名字面量逐字一致。
 // 注入时机：require 即注入（模块顶层副作用），app/assembly/compose.js 构造 DshTokenService 前 require 本模块；
-//   Node 模块缓存保证只注入一次。未注入时 kind 注册表为空、无推断映射、恢复文件用通用名。
+//   Node 模块缓存保证只注入一次。未注入时 kind 注册表为空、无推断映射。
 // 纪律：只做数据声明 + 注入调用；只 require 被注入的 platform 模块，绝不反向依赖域/编排对象。
+// 恢复文件名（TOKEN_FILE_NAME）不再是「注入对」：platform 侧的同名注入链因写而不读已删（积压 #24），
+//   本常量改为由消费方 assembly/compose/core.js 直接取用，全仓保持单一命名声明处。
 
 const kinds = require('../../platform/service/token/kinds');
 const pool = require('../../platform/service/token/pool');
-const persist = require('../../platform/service/token/persist');
 
 /** §1 全部 kind（顺序与 SSOT 表格一致）；值须与 platform kinds.js 同名对象逐字一致。 */
 const KINDS = {
@@ -92,12 +93,11 @@ const KIND_INFERENCE = {
   fileKind: 'dsh-main',
 };
 
-/** 令牌恢复文件默认名（须与 platform token/persist 的 tokenFileName 一致）。 */
+/** 令牌恢复文件名（全仓唯一声明的命名处；消费方 assembly/compose/core.js 的 attach 路径）。 */
 const TOKEN_FILE_NAME = 'dsh-main-token.log';
 
 // 注入（require 即生效；幂等）
 kinds.setKinds(KINDS);
 pool.configureKindInference(KIND_INFERENCE);
-persist.configureTokenFileName(TOKEN_FILE_NAME);
 
-module.exports = { KINDS };
+module.exports = { KINDS, TOKEN_FILE_NAME };

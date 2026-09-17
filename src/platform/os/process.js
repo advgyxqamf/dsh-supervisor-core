@@ -7,12 +7,6 @@ const { execFile } = require('node:child_process');
 
 const isWindows = process.platform === 'win32';
 
-function isAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; }
-  catch (e) { return !!e && e.code === 'EPERM'; }
-}
-
 /** 向进程（组）发信号：POSIX 先组信号（-pid），失败退单进程；
  *  Windows 仅单进程（树语义由 killTree 提供）。 */
 function signalProcess(pid, sig) {
@@ -38,4 +32,4 @@ function killTree(pid, sig, cb) {
   if (cb) process.nextTick(cb, null);
 }
 
-module.exports = { isAlive, signalProcess, killTree };
+module.exports = { signalProcess, killTree };

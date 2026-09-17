@@ -20,7 +20,9 @@ async function checkUpdates(ctx, force) {
       else {
         // 插件均为第三方 npm 包：维持「取全量最高」语义（他人 tag 策略不受控）。
         if (st === 'npm' && ctx.dist) { try { latest = await ctx.dist.fetchNpmLatest(p.name); } catch {} }
-        ctx._updCache[p.name] = { latest, at: Date.now() };
+        // 只在**取到**时写缓存：失败（latest=null）若写进去，等于把「registry 不可达」负缓存
+        // _updTTL 之久，此后 checkUpdates 一律显示「无更新」且不再重试（backlog #13）。
+        if (latest !== null) ctx._updCache[p.name] = { latest, at: Date.now() };
       }
       meta.set(p.name, { specType: st, latest });
     }
@@ -55,7 +57,8 @@ async function update(ctx, name, targetStr) {
   if (c && (Date.now() - c.at) < ctx._updTTL) latest = c.latest;
   else {
     if (ctx.dist) { try { latest = await ctx.dist.fetchNpmLatest(name); } catch {} }
-    ctx._updCache[name] = { latest, at: Date.now() };
+    // 与 checkUpdates 同一负缓存口径（同文件第二处写入点，同类缺陷一并收口）：取失败不写缓存。
+    if (latest !== null) ctx._updCache[name] = { latest, at: Date.now() };
   }
   if (!latest) return { ok: false, error: '无法获取 ' + name + ' 的最新版本（registry 不可达），请检查网络后重试' };
   const job = ctx.jobs.createJob('update', name, targetStr || 'native', targets);

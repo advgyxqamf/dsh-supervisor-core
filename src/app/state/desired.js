@@ -54,10 +54,13 @@ function createDesired(deps) {
     return { ok: true };
   }
 
-  /** config.json 补丁持久化；原子写 0600。 */
+  /** config.json 补丁持久化；原子写 0600。
+   *  返回**落盘成败**：成功 true；无 configPath（未配置落点）或写失败均 false。
+   *  为什么返回布尔：调用方需要如实上报"配置是否真的落盘"，此前只能靠"回读 configPath 逐键比对"
+   *  来核验 —— 那是第二套落盘判定，与这里必然分叉（P4-A #6）。既有调用方一律忽略返回值，故向后兼容。 */
   function persistConfigPatch(patch) {
     const p = configPath();
-    if (!p) return;
+    if (!p) return false; // 无落点 = 未持久化（如实回 false，不再静默返回 undefined）
     try {
       let cur = {};
       try { cur = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {}
@@ -66,9 +69,11 @@ function createDesired(deps) {
       const tmp = p + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(cur, null, 2), { mode: 0o600 });
       fs.renameSync(tmp, p);
+      return true;
     } catch (e) {
       const l = logger();
       if (l && l.warn) l.warn('config persist failed: ' + e.message);
+      return false;
     }
   }
 

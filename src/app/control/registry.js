@@ -46,7 +46,6 @@ class ManagedRegistry {
     this._objects = [];           // 内存目录（顺序 = 注册序）
     this._byId = new Map();
     this._adapters = {};          // kind -> { observe, apply }
-    this._loaded = false;
     // 是否「从既有磁盘文件加载」（阶段 2 状态单源迁移判定）：
     //   true  = 历史库已有权威目录 -> 以目录 desired 为准，state.json 不回灌（纯投影）；
     //   false = 目录文件原不存在（首启/老库迁移）-> 允许 state.json 的 desired 作一次性种子。
@@ -85,7 +84,6 @@ class ManagedRegistry {
           this._log('warn', 'managed-objects 条目损坏已跳过(' + ((o && o.kind) || '?') + ':' + ((o && o.id) || '?') + '): ' + ((err && err.message) || err));
         }
       }
-      this._loaded = true;
     } catch { /* 首次启动/文件缺失：空目录 */ }
   }
 

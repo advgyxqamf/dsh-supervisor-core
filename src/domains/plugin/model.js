@@ -33,7 +33,13 @@ function planJobCleanup(ids, max = MAX_JOBS) {
   return ids.slice(0, ids.length - max);
 }
 
-/** TaskRegistry 状态映射为作业视图状态（succeeded/skipped->done；failed/canceled->failed）。 */
+/** TaskRegistry 状态映射为作业视图状态（succeeded/skipped->done；failed/canceled->failed）。
+ *  ⚠ **有意平行**（不抽公共函数）：同一映射另有两处平行实现，分属三个域 ——
+ *    · domains/instance/model.js 的 `taskStateToView`
+ *    · domains/router/ops/apps-registry.js 中的内联三元表达式
+ *  抽公共函数须三处同批改造（跨域半改比平行更危险，backlog #30 已裁定）。
+ *  改动本映射语义时必须**三处同批**，否则同一 TaskRegistry 状态在插件/实例/应用三种视图上
+ *  会给出不同结果。 */
 function taskStateToJobState(s) {
   return (s === 'succeeded' || s === 'skipped') ? 'done'
     : (s === 'failed' || s === 'canceled') ? 'failed'

@@ -36,6 +36,8 @@ function createShellWatchdog(deps) {
   let expectedSince = null;
   let phaseStale = false;
   let phaseStaleWarned = false;
+  let journalStale = false;
+  let journalStaleWarned = false;
 
   const log = (m) => { try { logger.info && logger.info('[shell-watchdog] ' + m); } catch {} };
   const warn = (m) => { try { logger.warn && logger.warn('[shell-watchdog] ' + m); } catch {} };
@@ -57,7 +59,7 @@ function createShellWatchdog(deps) {
     let phase = "";
     try { const id = shell.identity(); phase = String((id && id.phase) || ""); } catch {}
     const inUpdate = isUpdatePhase(phase);
-    if (!inUpdate) { expectedSince = null; phaseStale = false; return; }
+    if (!inUpdate) { expectedSince = null; phaseStale = false; phaseStaleWarned = false; return; }
     if (expectedSince === null) expectedSince = t;
     const maxAge = config.shellWatchdogPhaseMaxAgeMs || DEFAULTS.phaseMaxAgeMs;
     phaseStale = (t - expectedSince) >= maxAge;
@@ -67,7 +69,29 @@ function createShellWatchdog(deps) {
     }
   }
 
-  /** 壳是否处于预期缺席：更新/重启相位（且未陈旧）或有未确认的更新账本。 */
+  /** 更新账本时效跟踪（由 tick 每拍调用，与 updatePhaseTracking 对称）。
+   *  账本只由壳侧上报（journal.js markPending）写入，`startedAt` 是**唯一**时间戳（ISO 串）；
+   *  `lastAttemptAt` 只在默认形状里声明、全仓无写入点，不可依赖。
+   *  壳 pending 后一直不回来确认时 j.to 会永久留着，只看 j.to 会让宽限永远走 updateGraceMs
+   *  （自愈被拖慢），故超过 phaseMaxAgeMs 即判陈旧、不再据此延长宽限（并 warn 一次）。
+   *  ⚠ 无法解析 `startedAt` 时按「未陈旧」处理：既有测试（watchdog-phase-freshness N-d）
+   *    用无 startedAt 的账本桩锁定「未确认账本 → 预期缺席」语义，不得改变该行为。 */
+  function updateJournalTracking(t) {
+    let j = null;
+    try { j = shell.readJournal && shell.readJournal(); } catch {}
+    if (!j || !j.to || j.confirmed) { journalStale = false; journalStaleWarned = false; return; }
+    const t0 = Date.parse(String(j.startedAt || ''));
+    if (!Number.isFinite(t0)) { journalStale = false; return; }
+    const maxAge = config.shellWatchdogPhaseMaxAgeMs || DEFAULTS.phaseMaxAgeMs;
+    journalStale = (t - t0) >= maxAge;
+    if (journalStale && !journalStaleWarned) {
+      journalStaleWarned = true;
+      warn('更新账本未确认已超 ' + Math.round((t - t0) / 1000) + 's（> ' + Math.round(maxAge / 1000) + 's），判定为陈旧；不再据此延长宽限');
+    }
+  }
+
+  /** 壳是否处于预期缺席：更新/重启相位（且未陈旧）或有**未过时效**的未确认更新账本。
+   *  只读快照：账本时效由 updateJournalTracking 每拍算好，本函数不得产生副作用。 */
   function expectedAbsence() {
     let phase = '';
     try { const id = shell.identity(); phase = String((id && id.phase) || ''); } catch {}
@@ -75,7 +99,8 @@ function createShellWatchdog(deps) {
     if (inUpdate && !phaseStale) return true;
     try {
       const j = shell.readJournal && shell.readJournal();
-      if (j && j.to && !j.confirmed) return true;
+      // journalStale 由每拍更新；陈旧账本不再算「预期缺席」，让看护按正常宽限介入。
+      if (j && j.to && !j.confirmed) return !journalStale;
     } catch {}
     return false;
   }
@@ -97,6 +122,7 @@ function createShellWatchdog(deps) {
       const absentForMs = alive > 0 ? null : (missingSince === null ? null : (t - missingSince));
       // 每拍都跟踪相位（不只缺失时），否则陈旧判定要多等一轮，且存活期相位变化无法复位计时。
       updatePhaseTracking(t);
+      updateJournalTracking(t);
       const expected = absentForMs === null ? false : expectedAbsence();
       const exe = exePath();
       restarts = restarts.filter((x) => t - x < (config.shellWatchdogWindowMs || DEFAULTS.windowMs));
@@ -164,7 +190,7 @@ function createShellWatchdog(deps) {
   }
 
   /** 仅供测试：重置内部状态。 */
-  function _reset() { missingSince = null; restarts = []; busy = false; lastSkipReason = null; everSawAlive = false; expectedSince = null; phaseStale = false; phaseStaleWarned = false; }
+  function _reset() { missingSince = null; restarts = []; busy = false; lastSkipReason = null; everSawAlive = false; expectedSince = null; phaseStale = false; phaseStaleWarned = false; journalStale = false; journalStaleWarned = false; }
 
   return { tick, status, _reset, intervalMs: config.shellWatchdogIntervalMs || DEFAULTS.intervalMs };
 }
