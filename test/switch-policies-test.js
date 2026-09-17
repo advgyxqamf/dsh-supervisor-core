@@ -74,11 +74,16 @@ const { decideFailure, headerRetryMs, bodyResetMs } = require(path.join(ROOT, 's
 // ── retry 时长解析与 providers/base 逐字对齐（防两处漂移）──
 {
   const base = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'base'));
+  // 绝对时刻样本（retry-after 的 HTTP-date、resets at <ISO>）返回「距该时刻的剩余 ms」，
+  // 两侧各自调用 Date.now()，相隔的毫秒差会让 === 偶发假红（Windows CI 实测 1ms）。
+  // 容差 50ms 远小于任何语义差异（样本间隔为秒/小时级），不会掩盖真实漂移。
+  const sameMs = (x, y) => (x === y) ||
+    (typeof x === 'number' && typeof y === 'number' && Math.abs(x - y) <= 50);
   for (const h of [{}, { 'retry-after': '120' }, { 'retry-after': new Date(Date.now() + 90000).toUTCString() }, { 'x-ratelimit-reset-ms': String(Date.now() + 5000) }]) {
-    check('S2 headerRetryMs 与 base 一致 ' + JSON.stringify(h), headerRetryMs(h) === base.headerRetryMs(h), String(headerRetryMs(h)));
+    check('S2 headerRetryMs 与 base 一致 ' + JSON.stringify(h), sameMs(headerRetryMs(h), base.headerRetryMs(h)), String(headerRetryMs(h)));
   }
   for (const b of ['resets in 5 min', 'retry in 30 sec', 'resets in 2 hour', 'resets at ' + new Date(Date.now() + 7200000).toISOString(), 'no time info']) {
-    check('S2 bodyResetMs 与 base 一致', bodyResetMs(b) === base.bodyResetMs(b), b);
+    check('S2 bodyResetMs 与 base 一致', sameMs(bodyResetMs(b), base.bodyResetMs(b)), b);
   }
   // 反向：判据非空转
   check('反向：window 无 Retry-After/体时间 → retryMs=0（上层走默认）', decideFailure('window', { status: 429, key: 'k' }).retryMs === 0, '');
