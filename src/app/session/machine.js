@@ -1,10 +1,7 @@
 'use strict';
 
-// app/session/machine.js —— 会话状态机（真 ctor 注入工厂）。
-// 自己持有会话态：createSession({ events, desired, crashHalted })，可只 require 本模块 + 假 deps 断言。
-// deps 均为惰性取值函数（装配期 host.config/logger 尚未就绪）：
-//   events() EventHub 适配器（有 append 即用，可返回 null）；desired() 'running'|'stopped'；
-//   crashHalted() 宿主瞬态字段 _crashHalted。
+// 会话状态机（真 ctor 注入工厂）：自己持有会话态，可只 require 本模块 + 假 deps 断言。
+// deps 均为惰性取值函数（装配期 host.config/logger 尚未就绪）。
 
 function createSession(deps) {
   const g = deps || {};

@@ -1,6 +1,6 @@
 'use strict';
 
-// S2 失败反应纯策略（原 switch.js:87-112 的判定部分下沉）。
+// S2 失败反应纯策略。
 // 纯：零 require / 零 this / 零 IO。retry 时长解析与 providers/base 的
 // headerRetryMs/bodyResetMs 逐字对齐（纯策略不得反向依赖有状态 provider 文件）。
 

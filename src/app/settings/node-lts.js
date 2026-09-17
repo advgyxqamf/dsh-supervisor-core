@@ -1,14 +1,13 @@
 'use strict';
 
-// app/settings/node-lts.js —— Node LTS 在线检查门面（本地判定 + 可刷新缓存）。
+// Node LTS 在线检查门面（本地判定 + 可刷新缓存）。
 // 导出形态 { methods }，方法经 this 协作。
 const fs = require('node:fs');
 const path = require('node:path');
 
 module.exports = {
   methods: {
-    /** Node LTS 在线检查（6h 缓存 + 失败降级）：探测当前 node 运行版本并给出 LTS 建议。
-     *  实现不做远端查询（避免守卫启动依赖网络）——本地判定 + 可刷新缓存；
+    /** 6h 缓存 + 失败降级：不做远端查询（避免守卫启动依赖网络），本地判定 + 可刷新缓存；
      *  失败返回 { ok:false, error } 由前端降级展示，绝不抛异常。 */
     async nodeLtsStatus() {
       try {

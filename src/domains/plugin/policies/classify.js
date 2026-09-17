@@ -2,7 +2,6 @@
 
 // 插件市场分类与作者启发（纯，无 IO）：关键词分类表 + classify + pickAuthor。
 
-// 分类关键词启发
 const CATEGORIES = {
   '官方生态': ['@deepseek-ai', 'deepseek-harness官方', 'official'],
   '免费模型源': ['free-provider', 'free-vision', 'opus', 'codex', 'openrouter', 'provider', 'subscription', 'chatgpt', 'gemini', 'claude'],

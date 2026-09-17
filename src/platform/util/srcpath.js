@@ -57,9 +57,8 @@ function describe() {
 }
 
 /** 定位包根（含 package.json 的目录）。从本模块位置逐级上溯，比固定层数稳健；
- *  兜底 cwd（开发态直接 node src/... 运行）。同类缺陷曾因固定相对路径推算而失效。 */
+ *  兜底 cwd（开发态直接 node src/... 运行）。 */
 function resolvePackageRoot() {
-  // 从本模块位置逐级上溯找 package.json（比固定层数稳健）。
   let dir = __dirname;
   for (let i = 0; i < 6; i++) {
     if (fs.existsSync(path.join(dir, 'package.json'))) return dir;
@@ -67,7 +66,6 @@ function resolvePackageRoot() {
     if (parent === dir) break;
     dir = parent;
   }
-  // 兜底：cwd（开发态直接 node src/... 运行）
   if (fs.existsSync(path.join(process.cwd(), 'package.json'))) return process.cwd();
   return null;
 }

@@ -61,7 +61,6 @@ function protectDir(dir) {
     : { ok: false, mode: 'icacls-dir', reason: r.error || ('退出码 ' + r.code) };
 }
 
-/** 确保目录存在并施加保护（创建 + 保护一步到位）。 */
 function ensurePrivateDir(dir) {
   try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return { ok: false, mode: 'mkdir', reason: e.message }; }
   return protectDir(dir);
@@ -70,8 +69,6 @@ function ensurePrivateDir(dir) {
 /** 写入敏感文件并施加保护（原子写 + 保护，避免写完到保护之间的可读窗口）。
  *  保护失败必须如实返回 ok:false；当前生产零调用点（唯一调用方是 cross-platform-test），
  *  但同目录 protectDir 是真正生效的那一半。
- *  @param {string} file 目标文件（自动创建父目录）
- *  @param {string|Buffer} data
  *  @returns {{ok:boolean, reason?:string, mode?:string}} */
 function writePrivate(file, data) {
   try {

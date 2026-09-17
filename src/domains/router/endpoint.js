@@ -84,7 +84,7 @@ function createEndpoint(deps) {
         try { p.apiPort = await ports.allocate('providerApi', 'providerApi:' + id); } catch (e) { p.apiPort = null; }
         if (p.apiPort) { try { if (!ports.isRegistered(p.apiPort)) ports.registerUser(p.apiPort, 'providerApi:' + id); } catch {} }
       }
-      // 工业标准（2026-09 池重构）：池满必须显式失败——绝不静默「激活了但无端点」。
+      // 工业标准：池满必须显式失败——绝不静默「激活了但无端点」。
       if (!p.apiPort) {
         p.activated = false;
         const cap = (ports.capacity && ports.capacity().providerApi) || null;

@@ -1,8 +1,6 @@
 'use strict';
 
-// app/state/main-store.js —— main 元数据（dsh-main.json）存储工厂（真 ctor 注入）。
-// createMainStore(deps) 自己持有 live 缓存与读写实现。
-// deps：getConfig() -> { stateFile }；getLogger() -> logger。
+// main 元数据（dsh-main.json）存储工厂（真 ctor 注入）：自己持有 live 缓存与读写实现。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,12 +11,11 @@ function createMainStore(deps) {
   const logger = () => (typeof g.getLogger === 'function' ? g.getLogger() : null);
   let live = null; // dsh-main.json live 缓存（LanManager mainOf 持同一对象，须原地修改）
 
-  /** <stateDir>/dsh-main.json。 */
   function dshMainFile() {
     try { return path.join(path.dirname(config().stateFile), 'dsh-main.json'); } catch { return null; }
   }
 
-  /** 受管对象目录持久化文件名（按守卫 stateFile 派生，隔离同目录多守卫）。 */
+  /** 按守卫 stateFile 派生，隔离同目录多守卫。 */
   function registryFileName() {
     try {
       const b = path.basename(config().stateFile || 'state.json', '.json');

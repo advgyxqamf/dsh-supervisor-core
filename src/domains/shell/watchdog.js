@@ -33,7 +33,6 @@ function createShellWatchdog(deps) {
   let busy = false;
   let lastSkipReason = null;
   let everSawAlive = false;
-  // P2：相位时效跟踪（由 tick 维护，见 updatePhaseTracking）
   let expectedSince = null;
   let phaseStale = false;
   let phaseStaleWarned = false;

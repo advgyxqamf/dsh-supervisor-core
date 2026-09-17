@@ -1,15 +1,13 @@
 'use strict';
 
 // 域：原生 DSH（app/native）—— 纯策略（无 fs / 无进程 / 无网络）。
-// 形态判定、状态视图、版本合法性与回滚判定。全部零副作用，可独立 require 单测。
-// 依赖：仅 ../../shared/version（纯）。
+// 全部零副作用，可独立 require 单测；只依赖 shared/version（纯）。
 
 const { semverCompare, VERSION_RE } = require('../../shared/version');
 
 /** 升级状态机的终态（其余状态视为「忙」）。 */
 const TERMINAL_STATES = ['idle', 'done', 'failed'];
 
-/** 是否处于升级/安装中（busy）：升级状态非终态。 */
 function busy(host) { return !TERMINAL_STATES.includes(host.upgradeState); }
 
 /** 升级状态简报（不含日志）。 */
@@ -48,10 +46,8 @@ function isBareCommand(configured) {
 /** 版本号合法性（空值视为「取最新」，合法）。 */
 function isValidVersion(version) { return !version || VERSION_RE.test(version); }
 
-/** latest > installed。 */
 function isNewer(a, b) { return semverCompare(a, b) > 0; }
 
-/** target <= installed（无需升级）。 */
 function isUpToDate(target, installed) { return semverCompare(target, installed) <= 0; }
 
 /** 升级失败后是否需回滚：自动回滚开启 + 有旧版本 + 磁盘版本存在且已变。 */

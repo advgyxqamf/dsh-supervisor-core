@@ -84,8 +84,7 @@ class LineBuffer {
   }
 }
 
-// 创建分级 logger。opts: { file, level='info', maxBytes=5MB, mirror=true }，
-// 返回 { debug, info, warn, error, writer: Rotator }。
+// 创建分级 logger。opts: { file, level='info', maxBytes=5MB, mirror=true }。
 function createLogger(opts) {
   const o = opts || {};
   const threshold = LEVELS[o.level] || LEVELS.info;

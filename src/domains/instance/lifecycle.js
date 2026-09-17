@@ -192,7 +192,7 @@ function createLifecycle(deps) {
         }
         case 'FAILED': {
           // 安装任务登记失败等会把进行中的安装误判 FAILED；若 npm 实际已成功（installOk===true），
-          // 必须自愈拉起，否则永久卡死（原自愈只认「安装超时」文案）。重试超限后不再自动拉起，交用户处理。
+          // 必须自愈拉起，否则永久卡死。重试超限后不再自动拉起，交用户处理。
           if (state.installOk === true && !st.running && !/重试超限/.test(state.lastError || '')) {
             const r = _systemdStart(inst);
             if (!r.ok) stateMachine.restart(stateDeps(), inst, '启动失败:' + r.error);

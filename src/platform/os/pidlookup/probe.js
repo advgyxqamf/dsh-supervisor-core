@@ -46,7 +46,6 @@ function linuxFind(port) {
 
 function macFind(port) {
   try {
-    // lsof 输出列：COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
     const out = ex.runOut('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN'], { timeoutMs: 3000 });
     if (!out) return null;
     return parseLsofPid(out);
@@ -59,7 +58,6 @@ function winFind(port) {
   // 滞后，但 PowerShell 输出的不确定性使守卫端口占用判定在 win runner 偶发失效，故回退 netstat；
   // relay 建连的可见滞后问题已由 targetReachable（TCP 直连）根治。
   try {
-    // netstat 输出例：TCP  127.0.0.1:41000  0.0.0.0:0  LISTENING  12345
     const out = ex.runOut('netstat', ['-ano'], { timeoutMs: 3000 });
     if (!out) return null;
     return parseNetstatPid(out, port);
@@ -105,7 +103,6 @@ function readCmdline(pid) {
     } catch { return null; }
   }
   if (isWindows) {
-    // wmic process where ProcessId=<pid> get CommandLine /value
     const out = ex.runOut('wmic', ['process', 'where', 'ProcessId=' + pid, 'get', 'CommandLine', '/value'], { timeoutMs: 5000 });
     // P1-2：wmic 取不到命令行时必须继续走下方回退。原实现在正则不命中时直接 return null，
     // 使回退永远不可达，isDshCmdline 恒 false，Windows 上既不能接管手动启动的 DSH 也不报错。

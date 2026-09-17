@@ -1,7 +1,6 @@
 'use strict';
 
-// 
-// 管家注册机（ManagedRegistry）—— 控制平面 v3 的声明目录（2026-09-06 定稿）。
+// 管家注册机（ManagedRegistry）—— 控制平面 v3 的声明目录。
 //
 // 定位：守卫核心层 = 大管家。本目录记录「管家直接负责」的受管对象的应然声明与所有权：
 //   - 身份（kind/id/name）
@@ -203,7 +202,7 @@ class ManagedRegistry {
     const e = this.get(id);
     if (!e) return { ok: false, error: '未注册: ' + id };
     const o = opts || {};
-    // 注意 P3 修复（2026-09-13）：**清掉节流游标**。
+    // **清掉节流游标**。
     //   _nextTickAt 原先只写不读其它、且**没有任何清除路径**（全仓仅 heartbeat 内一处读写）。
     //   对象注销后若同 id 重新注册，旧游标不会跟着新对象走（新对象是新 entry，天然无游标），
     //   故注销本身影响有限；真正的缺口是「守卫重启才自然丢失」——

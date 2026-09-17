@@ -112,7 +112,6 @@ async function probeOrigin(state, origin) {
   return { origin: o, ok: !!p.ok, latencyMs: p.latencyMs, probe: p.probe };
 }
 
-/** 生效的候选 registry 列表（用户配置或默认）。 */
 function registryOrigins(state) {
   return policies.effectiveOrigins(state.registryConfig, state.defaultRegistries);
 }

@@ -1,13 +1,10 @@
 'use strict';
 
-// 
 // app/assembly/compose/observers.js —— 组装第三步：实例事件接线 + 生命周期注册/视图同步。
 // 以 host 显式入参，零 this。
 // 实例事件（onRemoteChange/onRemove/onInstanceStart/onInstanceStop/onCreate/onDestroy）
 //   把域事件桥接到 relay 对账 / lan-state 收敛 / 受管目录申报；
 // 末段把全部模块注册进 LifecycleManager 并立即同步视图（必须在 start() 之前完成）。
-// 
-
 const { registerAll } = require('../../../app/control/adapters');
 
 function composeObservers(host) {

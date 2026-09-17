@@ -45,7 +45,6 @@ function guiCommand() {
   return cands[0];
 }
 
-/** 平台实现所需依赖经显式注入（不靠同一 this）。 */
 const DEPS = { guiCommand };
 
 /** 当前自启状态（三端同一 kind/on/gui 形态）。 */
@@ -57,7 +56,6 @@ function status() {
   return linux.status();
 }
 
-/** 服务链自启（守卫 + 面板）。 */
 function setAutostart(on) {
   if (isWindows) return win32.setAutostart(on, DEPS);
   if (isMac) return darwin.setAutostart(on, DEPS);

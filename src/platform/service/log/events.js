@@ -30,7 +30,6 @@ class Events {
     }
   }
 
-  // 从 meta 恢复 seq / rotatedSeq。成功返回 true。
   _loadMeta() {
     if (!this.metaFile) return false;
     try {

@@ -10,7 +10,6 @@
 
 const fs = require('node:fs');
 
-/** 本内核支持的契约版本。 */
 const SUPPORTED_SCHEMA = 2;
 
 /** 契约不可用时的理由码（供事件与诊断）。 */
@@ -22,7 +21,6 @@ const REASON = {
   EMPTY_CATALOG: 'contract-empty-catalog',
 };
 
-/** 规范化一个 origin（去尾斜杠）。 */
 function normOrigin(x) {
   return typeof x === 'string' ? x.trim().replace(/\/+$/, '') : '';
 }

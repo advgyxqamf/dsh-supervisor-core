@@ -1,9 +1,6 @@
 'use strict';
 
-// §7（步骤 7）拆分：app/control/scheduler.js —— 周期调度（tick：_dshConverge 别名）。
-// 逐字搬迁自 src/app/main/converge-view.js（tick；H 负责的 _dshSuperviseOnce 追加于同一模块）（原型 mixin），仅做两件事：
-//   1) 导出形态规范化：Object.getOwnPropertyDescriptors(X.prototype) -> { methods: { ... } }（契约 §2）；
-//   2) 方法体与注释逐字未改（含缩进）；方法内部继续以 this 协作（契约 §2：本步不做 ctor 注入）。
+// app/control/scheduler.js —— 周期调度（tick：_dshConverge 别名）。
 // 装配：app/assembly/compose.js 以 Object.assign(host, mod.methods) 注入（DS-G3）。
 
 module.exports = {

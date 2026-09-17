@@ -1,6 +1,6 @@
 'use strict';
 
-// 反代实例模型（原 instances/proxy-instance.js 上移）：一个账号（key）= 一个实例（硬规则）。
+// 反代实例模型：一个账号（key）= 一个实例（硬规则）。
 // 实例态按服务能力分四态：COLD 未启动（资源 0）、WARM 启动中（有进程未就绪，资源 1，不可服务）、
 // HOT 就绪（可立即服务）、DEAD 异常（进程在但不健康，资源 1，待回收）。注意：账号级冻结（frozen）
 // 不在实例态里，冻结是账号语义（base.applyDetection 管理）。实例记录与进程解耦：pid 不落盘，
@@ -90,7 +90,5 @@ function deserializeInstance(o) {
 
 /** 状态容器工厂（冻结导出名）：新建/包装一个实例状态容器。 */
 function stateContainer(opts) { return new ProxyInstance(opts || {}); }
-
-// 已删除 _set()/freeze()/unfreeze()（未接线死代码；冻结的真实语义在账号级，实例态只经 provider 直接赋值）。
 
 module.exports = { ProxyInstance, INSTANCE_STATES, isServable, occupiesSlot, stateContainer, serializeInstance, deserializeInstance };

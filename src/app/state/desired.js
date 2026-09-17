@@ -1,8 +1,6 @@
 'use strict';
 
-// app/state/desired.js —— 用户意图写入工厂（真 ctor 注入）。
-// createDesired(deps) 自己持有 setDesired/requestRestart/persistConfigPatch 实现，
-// 可只 require 本模块 + 假 deps 直测。
+// 用户意图写入工厂（真 ctor 注入）：可只 require 本模块 + 假 deps 直测。
 
 const fs = require('node:fs');
 
@@ -19,7 +17,7 @@ function createDesired(deps) {
   const tick = () => { if (typeof g.tick === 'function') g.tick(); };
   const stopProcess = (why) => { if (typeof g.stopProcess === 'function') g.stopProcess(why); };
 
-  /** 公开：设置用户期望运行态（/start、/stop）。 */
+  /** 设置用户期望运行态（/start、/stop）。 */
   function setDesired(v) {
     if (v !== 'running' && v !== 'stopped') return { error: 'invalid desired' };
     // 显式「启动」是用户意图，不受守护开关短路限制。
@@ -41,7 +39,6 @@ function createDesired(deps) {
     return { ok: true, desired: fields.desired() };
   }
 
-  /** 公开：手动重启请求。 */
   function requestRestart() {
     if (fields.desired() === 'stopped') {
       const ev = events();
@@ -57,7 +54,7 @@ function createDesired(deps) {
     return { ok: true };
   }
 
-  /** 公开：config.json 补丁持久化（原子写 0600）。 */
+  /** config.json 补丁持久化；原子写 0600。 */
   function persistConfigPatch(patch) {
     const p = configPath();
     if (!p) return;

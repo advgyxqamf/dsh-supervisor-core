@@ -99,7 +99,7 @@ const DOMAIN_DEPS = {
   ],
 };
 
-// 启用条件（本轮不做）：
+// 启用条件：
 //   1) 并行 guard 重构落地、supervisor 门面稳定；
 //   2) index.js 以 DOMAIN_DEPS 做装配期校验：域模块加载时断言
 //      "该域声明的成员在 sup 上可用（函数/对象）"，缺失即 fail-fast；

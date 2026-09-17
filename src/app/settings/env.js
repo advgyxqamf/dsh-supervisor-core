@@ -2,13 +2,12 @@
 
 const platform = require('../../platform/os/index');
 
-// app/settings/env.js —— 环境状态门面（壳写 runtime.json；EnvCatalog 声明式探测）。
+// 环境状态门面（壳写 runtime.json；EnvCatalog 声明式探测）。
 // 导出形态 { methods }，方法经 this 协作。
 const fs = require('node:fs');
 const path = require('node:path');
 const { EnvCatalog } = require('../../platform/service/env-catalog');
 
-// 环境目录摘要（仅本块使用）。
 function envCatalogSummary(that) {
   const cat = new EnvCatalog(that.config);
   const extra = {};
@@ -20,7 +19,6 @@ function envCatalogSummary(that) {
 
 module.exports = {
   methods: {
-    // ---- 环境状态（Phase1 壳写 runtime.json；EnvCatalog 声明式探测）----
     envStatus() {
       const rt = {};
       try { const f = path.join(path.dirname(this.config.stateFile), 'runtime.json'); if (fs.existsSync(f)) Object.assign(rt, JSON.parse(fs.readFileSync(f, 'utf8'))); } catch {}
@@ -34,7 +32,7 @@ module.exports = {
         source: rt.source || null,
         ok: cat.node.state === 'ok' && cat.npm.state === 'ok',
         npmRoot: en ? en.npmRoot : null,
-        // EnvCatalog 声明式视图（面板环境卡演进用）
+        // EnvCatalog 声明式视图（面板环境卡用）
         catalog: (envCatalogSummary(this)),
         // 平台能力矩阵：三平台静态档位 × 实际工具探测；前端据此做能力感知呈现与降级提示。
         capabilities: (() => { try { return platform.capabilities(); } catch { return null; } })(),
@@ -57,7 +55,7 @@ module.exports = {
         if (bin) binOk = fs.existsSync(bin);
       } catch {}
       try { if (this.nativeManager && typeof this.nativeManager.installedVersion === 'function') installed = this.nativeManager.installedVersion(); } catch {}
-      // main = 守卫核心服务(概念清分)：受管状态以 config.command 有效为准（不再依赖沙箱实例登记）
+      // main = 守卫核心服务（概念清分）：受管状态以 config.command 有效为准。
       return { installed, bin: bin || null, binOk, managed: cmdOk, phase: this.state.phase() || null };
     },
   },

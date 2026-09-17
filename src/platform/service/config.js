@@ -107,8 +107,7 @@ const BASE_DEFAULTS = {
 
 /** 合并注入的业务域默认值 + 平台通用默认值。注入组的 at 是锚点键：该组的值落在 BASE_DEFAULTS
  *  中此键之前，使完整 DEFAULTS 的键序与反转前逐字一致（launcher 落盘模板无字节漂移）。
- *  锚点未命中则追加到末尾（绝不丢键）；同名键以平台侧为准。
- *  @param ext 注入声明（缺省 = 纯平台默认值，零业务键 —— DS-G4）。 */
+ *  锚点未命中则追加到末尾（绝不丢键）；同名键以平台侧为准。 */
 function buildDefaults(ext) {
   const pending = normalizeExtension(ext).defaults.slice();
   const out = {};

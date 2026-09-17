@@ -65,7 +65,7 @@ function sandboxEnv(rootDir, inst) {
   return { env, workingDir };
 }
 
-/** 平台能力判决（**实时**求值，P2-2 修复）：本平台是否支持沙箱实例（Linux + systemd-run）。
+/** 平台能力判决（**实时**求值）：本平台是否支持沙箱实例（Linux + systemd-run）。
  *  override 非空则显式覆写（仅供测试/嵌入方）；否则实时问 platform/os/index.capabilities()，
  *  后者对工具负结果有 60s TTL，不会每次都 spawn 探测进程。 */
 function supported(override) {

@@ -4,7 +4,7 @@ const platform = require('../../platform/os/index');
 
 const matrix = require('../../platform/contract/matrix');
 
-// app/self/notify.js —— 桌面通知（守卫自身行为），经 platform/os 发送。
+// 桌面通知（守卫自身行为），经 platform/os 发送。
 
 
 function notify(host, title, body) {

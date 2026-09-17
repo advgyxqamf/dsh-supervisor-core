@@ -1,7 +1,6 @@
 'use strict';
 
-// 主机服务对接 -> 平台抽象层（src/platform/os/autostart）。
-// 保留类接口（supervisor/API 调用方零改动），实现全部委托平台层。
+// 主机服务对接 -> 平台抽象层（src/platform/os/autostart），实现全部委托平台层。
 // 三端能力以 capabilityProfile() 的 shellAutostart / shellSelfHeal 声明为准，
 //   并由 test/platform-capability-audit-test.js 强制与实现绑定。
 

@@ -27,7 +27,7 @@ class Lifecycle {
     return this;
   }
 
-  /** 守卫是否已就绪（供 /readyz）。 */
+  /** 供 /readyz。 */
   isReady() {
     return this.ready === true && this.stopping === false;
   }

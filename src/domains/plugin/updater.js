@@ -54,7 +54,7 @@ async function update(ctx, name, targetStr) {
   const c = ctx._updCache[name];
   if (c && (Date.now() - c.at) < ctx._updTTL) latest = c.latest;
   else {
-    if (ctx.dist) { try { latest = await ctx.dist.fetchNpmLatest(name); } catch {} } // 第三方插件包：取全量最高
+    if (ctx.dist) { try { latest = await ctx.dist.fetchNpmLatest(name); } catch {} }
     ctx._updCache[name] = { latest, at: Date.now() };
   }
   if (!latest) return { ok: false, error: '无法获取 ' + name + ' 的最新版本（registry 不可达），请检查网络后重试' };

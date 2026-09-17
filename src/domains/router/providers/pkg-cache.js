@@ -1,7 +1,7 @@
 'use strict';
 
 // npm 包缓存定位与预取（IO 叶子）。
-// 从 probe.js 抽出；所有 require 在模块顶层（DF-8），无内联 require。
+// 所有 require 在模块顶层（DF-8），无内联 require。
 // 只做「~/.npm/_npx 下的缓存 bin 定位」与「未命中时 npx --yes 预下载」。
 
 const os = require('node:os');

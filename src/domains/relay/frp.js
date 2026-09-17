@@ -47,7 +47,6 @@ class FrpManager {
     } catch { /* 平台层不可用时忽略（不阻断 frp 功能） */ }
   }
 
-  /* 设置持久化 */
   loadSettings() {
     try {
       const s = JSON.parse(fs.readFileSync(this.settingsFile, 'utf8'));
@@ -70,7 +69,6 @@ class FrpManager {
     try { fs.chmodSync(this.settingsFile, 0o600); } catch {}
   }
 
-  /* 状态 */
   status() {
     return {
       installed: fs.existsSync(this.binPath),

@@ -84,7 +84,7 @@ module.exports = {
     try {
       const rec = this._shadowLast;
       if (!rec) return;
-      if (this._shadowLoggedSeq === rec.seq) return; // 已记账
+      if (this._shadowLoggedSeq === rec.seq) return;
       this._shadowLoggedSeq = rec.seq;
       if (rec.excluded) {
         if (this.logger && this.logger.debug) this.logger.debug('[shadow] 拍#' + rec.seq + ' 业务钩子迁移(不计 diff): ' + rec.actual);

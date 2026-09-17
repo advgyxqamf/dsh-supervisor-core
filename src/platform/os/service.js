@@ -23,7 +23,6 @@ function run(cmd, args, opts) {
   return exec.run(cmd, args, opts || {});
 }
 
-/* Linux：systemd --user */
 const systemd = {
   kind: 'systemd',
   supportsUnits: true,
@@ -41,7 +40,6 @@ const systemd = {
     try { return (run('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8', timeoutMs: 8000 }) || '').toString().trim() === 'active'; }
     catch { return false; }
   },
-  /** transient 单元文件路径（systemd 特有布局）。 */
   transientUnitFile(unit) {
     let uid = 0;
     try { uid = os.userInfo().uid; } catch { /* 受限环境：退回 /run/user/0 */ }
@@ -105,7 +103,6 @@ const PROVIDERS = {
 };
 const NONE = makeUnsupported('none', '当前平台无服务管理器');
 
-/** 当前平台的服务管理器 Provider。 */
 function current() { return PROVIDERS[PLATFORM] || NONE; }
 
 module.exports = { current, CapabilityError, kind: () => current().kind, PLATFORM };

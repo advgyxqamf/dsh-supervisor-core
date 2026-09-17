@@ -1,9 +1,7 @@
 'use strict';
 
 // 冻结/恢复策略（B4）+ 检测应用（B7）：近乎纯，状态迁移纯计算，事件/持久化经 provider 注入。
-// 覆盖 freezeLimited/markCreditsExhausted/markQuotaExhausted/markBanned/setStatus/ensureLimit/
-// setLimit/applyDetection/normalizeConsistency/reconcileLock。文件不 require 任何 IO；对 provider
-// 的调用一律显式经入参（保留 provider 的方法覆写语义）。
+// 文件不 require 任何 IO；对 provider 的调用一律显式经入参（保留 provider 的方法覆写语义）。
 
 const quota = require('./quota');
 

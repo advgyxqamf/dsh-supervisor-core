@@ -2,7 +2,6 @@
 
 // 守护决策（纯函数，不触碰进程/实例/系统服务）。默认关：仅 guardian===true 才自动拉起。
 
-/** 该目标是否开启进程守护开关（默认关）。 */
 function shouldGuard(inst) {
   return !!(inst && inst.guardian === true);
 }

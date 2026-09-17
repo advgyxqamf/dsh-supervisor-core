@@ -4,8 +4,6 @@
 // 从 process.js 构造器拆出，纯派生与进程生命周期分离，可独立 require 单测。
 
 /**
- * 从 script 派生权威 cmdline 标记。
- *
  * 从 script 派生权威 cmdline 标记：cmdMark 与实际命令行永不匹配。
  *
  * daemon 由 spawn(process.execPath, [script, ...args]) 拉起，真实 cmdline 形如

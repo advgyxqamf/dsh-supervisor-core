@@ -14,7 +14,7 @@ const spawn = require('../../platform/os/spawn');
 const matrix = require('../../platform/contract/matrix');
 const { assertSafeCliArgs, cliArgv } = require('./policies');
 
-const CLI_TIMEOUT_MS = 180000; // 单次 dsh plugin CLI 超时
+const CLI_TIMEOUT_MS = 180000;
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 
 /** 经 dist 统一镜像源选择 registry origin（不可达降级官方源）。 */

@@ -37,7 +37,6 @@ module.exports = {
       // 拍起点快照（探测后、收敛前，与决策同输入同源）
       t0 = this.main.stateSnapshot();
       // dsh 健康面由 _syncDshLifecycleView 从目录 main entry 合成（不经观测镜像喂入）。
-      // systemd 托管已废弃：main 由守卫 spawn/adopt 统一管理。
       const host = this.config.targetHost;
       const port = this.config.targetPort;
       // spawn 托管：目标在线 = 自有 child 或接管 pid 存活。
@@ -207,7 +206,7 @@ module.exports = {
       this.logger.error('tick error: ' + ((e && e.stack) || e));
     } finally {
       this._ticking = false;
-      this._actWindow = false; // 收敛窗口关闭
+      this._actWindow = false;
       // 会话态：首拍收敛完成，starting 迁移到 running（契约 §3.2）。
       if (this._sessionState === 'starting') this.session.setState('running');
       // 拍末记账（actual vs shadow；不受 tick 内提前 return 影响，必定执行）

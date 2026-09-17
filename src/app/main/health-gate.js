@@ -35,8 +35,7 @@ module.exports = {
    *
    *  本方法只记账 + 返回决策，不直接调 this.main.beginRestart()（否则造成
    *  health-gate -> process 反向边）；执行由收敛器（main/controller.js）承担。
-   *  依赖单向：controller/process -> health-gate。
-   *  @returns {{restart:boolean, reason?:string, countCrash?:boolean}} */
+   *  依赖单向：controller/process -> health-gate。 */
   _applyHealthCheck(healthOk) {
     if (healthOk) {
       this._mSetFailStreak(0);

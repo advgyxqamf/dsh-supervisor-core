@@ -1,6 +1,6 @@
 'use strict';
 
-// S1 选号策略（原 switch.js:31-79 的**纯判定**下沉）。
+// S1 选号策略。
 // 纯模块：零 require / 零 this / 零 IO；可用性与就绪由调用方（S3）预算是 bool 传入。
 // 契约：绝不跨供应商 failover —— 只在传入的单个 state 池内选。
 

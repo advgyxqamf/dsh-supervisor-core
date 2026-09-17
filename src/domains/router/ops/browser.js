@@ -2,7 +2,7 @@
 
 const platform = require('../../../platform/os/index');
 
-// 图形环境 + 打开浏览器（IO：进程/文件系统/平台层）。防风控/防关联策略与已知边界见原注释；
+// 图形环境 + 打开浏览器（IO：进程/文件系统/平台层）。
 // 调用方只给策略参数，平台差异封装在 platform.browser。
 
 const fs = require('node:fs');

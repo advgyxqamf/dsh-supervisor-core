@@ -5,7 +5,6 @@
 // provider 侧只经 ctor 注入的 persist 回调触发，本类把「何时允许写」收敛为一个对象，杜绝各写一半。
 
 class AccountStore {
-  /** @param opts { persist?:()=>void, canPersist?:()=>boolean, logger?:object } */
   constructor(opts) {
     const o = opts || {};
     this._persistFn = typeof o.persist === 'function' ? o.persist : null;

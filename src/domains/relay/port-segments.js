@@ -8,7 +8,7 @@
 const ports = require('../../platform/service/ports');
 
 /** 逻辑段到物理池的映射。relay 与反代实例/回调共用通用共享池（K8s 单一范围思想）。 */
-// anchor 是池内显式起点（原按「同池段序 * 1000」得出同值，现显式固定，与申报顺序无关）。
+// anchor 是池内显式起点（与申报顺序无关）。
 const SEGMENTS = {
   relay: { pool: 'managed', anchor: 0 },
 };

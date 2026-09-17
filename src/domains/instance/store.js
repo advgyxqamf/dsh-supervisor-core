@@ -31,7 +31,7 @@ class InstanceStore {
       model.normalizeInstance(inst);
       // 唯一令牌节点：沙箱实例登记“源”（journald 单元 dsh-web@<id>），令牌获取/分发由服务统一负责。
       // 只登记 journald 单元（天然持久、-g 取最近行=当前进程新令牌）；不登记 file——沙箱重启轮换新令牌
-      // 只打 journal，若复用恢复文件会缓存旧令牌 block journal（2026-09 修复）。
+      // 只打 journal，若复用恢复文件会缓存旧令牌 block journal。
       if (inst.domain === 'sandbox' && this.tokens) this.tokens.attach(inst.id, { unit: 'dsh-web@' + inst.id });
     }
     this.syncPorts();

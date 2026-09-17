@@ -2,7 +2,6 @@
 
 // 域：原生 DSH（app/native）—— 安装/卸载/状态/更新检查编排。
 // 纯编排 + 卸载进程治理（spawn + 超时看门狗）；原子操作经 host-first 调用 NativeManager。
-// 依赖：node:fs / platform/os/spawn / platform/os/process / ./npm / ./policies。
 
 const fs = require('node:fs');
 const spawnOS = require('../../platform/os/spawn');
@@ -158,7 +157,6 @@ async function uninstall(host) {
   if (host.uninstalling) return { ok: false, error: '卸载已在进行中' };
   if (policies.busy(host)) return { ok: false, error: '升级进行中，无法卸载（state=' + host.upgradeState + '）' };
 
-  // 并发锁必须在任何 await 之前置位（否则并发 POST 会在 await 间隙同时通过检查）。
   host.uninstalling = true;
   try {
     if (host.events) host.events.append('native_uninstall_started', {});

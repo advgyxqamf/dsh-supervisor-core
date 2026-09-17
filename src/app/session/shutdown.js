@@ -2,8 +2,6 @@
 
 const platform = require('../../platform/os/index');
 
-const { registerAll } = require('../../app/control/adapters');
-
 // app/session/shutdown.js —— 关停编排：停被管对象、会话置 stopped、回执（绝不自行停止守卫）。
 
 
@@ -27,7 +25,6 @@ function shutdown(host) {
         host.api.close();
       } catch {}
     }
-    // 统一生命周期停止
     // router/lan 仍驻守卫进程（进程解耦完成前）时 shutdown 必须停它们防孤儿
     // （反代实例进程、relay/frpc、动态端口残留）。统一经 lifecycleManager 出口，保证启停路径收敛到一处。
     // stopAll 是 async，必须 await，否则调用方 exit 会截断它；
@@ -45,7 +42,7 @@ function shutdown(host) {
           } catch {}
           await host.lifecycleManager.stopAll('guard-shutdown', { exclude: ['dsh'] }); // 守卫退出绝不动 DSH（RC2 契约）
         } else {
-          // 兜底（lifecycleManager 未初始化时保持原行为防孤儿）
+          // 兜底：lifecycleManager 未初始化时防孤儿
           try { if (host.lan) await host.lan.shutdown(); } catch (e) { host.logger.warn && host.logger.warn('lan shutdown: ' + (e && e.message)); }
           try { if (host.router) await host.router.stop(); } catch (e) { host.logger.warn && host.logger.warn('router stop: ' + (e && e.message)); }
         }
@@ -63,7 +60,7 @@ async function shutdownAll(host) {
     host.events && host.events.append('shutdown_all', {});
     // 1) 停 DSH 主实例（本守卫是被管对象的所有者，契约 §2）
     host._stopMainDsh();
-    // 2) 停全部沙箱（按实际单元名——glob 不经 shell 不展开，V5 修复）
+    // 2) 停全部沙箱（按实际单元名——glob 不经 shell 不展开）
     await host._stopAllSandboxes();
     // 3) 停路由/远程 daemon（独立进程；DaemonLifecycle.stop 串行换代语义）
     // stop() 会如实返回 ok:false（进程未在超时内退出时）：失败即记事件 + warn，

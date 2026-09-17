@@ -1,8 +1,6 @@
 'use strict';
 
-// app/state/main-record.js —— 状态基座的存储原语工厂（真 ctor 注入）。
-// createMainRecord(deps) 自己持有 fallback 存储与读写实现（storeOf/fieldOf/procFieldOf）。
-// deps：getManagedObjects() -> 受管目录（有 get/persistCrashState 即用）；getLogger() -> logger（可 null）。
+// 状态基座的存储原语工厂（真 ctor 注入）：自己持有 fallback 存储与读写实现。
 
 function createMainRecord(deps) {
   const g = deps || {};
@@ -34,7 +32,6 @@ function createMainRecord(deps) {
     return fallback;
   }
 
-  /** 崩溃/退避字段变化后落盘目录。 */
   function persistCrashField() {
     const m = reg();
     try {
@@ -49,7 +46,7 @@ function createMainRecord(deps) {
   /** 状态存储解析：目录 main entry 优先，构造期回退到 fallback。 */
   function storeOf() { return entryOf() || fallbackEntryOf(); }
 
-  /** entry 字段读写。write=true 写（值变化即落盘）并返回 entry；否则读值。 */
+  /** write=true 时值变化即落盘并返回 entry，否则读值。 */
   function fieldOf(name, v, write) {
     const e = storeOf();
     if (write) {
@@ -59,7 +56,7 @@ function createMainRecord(deps) {
     return e[name];
   }
 
-  /** entry.process 字段读写。write=true 写并返回 process 对象；否则读值。 */
+  /** write=true 时返回 process 对象，否则读值。 */
   function procFieldOf(name, v, write) {
     const e = storeOf();
     let p = e.process;

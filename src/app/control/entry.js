@@ -15,7 +15,6 @@
 //     守卫重启只重置自己的观测，不重置模块运行态。
 
 // phase 词表的唯一源是 control/registry.js（控制平面 v3 canonical）。
-// 此前此处自建副本与 canonical 不一致：多了死词 degraded，少了 installing/backoff/failed/restarting，
 // 而 _setPhase 对不在表内的值静默丢弃，故本对象永远表达不了这些真实状态。
 // 副本还会随 canonical 演进而静默漂移；现改为直接引用，消除第二个状态源。
 const { PHASES } = require('./registry');
@@ -60,7 +59,7 @@ class ManagedLifecycle {
     //   属**域 A**（dsh/沙箱）概念。此前只有域 B 的 router/lan 分支写它（且 lan 那处还因 A/B 平面
     //   id 混用而恒不生效），域 B 归位后两处写入随之删除 -> 该字段既无写入者、也无消费方
     //   （snapshot() 虽暴露、UI 亦未渲染），成为**语义孤儿**；留着会误导后来者以为「模块级守护计数存在」。
-    //   注意 域 A 的真实计数**不在这里**：dsh 走 main-process.js 的 `restart_triggered` + `restartCount`
+    //   注意 域 A 的真实计数**不在这里**：dsh 走 app/main/process.js 的 `restart_triggered` + `restartCount`
     //     （supervisor._mSetRestartCount）；沙箱走 instance 自身的 `state.restartCount`。
     // 守护开关（**契约 GUARD-DOMAIN-MODEL §2 域 A 专有**）：true=崩溃时按用户意图自愈；false=停就停。
     // 注意 域 B 基础设施（router-daemon/lan-daemon）**不属此轴**——它们由保活路径无条件拉起，

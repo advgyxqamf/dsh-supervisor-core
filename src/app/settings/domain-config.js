@@ -5,7 +5,7 @@
 //   业务键的默认值与别名在此声明，由各进程入口/装配期注入 config.normalize / buildDefaults。
 // 纪律：只做数据声明（纯对象/数组），零副作用；绝不 require platform/service/config（成环）。
 
-/** 业务域默认值声明。值 = 反转前 `platform/service/config.js BASE_DEFAULTS` 中的同名字面量，逐字未改。
+/** 业务域默认值声明：值须与 `platform/service/config.js BASE_DEFAULTS` 的同名字面量一致（逐字）。
  *  `at` = 锚点键：本组值插入到 BASE_DEFAULTS 中该键**之前**（保持 DEFAULTS 键序与反转前一致）。 */
 const defaults = [
   {
@@ -20,7 +20,7 @@ const defaults = [
   },
   {
     at: 'corePackageName',
-    // 智能路由启动开关（旧键 switcherAutoStart 已迁移）。
+    // 智能路由启动开关（别名见下方 aliases）。
     values: {
       routerAutostart: false,
     },
@@ -30,7 +30,7 @@ const defaults = [
 /** 换名别名表：[旧键, 新键]，平台通用迁移机制（config.normalize 逐条应用）。
  *  新键缺省且旧键已给时，布尔严格归一后写入新键。 */
 const aliases = [
-  ['switcherAutoStart', 'routerAutostart'], // 换名：switcherAutoStart -> routerAutostart
+  ['switcherAutoStart', 'routerAutostart'],
 ];
 
 /** 实例化一个完整注入声明（浅拷贝，防调用方改写本模块的常量）。 */

@@ -1,13 +1,12 @@
 'use strict';
 
-// app/settings/lan-panel.js —— 管家面板局域网访问开关门面。
+// 管家面板局域网访问开关门面。
 // 导出形态 { methods }，方法经 this 协作。
 const fs = require('node:fs');
 const netInfo = require('../../platform/os/netinfo');
 
 module.exports = {
   methods: {
-    // 管家面板局域网访问开关（0.0.0.0 / 127.0.0.1）。
     lanPanelStatus() {
       const enabled = this.config.apiHost === '0.0.0.0';
       const port = this.config.apiPort;
@@ -15,9 +14,8 @@ module.exports = {
       // IPv4，过滤虚拟网桥(virbr*/veth*/docker*/br-*)。
       const ips = [];
       if (enabled) {
-        // 平台化：不能直接调用 ip (iproute2)——Linux 专有，macOS/Windows 上抛异常被吞，
-        //   ips 恒为空，面板显示「开关已开但没有任何可访问地址」且不报错；裸 execFileSync 也无超时。
-        //   现下沉到 platform/os/netinfo（三平台实现 + 经 platform/util/exec 有界）。
+        // 不能直接调 ip(iproute2)——Linux 专有，macOS/Windows 抛异常被吞，ips 恒空且不报错；
+        // 经 platform/os/netinfo（三平台实现 + platform/util/exec 有界执行）。
         ips.push(...netInfo.lanAddresses());
         if (!ips.length) {
           this.logger && this.logger.warn && this.logger.warn(

@@ -6,7 +6,7 @@ function owns(pathname) {
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
 
     if (req.method === 'GET' && pathname === '/lan/frp') {
       return Promise.resolve(sup.frpStatus()).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: e.message }));

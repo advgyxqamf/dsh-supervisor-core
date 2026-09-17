@@ -13,12 +13,6 @@ const DAEMON_REL = {
   lan: path.join('domains', 'relay', 'daemon.js'),
 };
 
-/**
- * 受管 daemon 脚本的绝对路径。
- *
- * @param {'router'|'lan'} kind
- * @returns {string|null} 存在时返回路径；**不存在时返回 null**（调用方据此降级）
- */
 function daemonScript(kind) {
   const rel = DAEMON_REL[kind];
   if (!rel) return null;

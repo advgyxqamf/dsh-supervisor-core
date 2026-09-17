@@ -30,7 +30,6 @@ function fetchDshChangelog(res, sup) {
 
 function handle(ctx) {
   const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
-    // 更新日志：概览「版本与升级」只关心 DeepSeek Harness（DSH）
     if (req.method === 'GET' && pathname === '/changelog') {
       return fetchDshChangelog(res, sup);
     }

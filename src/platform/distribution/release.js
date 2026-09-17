@@ -13,17 +13,12 @@ const { semverCompare } = require('../../shared/version');
 /** 「我们的」发布包 scope。同 scope 的 '@dsh-sup/shell-*' 亦由我们发布。 */
 const OUR_RELEASE_SCOPE = '@dsh-sup/';
 
-/** 该包名是否属于我们的发布通道；只有 true 时才允许 rollback/canary 语义。
- *  @param {string} pkg
- *  @returns {boolean} */
+/** 该包名是否属于我们的发布通道；只有 true 时才允许 rollback/canary 语义。 */
 function isOurReleasePackage(pkg) {
   return typeof pkg === 'string' && pkg.startsWith(OUR_RELEASE_SCOPE);
 }
 
-/** 在候选版本集合里取最高合法版本（semverCompare 判定）；空集返回 null。
- *  @param {Iterable<string>} candidates
- *  @param {(v:string)=>boolean} isValid
- *  @returns {string|null} */
+/** 在候选版本集合里取最高合法版本（semverCompare 判定）；空集返回 null。 */
 function highestVersion(candidates, isValid) {
   let best = null;
   for (const v of candidates) {

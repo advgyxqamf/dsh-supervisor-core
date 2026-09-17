@@ -6,7 +6,7 @@ const spawnOS = require('../../platform/os/spawn');
 const pidlook = require('../../platform/os/pidlookup');
 const { LineBuffer } = require('../../platform/service/log/log');
 const native = require('../../app/native/command');
-// DF-2/DF-3（R3 严值）：端口运行时再推导已拆到 main/port-rederive.js（独立切面）。
+// 端口运行时再推导已拆到 main/port-rederive.js（独立切面）。
 const { findManagedDshPort, applyMainPort } = require('./port-rederive');
 
 module.exports = {
@@ -15,9 +15,8 @@ module.exports = {
     return native.nativeCommand(this.config, this.pluginManager);
   },
 
-  // ---- 生命周期动作 ----
   async _startProcess() {
-    this.main.actNote('start', 'spawn'); // 影子 actual 记账
+    this.main.actNote('start', 'spawn');
     this._crashHalted = false; // 主动拉起 = 清除崩溃停靠（进入运行流程）
     // 前置条件：原生 DSH 必须已安装才尝试启动。未安装则进入「未安装」状态：
     // 不启动、不重试、不计数崩溃；一次性通知引导安装（与"启动失败"严格区分）。
@@ -103,7 +102,7 @@ module.exports = {
       if (this.state.desired() !== 'running') return;
       if (this.state.phase() === 'RUNNING' || this.state.phase() === 'STARTING') {
         const why = code !== null ? String(code) : 'sig' + signal;
-        // 守护语义（2026-09 收敛，与 RUNNING 收敛分支同 gate）：RUNNING 崩溃看守护开关——
+        // 守护语义（与 RUNNING 收敛分支同 gate）：RUNNING 崩溃看守护开关——
         // guardian=false 不自动拉起（转 STOPPED 等用户手动）；STARTING(用户启动流程)保留重试。
         if (this.state.phase() === 'STARTING' || this.state.guardian()) {
           this._beginRestart('exit:' + why, { countCrash: true });
@@ -119,7 +118,7 @@ module.exports = {
   },
 
   _enterRunning() {
-    this.main.actNote('enterRunning', 'healthy'); // 影子 actual 记账
+    this.main.actNote('enterRunning', 'healthy');
     const wasRunning = this.state.phase() === 'RUNNING';
     this.state.setPhase('RUNNING');
     this._mSetAdopted(false);
@@ -140,12 +139,9 @@ module.exports = {
     this.state.write();
   },
 
-  // 端口运行时再推导（_findManagedDshPort/_applyMainPort）已拆到 main/port-rederive.js（独立切面）。
-
-
   /** 期望停止下发现无主健康实例：仅观测（拿 pid、如实展示），不强杀不拉起。 */
   _adoptObserved() {
-    this.main.actNote('adoptObserved', 'observe'); // 影子 actual 记账
+    this.main.actNote('adoptObserved', 'observe');
     this.state.setPhase('OBSERVED');
     this._mSetAdopted(true);
     this._mSetObservedOnly(true);
@@ -165,7 +161,7 @@ module.exports = {
   },
 
   _adopt() {
-    this.main.actNote('adopt', 'adopt'); // 影子 actual 记账
+    this.main.actNote('adopt', 'adopt');
     this.state.setPhase('RUNNING');
     this._mSetAdopted(true);
     this._mSetObservedOnly(false);
@@ -225,12 +221,12 @@ module.exports = {
     if (this._mAdoptPid() && pidlook.isAlive(this._mAdoptPid())) {
       try { this.main.killAdopted(this._mAdoptPid()); } catch (e) { this.logger.warn('adopt kill during restart: ' + e.message); }
     }
-    this.main.actNote('restart', reason); // 影子 actual 记账（退避记账不改变 restart 动作）
+    this.main.actNote('restart', reason); // 退避记账不改变 restart 动作
     this.state.write();
   },
 
   stopProcess(reason) {
-    this.main.actNote('stop', reason); // 影子 actual 记账
+    this.main.actNote('stop', reason);
     this.events.append('stop', { reason });
     this.logger.info('stop: ' + reason);
     const child = this._mChild();

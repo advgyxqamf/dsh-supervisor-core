@@ -18,7 +18,6 @@ class LifecycleManager {
     this.registrations = new Map(); // id -> ManagedLifecycle
   }
 
-  /* 注册 */
   register(lc) {
     if (!(lc instanceof ManagedLifecycle)) throw new Error('register 需要 ManagedLifecycle 实例');
     this.registrations.set(lc.id, lc);

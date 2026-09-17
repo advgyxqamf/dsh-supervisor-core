@@ -1,8 +1,6 @@
 'use strict';
 
 // 原生 DeepSeek Harness（原生 DSH）生命周期门面——组合 + 委托，无业务实现。
-// 职责拆分：ops.js 安装/卸载/状态/更新检查；upgrade.js 升级/回滚；npm.js npm 调用；
-//   manifest.js 清单读写；probe.js 安装检测/版本/端口健康；policies.js 纯策略。
 // 公共导出面（NativeManager）：消费方 src/supervisor.js、api/domains/native.js、
 //   app/assembly/compose.js、app/settings/versions.js，以及 native-* / precheck / upgrade 等测试。
 

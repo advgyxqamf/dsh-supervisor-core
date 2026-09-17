@@ -18,12 +18,6 @@ function taskId() {
 }
 
 class TaskRegistry {
-  /**
-   * @param {object} opts
-   *   - stateDir: 状态目录，tasks.json 落于此（见 platform/service/state-root.js）
-   *   - logger: 可选日志器
-   *   - events: 可选事件总线（append('task_created'|'task_state'|...)）
-   */
   constructor(opts) {
     this.stateDir = opts && opts.stateDir;
     this.logger = (opts && opts.logger) || null;
@@ -62,14 +56,6 @@ class TaskRegistry {
   }
 
   /* 任务创建与查询 */
-  /**
-   * 创建任务。
-   * @param {string} kind    'native' | 'instance' | 'plugin' | 'proxy-app'
-   * @param {string} action  'install' | 'upgrade' | 'uninstall' | 'update'
-   * @param {object} target  { id, name }
-   * @param {object} opts    { from, to, createdBy, meta }
-   * @returns 任务对象
-   */
   begin(kind, action, target, opts) {
     const o = opts || {};
     const now = Date.now();
@@ -102,12 +88,6 @@ class TaskRegistry {
    * 统一作业执行器：提供 begin->start->fn->succeed/fail 的封装（作业体异常自动落 failed）。
    *  内建契约：finally 清 _current 索引；fn 内的任何异常都不再逃逸为 unhandledRejection /
    *  任务永久 running。
-   * @param {string} kind 任务类别（instance|native|plugin|router|dist）
-   * @param {string} targetId 目标 id
-   * @param {string} action 动作名（install|upgrade|uninstall|...）
-   * @param {object} opts 透传 begin()（from/to/meta/createdBy 等）
-   * @param {(task: object) => Promise<any>} fn 作业体（async）
-   * @returns {Promise<{ ok: boolean, task?: object, error?: string }>}
    */
   async run(kind, targetId, action, opts, fn) {
     if (this.isBusy(kind, targetId)) {

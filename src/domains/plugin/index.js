@@ -23,7 +23,7 @@ class PluginManager {
   constructor(opts) {
     this.dshBin = opts.dshBin || 'dsh';
     this.profileName = opts.profileName || 'web';
-    this.profileDir = opts.profileDir;         // 原生 profile 目录
+    this.profileDir = opts.profileDir;
     this.overlayFile = opts.overlayFile;
     this.dshPort = opts.dshPort;
     this.instances = opts.instances || null;   // InstanceManager（实例目标数据源）
@@ -39,13 +39,11 @@ class PluginManager {
     this.store = new store.PluginStore({ getInventory: () => this.inventory() });       // 补丁行 id 推导
   }
 
-  // 目标解析（可覆盖）
   resolveTargets(str) { return targets.resolveTargets(this, str); }
   _nativeTarget() { return targets.nativeTarget(this); }
   _sandboxTarget(inst) { return targets.sandboxTarget(this, inst); }
   _allSandboxTargets() { return targets.allSandboxTargets(this); }
 
-  // 只读（可覆盖）
   installedOn(target) { return store.installedOn(target, PROTECTED); }
   inventory() { return store.inventory(this.dshPort); }
   readManifest() { return store.readManifest(this.profileDir); }
@@ -66,14 +64,12 @@ class PluginManager {
   _writeHomePatch(target, entries) { return this.layers.writeHomePatch(target, entries); }
   saveOverlayEntries(entries) { return this.layers.saveOverlayEntries(entries); }
 
-  // CLI 执行 / 变更生效
   _runCli(target, args, opts) {
     return cli.runCli({ target, args, opts, registryOrigin: () => cli.registryOrigin(this.dist), logger: this.logger });
   }
   _targetRunning(target) { return restart.targetRunning(this, target); }
   _applyPluginChange(target, kind, onLog) { return restart.applyPluginChange(this, target, kind, onLog); }
 
-  // 编排 / 作业
   install(spec, opts) { return ops.install(this, spec, opts); }
   uninstall(name, targetStr) { return ops.uninstall(this, name, targetStr); }
   installStatus(jobId) { return this.jobs.installStatus(jobId); }

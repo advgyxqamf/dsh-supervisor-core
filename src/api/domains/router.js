@@ -6,9 +6,8 @@ function owns(pathname) {
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
 
-    // 智能路由（中转服务）生命周期
     // 域摘要：daemon 监督模式读目录 router-daemon 项 domainSummary（监督拍缓存，≤1 个 fetch 周期陈旧）；
     // 非 daemon 模式（内嵌）回退本地实例实时摘要。目录只存引用，账号明细/令牌仍只走实时 /router/*。
     if (req.method === 'GET' && pathname === '/router/domain-summary') {
@@ -38,7 +37,6 @@ function handle(ctx) {
       }
     }
 
-    // 局域网访问开关
     if (req.method === 'GET' && pathname === '/router/providers') {
       // routerProviders 在 daemon 监督模式返回 Promise（daemon 实时状态）；本地模式同步对象
       return Promise.resolve(sup.routerProviders()).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: e.message }));

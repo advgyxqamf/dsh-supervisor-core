@@ -20,7 +20,6 @@ function createJobs({ tasks }) {
     return run.catch((e) => ({ ok: false, error: (e && e.message) || String(e) }));
   };
 
-  /** 超出保留上限清理最旧。 */
   const cleanupJobs = () => {
     const drop = planJobCleanup(Object.keys(_jobs));
     for (const id of drop) delete _jobs[id];
@@ -45,7 +44,6 @@ function createJobs({ tasks }) {
   /** 作业收尾并桥接统一任务。 */
   const finishJob = (job, ok, error) => {
     finishJobRecord(job, ok, error);
-    // 桥接收尾统一任务
     if (tasks && job.taskId) {
       if (ok) { tasks.log(job.taskId, '完成'); tasks.succeed(job.taskId); }
       else tasks.fail(job.taskId, error || '任务失败');

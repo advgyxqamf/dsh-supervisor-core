@@ -74,15 +74,13 @@ function evaluate() {
   return view;
 }
 
-// 回退功能已整体移除：壳更新强制且不可回退、不得跳过。
-
 /** 仅回环可用的健康上报（壳调用）。phase=ready 即壳已健康启动 = 更新确认信号。 */
 function health(payload) {
   const p = payload || {};
   const dir = shellDir();
   fs.mkdirSync(dir, { recursive: true });
   // 兜底写 identity.json 的 phase/version/lastSeenAt（壳自己也会写），供内核观察；
-  // 本域 evaluate() 依赖它们。只写运行时字段，护栏/回退字段已废除。
+  // 本域 evaluate() 依赖它们。只写运行时字段。
   const idp = path.join(dir, 'identity.json');
   const id = readJson(idp) || {};
   if (p.phase) id.phase = String(p.phase);

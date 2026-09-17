@@ -6,7 +6,7 @@ function owns(pathname) {
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
 
     // 全局统一分发：镜像源配置由 DistributionManager 统一管理（DSH 自升级 + 反代共用）——仅 /dist/registry*。
     if (req.method === 'GET' && pathname === '/dist/registry') {

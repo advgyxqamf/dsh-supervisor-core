@@ -1,7 +1,7 @@
 'use strict';
 
 // 账号与实例生命周期（providers 叶子）。有状态协作经 provider 显式入参（与 probe.js/restart.js
-// 同形），无隐式 this。覆盖：停止仲裁/停止补刀、健康等待、可用性判定、加账号。
+// 同形），无隐式 this。
 
 const { INSTANCE_STATES } = require('../model');
 const pidlook = require('../../../platform/os/pidlookup');

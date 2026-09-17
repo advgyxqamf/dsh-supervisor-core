@@ -1,7 +1,6 @@
 'use strict';
 
 // 领域：原生 DeepSeek Harness（原生 DSH，独立模块，不作为沙箱实例）。
-// 管理原生 DSH 的生命周期状态 / 启动命令 / 一键安装 / 自动注册等原生专属关注点。
 // 与沙箱实例(domain/instance)彻底分开；监控/守护由 domain/monitor + domain/guardian 统一覆盖。
 
 const fs = require('node:fs');

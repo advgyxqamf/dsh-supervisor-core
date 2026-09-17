@@ -118,7 +118,7 @@ function setGuiAutostart(on, deps) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const atmp = file + '.tmp';
       fs.writeFileSync(atmp, macGuiPlist(gui));
-      fs.renameSync(atmp, file);            // 原子写
+      fs.renameSync(atmp, file);
       macSetEnabled(GUI_LABEL, true);
       const loaded = macLoaded(GUI_LABEL) || macBootstrap(file);
       return { ok: true, platform: 'darwin', enabled: true, via: 'launchagent',

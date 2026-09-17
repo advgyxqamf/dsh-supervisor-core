@@ -12,7 +12,6 @@ const ex = require('../util/exec');
 
 const PLATFORM = process.platform;
 
-/** 虚拟/环回网卡前缀（LAN 地址枚举应排除）。 */
 const VIRTUAL_IFACE = /^(virbr|veth|docker|vmnet|br-|lo|vEthernet)/;
 
 function usable(addr) {
@@ -37,7 +36,6 @@ function pick(records, dev) {
   return out;
 }
 
-/* Linux：iproute2 */
 function linux() {
   let dev = null;
   const def = ex.runOut('ip', ['route', 'show', 'default']);
@@ -53,7 +51,6 @@ function linux() {
   return pick(records, dev);
 }
 
-/* macOS：route + ifconfig */
 function darwin() {
   let dev = null;
   const def = ex.runOut('route', ['-n', 'get', 'default']);
@@ -99,8 +96,6 @@ function win32() {
 const IMPL = { linux, darwin, win32 };
 
 /**
- * 枚举本机局域网可访问 IPv4 地址。
- *
  * @returns {string[]} 已去重的地址列表（**任何平台都不抛异常**；失败返回空数组）
  */
 function lanAddresses() {

@@ -4,7 +4,7 @@
 // 端口 + 监听 pid + cmdline 特征判定；绝不拉起/接管/做任何生命周期动作，结果仅作观测/决策依据。
 
 const pidlook = require('../os/pidlookup');
-const probeModule = require('../util/probe'); // 探测原语已上游化到平台层（PROVIDER-GATEWAY-ARCHITECTURE §7 Phase 1）
+const probeModule = require('../util/probe');
 
 /** 端口是否被监听（占用检查，纯探测）。 */
 function isPortListening(host, port, timeoutMs) {

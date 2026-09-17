@@ -98,7 +98,6 @@ function createOps(deps) {
     return stillActive ? { ok: true, dataPreserved: true, preserveReason: 'unit-still-active' } : { ok: true };
   }
 
-  /** 设置实例的监控开关 / 远程控制开关 / 沙箱资源。 */
   function updateInstance(id, patch) {
     const inst = store.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: '实例不存在' };

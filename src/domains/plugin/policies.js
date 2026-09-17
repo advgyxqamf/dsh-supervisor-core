@@ -25,7 +25,6 @@ function specType(spec) {
   return 'npm';
 }
 
-/** 是否有可更新版本（纯版本比较）。 */
 function isUpdateAvailable(latest, version) {
   return !!latest && !!version && semverCompare(String(latest), String(version)) > 0;
 }

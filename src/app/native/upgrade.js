@@ -2,23 +2,18 @@
 
 // 域：原生 DSH（app/native）—— 升级编排（先停后装、健康验证、失败回滚）。
 // 纯编排：只经 host-first 调用 NativeManager 的原子操作，不自持 IO。
-// 依赖：./policies（纯判定）。
 
 const policies = require('./policies');
-
-const PKG_DEFAULT = '@deepseek-ai/dsh';
 
 function log(host, msg) { host._appendUpgradeLog(msg); }
 function taskLog(host, task, msg) { if (task && host.tasks) host.tasks.log(task.id, msg); }
 
-/** 开一个统一任务步骤并置 running。 */
 function markStep(host, task, title) {
   if (!task) return;
   const s = host.tasks.step(task.id, title);
   host.tasks.stepState(task.id, host.tasks.get(task.id).steps.indexOf(s), 'running');
 }
 
-/** 把最后一个步骤置 done（安装完成）。 */
 function doneLastStep(host, task) {
   if (!task) return;
   const steps = host.tasks.get(task.id).steps;
@@ -26,7 +21,7 @@ function doneLastStep(host, task) {
   if (st) host.tasks.stepState(task.id, steps.indexOf(st), 'done');
 }
 
-/** 初始化升级状态机字段（每次升级入口清零）。 */
+/** 每次升级入口清零。 */
 function beginUpgradeState(host, requestedVersion) {
   host.upgradeState = 'installing';
   host.upgradeStartedAt = new Date().toISOString();
@@ -265,4 +260,4 @@ async function upgrade(host, requestedVersion) {
   }
 }
 
-module.exports = { upgrade, PKG_DEFAULT };
+module.exports = { upgrade };

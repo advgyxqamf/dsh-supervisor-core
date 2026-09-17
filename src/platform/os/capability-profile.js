@@ -42,7 +42,6 @@ const win32 = {
   multiInstance: false, // 沙箱 systemd-run 不可用（Phase 3 迁移计划任务/NSSM 后置 true）
   pidAdoption: true,    // netstat
   // processTreeKill 已接入 _killTree（supervisor 的 SIGKILL 升级路径 + 接管实例路径），
-  // 声明与实现一致（回归 test/process-tree-kill-test.js）。
   processTreeKill: true, // taskkill /PID /T（由 hasTool 覆写；使用点见 main-process._killTree）
   desktopNotify: true,   // 期望 powershell（实测覆写）
   autostart: true,       // 期望 schtasks（实测覆写）

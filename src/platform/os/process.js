@@ -2,13 +2,11 @@
 
 const { execFile } = require('node:child_process');
 
-// 平台进程控制：存活探测 / 组信号 / 树杀。
 // POSIX（Linux/macOS）用进程组信号 kill(-pid)；Windows 无进程组语义，单进程信号 +
 // taskkill /T 整树终止（能力等价）。
 
 const isWindows = process.platform === 'win32';
 
-/** kill(pid,0) 存活探测（三平台通用）。 */
 function isAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; }

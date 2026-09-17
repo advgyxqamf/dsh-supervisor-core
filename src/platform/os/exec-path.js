@@ -34,10 +34,7 @@ function firstExecutable(dir, base, platform) {
 }
 
 /** 标准安装目录（按优先级；跨平台）。env 可注入：原实现直读 process.env.APPDATA/
- *  LOCALAPPDATA，导致在 Linux 上注入 platform=win32 也拿不到 Windows 目录，无法穷举解析行为。
- *  @param platform 可选（默认 process.platform）
- *  @param home 可选（默认 os.homedir()）
- *  @param env 可选（默认 process.env） */
+ *  LOCALAPPDATA，导致在 Linux 上注入 platform=win32 也拿不到 Windows 目录，无法穷举解析行为。 */
 function standardDirs(platform, home, env) {
   const pl = platform || process.platform;
   const h = home || os.homedir();
@@ -70,8 +67,6 @@ function inPath(base, platform, env) {
 
 /**
  * 解析可执行绝对路径。
- * @param {string} base 逻辑名（如 'dsh-supervisor'）
- * @param {{envVar?:string, extraDirs?:string[]}} [opts]
  * @returns {string|null} 绝对路径或 null
  */
 function resolveExecutable(base, opts) {
@@ -99,7 +94,6 @@ function resolveExecutable(base, opts) {
  * 而 Node 的 spawn/execFile 不做 PATHEXT 解析，传裸 npx 一律 ENOENT。
  * 解析失败仍返回 npx.cmd（失败留给调用方的错误处理，而不是把 null 传进 spawn）。
  * @param {{platform?:string}} [opts] platform 可注入，便于纯函数测试
- * @returns {string} 可执行的绝对路径，或回退名（'npx'）
  */
 function npxBin(opts) {
   const o = opts || {};
@@ -119,7 +113,6 @@ function npxBin(opts) {
  * 安装/卸载全部失败且只报含糊 ENOENT。本函数是唯一解析入口：Windows 走 PATHEXT（优先 .cmd），
  * 其余平台直接用 npm；解析失败返回可执行名而非 null，让调用方沿用既有错误路径。
  * @param {{platform?:string}} [opts] platform 可注入，便于纯函数测试
- * @returns {string} 可执行的绝对路径，或回退名（'npm'）
  */
 function npmBin(opts) {
   const o = opts || {};
@@ -138,7 +131,6 @@ function npmBin(opts) {
 
 const DSH_PKG = ['@deepseek-ai', 'dsh'];
 
-/** 包内 DSH JS 入口（给定 npm 全局 prefix 或垫片所在目录）。 */
 function dshJsIn(prefix) {
   return path.join(prefix, 'node_modules', ...DSH_PKG, 'lib', 'bin.js');
 }

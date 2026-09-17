@@ -69,15 +69,13 @@ function isolatedPlan(platform, url, opts) {
       { bin: 'chromium', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
       { bin: 'chromium-browser', args: antiArgs, isolated: true, watch: true, envKind: 'anti' },
       { bin: 'firefox', args: ['--private-window', url], isolated: false, watch: true, envKind: 'sys' },
-      { bin: 'xdg-open', args: [url], isolated: false, watch: false, envKind: 'sys' }, // 兜底：无隔离
+      { bin: 'xdg-open', args: [url], isolated: false, watch: false, envKind: 'sys' },
     ],
   };
 }
 
 /**
  * 以隔离 profile + 无痕打开浏览器（OAuth 反指纹登录用）。
- * @param {string} url
- * @param {{profileDir:string, antiArgs?:string[], antiEnv?:object, sysEnv?:object, onExit?:Function}} o
  * @returns {{ok:boolean, bin:string|null, isolated:boolean}} bin=null 表示全部候选失败
  */
 function launchIsolated(url, o) {

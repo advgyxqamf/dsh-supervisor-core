@@ -157,9 +157,6 @@ function configureTokenFileName(name) {
   if (typeof name === 'string' && name) _tokenFileName = name;
 }
 
-/** 当前恢复文件名（供装配自检/测试）。 */
-function tokenFileBaseName() { return _tokenFileName; }
-
 /** 目标状态目录下的令牌恢复文件名（路径规则集中一处）。文件名来自注入，未注入时为通用默认名。 */
 function tokenFileName(stateFile) {
   return path.join(path.dirname(path.resolve(stateFile)), _tokenFileName);

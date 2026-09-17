@@ -17,7 +17,7 @@ const shellDomain = require('../../../domains/shell/index');
 const { TaskRegistry } = require('../../../platform/service/tasks');
 const { IntentLedger } = require('../../../app/state/intents');
 // DS-G4（§4.2 反转法）：日志汇聚业务源名单 / 令牌分类的唯一声明处，require 即注入 platform。
-// 必须在 LogCore.init（构造 EventHub）与 new DshTokenService 之前（行为序与拆分前逐字一致）。
+// 必须在 LogCore.init（构造 EventHub）与 new DshTokenService 之前。
 require('../log-sources');
 require('../../../app/settings/token-kinds');
 

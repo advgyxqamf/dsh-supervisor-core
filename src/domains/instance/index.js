@@ -48,20 +48,16 @@ class InstanceManager {
   set instances(list) { this._store.replace(list); }
 
   // 查询接口（DG-11 契约面）：每次经 store 取当前数组，保持活数组身份语义（非快照）。
-  /** 当前实例数组（store 当前引用）。 */
   all() { return this._store.instances; }
-  /** 遍历当前实例（委托数组 forEach）。 */
   forEach(fn) { return this._store.instances.forEach(fn); }
-  /** 按 id 查找实例（未找到返回 undefined）。 */
   find(id) { return this._store.instances.find((i) => i.id === id); }
-  /** 映射当前实例（委托数组 map）。 */
   map(fn) { return this._store.instances.map(fn); }
 
-  /** 沙箱能力（实时求值，P2-2）：仅 Linux+systemd 可用；保留显式覆写位供测试/嵌入方。 */
+  /** 沙箱能力（实时求值）：仅 Linux+systemd 可用；保留显式覆写位供测试/嵌入方。 */
   get sandboxSupported() { return sandbox.supported(this._sandboxSupportedOverride); }
   _setSandboxSupportedForTest(v) { this._sandboxSupportedOverride = (v === null ? null : v === true); }
 
-  // 6 个回调访问器（compose.js:272-294 直接赋值；内部只读 _hooks，不再读 this.<字段>）
+  // 6 个回调访问器（compose.js 直接赋值；内部只读 _hooks）
   get onRemoteChange() { return this._hooks.onRemoteChange || null; }
   set onRemoteChange(fn) { this._hooks.onRemoteChange = fn; }
   get onRemove() { return this._hooks.onRemove || null; }

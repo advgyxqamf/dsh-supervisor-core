@@ -1,7 +1,6 @@
 'use strict';
 
-// 账号模型（B2）：账号结构、keyId、状态字段、序列化形状，纯模块（零 IO）。覆盖
-// keyFingerprint/maskKey、序列化与供应商预设常量。
+// 账号模型（B2）：账号结构、keyId、状态字段、序列化形状，纯模块（零 IO）。
 
 const crypto = require('node:crypto');
 

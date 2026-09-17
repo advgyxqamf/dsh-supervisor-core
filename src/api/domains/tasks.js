@@ -6,10 +6,9 @@ function owns(pathname) {
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, pathname, send } = ctx;
 
-    // 统一安装/更新任务（Task Registry）：全部安装/升级/卸载/更新操作收敛为同一任务模型
-    //（状态机 + step 进度 + 日志 + 持久化历史）。
+    // 全部安装/升级/卸载/更新操作收敛为同一任务模型（状态机 + step 进度 + 日志 + 持久化历史）。
     if (pathname === '/tasks') {
       if (req.method === 'GET') {
         const kind = new URL(req.url, 'http://localhost').searchParams.get('kind') || null;

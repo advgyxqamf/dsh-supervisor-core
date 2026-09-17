@@ -83,8 +83,6 @@ class SwitchEngine {
     if (d.log) res.log = d.log;
     return res;
   }
-
-  // 已删除 _capture() 取证旁路（无消费方的子系统）。
 }
 
 module.exports = { SwitchEngine };

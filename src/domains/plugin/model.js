@@ -9,7 +9,6 @@ const path = require('node:path');
 /** 内置组件：禁止卸载/禁用（bind 进 store/ops 的判定）。 */
 const PROTECTED = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']);
 
-/** 作业保留上限（超出清理最旧）。 */
 const MAX_JOBS = 50;
 
 /** 新建作业记录：jobId + 每目标子记录（pending/log）。 */
@@ -41,15 +40,12 @@ function taskStateToJobState(s) {
     : 'running';
 }
 
-/** 内置组件判定（读 PROTECTED）。 */
 function isProtectedName(name) { return PROTECTED.has(name); }
 
-/** 补丁行是否属于本插件（id 命中）。 */
 function isOwnRow(e, ids) {
   return e && typeof e === 'object' && typeof e.id === 'string' && ids.includes(e.id);
 }
 
-/** 补丁行是否为本插件的 disabled 行。 */
 function isOwnDisabled(e, ids) {
   return isOwnRow(e, ids) && e.disabled === true;
 }

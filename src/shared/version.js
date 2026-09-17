@@ -10,7 +10,7 @@ const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?
 /** 简化 semver 比较：返回 >0 / 0 / <0。prerelease < release；build metadata 按规范忽略。 */
 function semverCompare(a, b) {
   const parse = (v) => {
-    const clean = String(v).split('+')[0]; // 剥离 build metadata（不参与比较）
+    const clean = String(v).split('+')[0];
     // 只在第一个连字符处切分：标识符本身可含连字符，split('-') 会丢掉 1.0.0-beta-2 的 -2。
     const dash = clean.indexOf('-');
     const core = dash === -1 ? clean : clean.slice(0, dash);

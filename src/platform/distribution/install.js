@@ -138,7 +138,6 @@ function runNpmInstall(opts) {
   });
 }
 
-/** 单次端口连通探测。 */
 function portListening(host, port) {
   return new Promise((resolve) => {
     const socket = net.connect({ host, port });

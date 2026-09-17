@@ -1,7 +1,6 @@
 'use strict';
 
 // 域：原生 DSH（app/native）—— 安装清单读写 + 数据认领（IO：fs，原子写）。
-// 依赖：node:fs / node:path / ./probe。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -25,9 +24,7 @@ function save(host, m) {
 }
 
 /** 记录安装清单。dataPaths 未显式传则继承既有认领（首装认领不因升级丢失）。
- *  @param {string} version
- *  @param {string[]|undefined} dataPaths 卸载时删除的数据路径（默认继承既有认领）
- *  @param {string|null} npmRoot npm 全局根（由调用方解析，测试可注入） */
+ *  npmRoot 由调用方解析（测试可注入）。 */
 function record(host, version, dataPaths, npmRoot) {
   let claim = Array.isArray(dataPaths) ? dataPaths : null;
   if (claim === null) {

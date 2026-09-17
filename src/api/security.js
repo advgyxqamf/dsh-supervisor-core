@@ -52,7 +52,6 @@ function isLocalOrLanHost(h) {
   if (!h) return false;
   const s = String(h).toLowerCase();
   if (LOOPBACK_HOSTS.has(s)) return true;
-  // IPv6 方括号形态：去掉括号再判
   const bare = s.startsWith('[') && s.endsWith(']') ? s.slice(1, -1) : s;
   if (bare === '::1') return true;
   // RFC1918 私有 IPv4（与 identity.isPrivateIpv4 同一份判定）
@@ -81,7 +80,6 @@ function originAllowed(req, apiPort) {
     // Host 形如 `127.0.0.1:36360` / `[::1]:36360` / `evil.com`
     const m = /^(\[[^\]]+\]|[^:]+)(?::\d+)?$/.exec(String(host).trim());
     hostname = m ? m[1] : String(host).trim();
-    // 接受「本机或 RFC1918 私有网段」，与文件头声明的信任集合一致。
     if (!isLocalOrLanHost(hostname)) return false;
   }
 

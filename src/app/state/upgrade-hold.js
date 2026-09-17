@@ -1,8 +1,7 @@
 'use strict';
 
-// app/state/upgrade-hold.js —— 升级 hold 工厂（真 ctor 注入）。
-// createUpgradeHold(deps) 自己持有 enter/enterAsync/exit 实现，可独立直测。
-// hold 标志位仍落宿主瞬态字段（controller/facade 直读 _upgradeHold），经 getHold/setHold 注入。
+// 升级 hold 工厂（真 ctor 注入）。
+// hold 标志位落宿主瞬态字段（controller/facade 直读 _upgradeHold），经 getHold/setHold 注入。
 
 const pidlook = require('../../platform/os/pidlookup');
 

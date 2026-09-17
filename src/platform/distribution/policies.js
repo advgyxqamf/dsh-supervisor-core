@@ -12,7 +12,6 @@ const FALLBACK_REGISTRIES = [
   'https://registry.npmmirror.com',
 ];
 
-/** 去掉首尾空白与尾部斜杠。 */
 function normalizeOrigin(origin) {
   return String(origin || '').trim().replace(/\/+$/, '');
 }

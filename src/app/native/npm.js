@@ -1,7 +1,7 @@
 'use strict';
 
 // 域：原生 DSH（app/native）—— npm 调用（IO：exec / spawn 经 platform 统一封装）。
-// 依赖：platform/os/exec-path / platform/util/exec。npm 可执行经 host._npmBin 构造期注入。
+// npm 可执行经 host._npmBin 构造期注入。
 
 const execPath = require('../../platform/os/exec-path');
 const ex = require('../../platform/util/exec');
@@ -15,14 +15,13 @@ function npmExeArgs(host) {
   return (host && Array.isArray(host._npmBinArgs)) ? host._npmBinArgs.slice() : [];
 }
 
-/** 解析 npm 全局根：优先注入值，否则执行 npm root -g。 */
+/** 优先注入值（测试）。 */
 function resolveNpmRoot(host) {
   if (host.npmRoot) return host.npmRoot;
   const r = ex.runOut(npmExe(host), npmExeArgs(host).concat(['root', '-g']));
   return r ? r.trim() : null;
 }
 
-/** 环境检查：node/npm 可执行 + npm 全局根。 */
 function checkEnvironment(host) {
   const errors = [];
   const nv = ex.runOut('node', ['--version']);

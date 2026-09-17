@@ -30,9 +30,8 @@ const _NEG_TTL_MS = 60000; // 负结果 60s 内不重探（避免每次 /env/sta
 function hasTool(name, args) {
   const hit = _toolCache[name];
   if (hit !== undefined) {
-    if (hit === true) return true; // 正结果：永久
-    if (Date.now() - (hit.at || 0) < _NEG_TTL_MS) return false; // 负结果：TTL 内沿用
-    // 负结果过期 -> 落到下面重探
+    if (hit === true) return true;
+    if (Date.now() - (hit.at || 0) < _NEG_TTL_MS) return false;
   }
   // 必须用 runOut：execFileSync 在 stdio ignore 下成功也返回 null，用 !== null 判存在会恒 false，
   // 导致 capabilities() 把 multiInstance/desktopNotify/autostart 全部误降为 false。

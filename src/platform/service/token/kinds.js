@@ -28,13 +28,6 @@ function setKinds(map) {
   }
 }
 
-/** 已登记 kind 快照（副本；供装配自检/测试）。 */
-function getKinds() {
-  const out = {};
-  for (const k of KIND_ORDER) out[k] = KINDS[k];
-  return out;
-}
-
 /** 幽灵键清单（契约1 末行）：不存在这些令牌，src/ 中必须零引用。
  *  在此显式登记废弃键名，门禁 TK-G7 以本表为权威自动覆盖，不会留下没人守的幽灵键；
  *  此处只登记字面量不算引用，危害在于消费方把废弃键当真令牌使用，那正是 G7 要拦的。 */
@@ -66,12 +59,6 @@ function isCaptured(kind) {
 function isUserConfigKind(kind) {
   const k = kindOf(kind);
   return !!(k && k.side === 'user');
-}
-
-/** 是否 DSH 侧生成（唯一允许走“捕捉、令牌池、广播”通道的两类）。 */
-function isDshSideKind(kind) {
-  const k = kindOf(kind);
-  return !!(k && k.side === 'dsh');
 }
 
 module.exports = {

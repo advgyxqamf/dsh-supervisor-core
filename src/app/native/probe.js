@@ -1,7 +1,6 @@
 'use strict';
 
 // 域：原生 DSH（app/native）—— 真实安装探测 / 版本读取 / 端口健康（IO）。
-// 依赖：node:fs / node:path / node:os / platform/os/exec-path / ./policies。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -38,7 +37,6 @@ function readPkgVersion(file) {
   return null;
 }
 
-/** 从 bin 所在目录向上最多 8 层找 package.json。 */
 function versionNearBin(bin) {
   try {
     let dir = path.dirname(fs.realpathSync(bin));
@@ -53,7 +51,6 @@ function versionNearBin(bin) {
   return null;
 }
 
-/** 已安装版本：显式 installedPkgJsonPath 优先，否则从 bin 向上找 package.json。未装 null。 */
 function installedVersion(host) {
   if (host.config.installedPkgJsonPath) {
     try {
@@ -66,12 +63,11 @@ function installedVersion(host) {
   return versionNearBin(bin);
 }
 
-/** 原生 DSH 目标端口（从 healthUrl 提取）。 */
 function targetPort(config) {
   try { return Number(new URL(config.healthUrl).port) || null; } catch { return null; }
 }
 
-/** 托管单元名（恒为 null）：健康验证只按端口 + 稳定期。 */
+/** 恒为 null：健康验证只按端口 + 稳定期。 */
 function mainUnit() { return null; }
 
 /** 升级后健康验证：端口在线 + 稳定期（unit 恒 null）。返回 { ok, reason }。 */

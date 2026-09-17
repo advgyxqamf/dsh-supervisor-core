@@ -1,7 +1,7 @@
 'use strict';
 
-// 实例池策略（B12）：纯决策，覆盖 HOT/WARM 上限、常驻账号、备胎、期望运行集。IO（启停/对账）
-// 由 proxy/restart 编排；状态一律显式入参（账号数组、在用指向、上限），不读 this。
+// 实例池策略（B12）：纯决策。IO（启停/对账）由 proxy/restart 编排；
+// 状态一律显式入参（账号数组、在用指向、上限），不读 this。
 
 const { quotaPercent } = require('./policies/quota');
 

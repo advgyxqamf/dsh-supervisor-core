@@ -61,7 +61,7 @@ async function portsView(state, deps) {
 /** 供应商列表视图（账号/实例/额度/用量/锁定全量投影）。
  *  deps={ loadTotals, quotaOverallStatus, semverCompare }。 */
 function listProviders(state, deps) {
-  // 配额总览标签单源：与 proxy 检测端同一 quotaOverallStatus（修复视图/检测措辞分叉）
+  // 配额总览标签单源：与 proxy 检测端同一 quotaOverallStatus
   const t = deps.loadTotals();
   const byKey = (t && t.byKey) || {};
   const quotaOverallStatus = deps.quotaOverallStatus;
@@ -76,7 +76,7 @@ function listProviders(state, deps) {
       return {
         keyId: a.keyId,
         maskedKey: a.maskedKey,
-        status: a.status,                       // 单事实源（validity 字段已删除）
+        status: a.status,                       // 单事实源
         validity: a.status,                     // 兼容字段（=status，避免旧前端读 undefined）
         usage: usageOf,                          // 纯派生（activeAccount/实例实况）
         quota: a.quota || null,

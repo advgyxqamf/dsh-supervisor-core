@@ -1,8 +1,6 @@
 'use strict';
 
-// app/state/store.js —— state.json 原子读写 + main 记录迁移工厂（真 ctor 注入）。
-//
-// createStore(deps) 自己持有 lastStateBody 缓存与读写实现，可独立直测。
+// state.json 原子读写 + main 记录迁移工厂（真 ctor 注入）。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -27,7 +25,7 @@ function createStore(deps) {
       const updatedAt = snap.updatedAt;
       snap.updatedAt = null;
       const body = JSON.stringify(snap, null, 2);
-      if (!force && body === lastStateBody) return; // 内容未变不写盘
+      if (!force && body === lastStateBody) return;
       lastStateBody = body;
       snap.updatedAt = updatedAt;
       const dir = path.dirname(config().stateFile);
@@ -56,7 +54,7 @@ function createStore(deps) {
       if (typeof raw.crashWindowRestarts === 'number') record.fieldOf('crashWindowRestarts', raw.crashWindowRestarts, true);
       if (typeof raw.lastFailure === 'string' || raw.lastFailure === null) record.procFieldOf('lastFailure', raw.lastFailure, true);
       if (typeof raw.lastRestartAt === 'string' || raw.lastRestartAt === null) record.procFieldOf('lastRestartAt', raw.lastRestartAt, true);
-      // 升级 hold 跨守卫重启保持：使用 upgrade-hold 的真实导出恢复（enter 置 hold 并按需停目标）。
+      // 升级 hold 跨守卫重启保持。
       if (raw.upgradeHold === true) upgradeHold.enter();
     } catch {}
     // boot 相位不继承：复位 STOPPED，让首拍按真实探测收敛。

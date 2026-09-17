@@ -6,7 +6,6 @@
 
 const guardian = require('../../shared/guardian');
 
-/** 设置实例运行中。 */
 function setRunning(deps, inst, st, now) {
   const state = inst.state;
   state.phase = 'RUNNING';
@@ -54,7 +53,7 @@ function fail(deps, inst, reason) {
 function restart(deps, inst, reason) {
   const state = inst.state;
   const attempts = (state.restartCount || 0) + 1;
-  if (attempts > 20) { // 超过 20 次仍起不来则判定失败，交给用户处理
+  if (attempts > 20) {
     state.restartCount = attempts;
     fail(deps, inst, '重试超限(' + reason + ')');
     return;

@@ -33,7 +33,7 @@ function findManagedDshPort(config) {
     const genericDsh = !bins.length && pidlook.isDshCmdline(pid) && /(^|\s)web(\s|$)/.test(c);
     const owned = binMatch || genericDsh;
     if (!owned) continue;
-    // 复用 config.extractPortFromCommand（同一解析实现，消除 config/supervisor 双份）
+    // 复用 config.extractPortFromCommand（同一解析实现）。
     const port = extractPortFromCommand(c.split(' '));
     if (port) candidates.push({ pid, port, cmdline: c.slice(0, 120) });
   }
@@ -73,7 +73,7 @@ function applyMainPort(host, newPort, pid) {
 module.exports = {
   findManagedDshPort,
   applyMainPort,
-  // 切面装配（app/assembly/facets.js）：成员名与拆分前逐字一致（协作方接口表 + 既有测试依赖）。
+  // 切面装配（app/assembly/facets.js）：成员名须与协作方接口表一致（既有测试依赖）。
   methods: {
     _findManagedDshPort() { return findManagedDshPort(this.config); },
     _applyMainPort(newPort, pid) { return applyMainPort(this, newPort, pid); },

@@ -12,7 +12,6 @@ function createInflight() {
   let errors = 0;
 
   return {
-    /** 真实转发开始 +1。 */
     begin(acc) {
       if (!acc) return 0;
       begun += 1;

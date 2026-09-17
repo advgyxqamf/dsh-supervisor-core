@@ -10,14 +10,12 @@
 const fs = require('node:fs');
 const PLATFORM = process.platform;
 
-/** X11 socket 目录中是否存在活动显示（/tmp/.X11-unix/X0 ...）。 */
 function hasX11Socket() {
   try {
     return fs.readdirSync('/tmp/.X11-unix').some((f) => /^X\d+$/.test(f));
   } catch { return false; }
 }
 
-/** Wayland socket 是否存在（$XDG_RUNTIME_DIR/wayland-0 ...）。 */
 function hasWaylandSocket() {
   const uid = (typeof process.getuid === 'function') ? process.getuid() : 0;
   const rt = process.env.XDG_RUNTIME_DIR || ('/run/user/' + uid);
@@ -26,7 +24,6 @@ function hasWaylandSocket() {
   } catch { return false; }
 }
 
-/** 当前是否有可用于承载 GUI 的图形会话。 */
 function sessionAvailable() {
   if (PLATFORM === 'linux') {
     if (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) return true;
@@ -37,7 +34,6 @@ function sessionAvailable() {
   return PLATFORM === 'darwin' || PLATFORM === 'win32';
 }
 
-/** 判定依据（供诊断/审计，说明**为什么**得出该结论）。 */
 function describe() {
   if (PLATFORM === 'linux') {
     const byEnv = !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);

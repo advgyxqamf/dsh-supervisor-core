@@ -33,7 +33,7 @@ function pipeWithHold(ur, res, clientReqPath, logger) {
     try { ur.destroy(); } catch {}
   });
   res.on('close', () => {
-    if (ur.readableEnded || ur.destroyed) return; // 正常结束后的 close
+    if (ur.readableEnded || ur.destroyed) return;
     // 浏览器中途断开：进入保持模式——继续读上游丢弃，等 DSH 自然结束（不取消 agent、不清理）
     clientGone = true;
     log('warn', 'relay: 客户端连接断开，保持上游连接直到响应结束（agent 不受影响）' + (clientReqPath ? ' ' + clientReqPath : ''));

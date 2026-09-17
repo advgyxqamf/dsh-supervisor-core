@@ -19,11 +19,6 @@ class FollowBus {
     return () => { try { this._listeners.delete(fn); } catch { /* 集合删除不应抛 */ } };
   }
 
-  /** 当前订阅者数量（仅供自测/诊断，不参与分发逻辑）。 */
-  listenerCount() {
-    return this._listeners.size;
-  }
-
   /** 广播一次令牌变化，唯一的对外通知出口（TK-8）。value 为 null 表示失效或清空。 */
   emit(id, value, record) {
     // 快照后再遍历：listener 在回调里退订/再订阅不应影响本次分发的确定性。

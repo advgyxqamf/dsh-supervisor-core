@@ -107,9 +107,6 @@ const SURFACE = [
   // 更新策略：壳与内核同一套升级逻辑，有新版必须强制更新，不得跳过、不得隐式回退；
   // 紧急回退由发布通道契约的 `rollback` dist-tag 显式触发（RELEASE-CHANNEL-CONTRACT.md）。
   { path: '/shell/status',         methods: ['GET'],  domain: 'shell', category: 'public',      consumers: ['UI(壳状态卡)', 'CLI'], note: '壳身份 + 更新账本 + 判定结论' },
-  // 以下两个端点的 `consumers` 曾声明为「壳」，与事实不符：壳仓从不 POST 它们（grep 零命中），
-  // 壳只写 identity.json，更新阶段经本地命令 `shell_set_phase` 上报。现按真实情况标注为
-  // 「无人消费（待接线）」，并保留端点（运维/未来接线可用）。
   { path: '/shell/health',         methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工上报壳阶段（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：phase=ready 即更新确认信号，供排障手工驱动安全网；当前 evaluate() 因缺输入恒 idle' },
   { path: '/shell/update-pending', methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工建立更新账本（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：建立更新账本（待重启确认），供排障手工驱动内核侧安全网' },
   { path: '/shell/check-update',   methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['UI(关于卡)'], note: '壳版本检测（与内核自更新同源：npm registry + 镜像回退）' },

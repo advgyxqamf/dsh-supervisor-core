@@ -25,7 +25,6 @@ function guiFile() {
   return path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
 }
 
-/** 守卫（systemd --user unit）自启状态。 */
 function status() {
   let unit = 'unknown';
   const en = ex.runDetail('systemctl', ['--user', 'is-enabled', 'dsh-supervisor.service']);
@@ -33,7 +32,6 @@ function status() {
   return { kind: 'systemd', unit, on: unit === 'enabled', gui: fs.existsSync(guiFile()) };
 }
 
-/** 服务链自启（守卫 + 面板）。 */
 function setAutostart(on, deps) {
   const errors = [];
   { const r = ex.runDetail('systemctl', ['--user', 'daemon-reload']);
@@ -75,7 +73,7 @@ function setGuiAutostart(on, deps) {
       const icon = iconCandidates.find((c) => { try { return fs.statSync(c).isFile(); } catch { return false; } });
       if (icon) entry = entry.split(/^Icon=.*$/m).join('Icon=' + icon);
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      const atmp2 = file + '.tmp'; fs.writeFileSync(atmp2, entry); fs.renameSync(atmp2, file); // 原子写
+      const atmp2 = file + '.tmp'; fs.writeFileSync(atmp2, entry); fs.renameSync(atmp2, file);
     } else { try { fs.unlinkSync(file); } catch {} }
     return { ok: true, enabled: !!on, exec: deps.guiCommand() };
   } catch (e) { return { ok: false, error: e.message }; }

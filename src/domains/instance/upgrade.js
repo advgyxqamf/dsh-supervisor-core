@@ -6,12 +6,10 @@ const { semverCompare } = require('../../shared/version');
 const sandbox = require('./sandbox');
 const model = require('./model');
 const dshInstall = require('./ops/dsh-install');
-/** TaskRegistry 行日志回调（task 为空时静默）。 */
 function taskLogger(task, tasks) {
   return (l) => { if (task) tasks.log(task.id, l); };
 }
 
-/** 端口健康检查参数。 */
 function portHealthOpts(inst) {
   return { host: '127.0.0.1', port: inst.port, unit: 'dsh-web@' + inst.id, timeoutMs: 120000 };
 }

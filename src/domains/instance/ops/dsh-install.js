@@ -58,7 +58,7 @@ function createDshInstall(deps) {
       inst.state.installAt = Date.now();
       inst.state.installOk = null;
       inst.state.installError = null;
-      inst.state.installLog = inst.state.installLog || []; // 可观测安装日志(有界)
+      inst.state.installLog = inst.state.installLog || [];
       save();
       const pushLog = (txt) => pushInstallLog(inst, task, txt);
       if (task) { try { tasks.log(task.id, '目标目录：' + installDir); } catch {} }

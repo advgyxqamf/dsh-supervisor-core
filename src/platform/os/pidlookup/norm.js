@@ -68,7 +68,6 @@ function parseWmicCommandLine(out) {
   return v || null;
 }
 
-/** 解析 PowerShell CIM 的 CommandLine 输出 -> 命令行或 null（trim；空串视为未取到）。 */
 function parsePowerShellCommandLine(out) {
   const v = out ? String(out).trim() : '';
   return v || null;

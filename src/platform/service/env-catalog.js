@@ -69,8 +69,7 @@ function verAtLeast(a, b) {
 }
 
 /** Node 探测：不仅要能执行，还要达到最低门槛（旧实现只判 which node 是否成功，装了 v18 也报 ok，
- *  而壳的引导会因门槛不满足拒绝启动内核）。
- *  @returns {{version:string, min:string, meets:boolean}|null} */
+ *  而壳的引导会因门槛不满足拒绝启动内核）。 */
 function probeNode() {
   const v = cachedWhichVersion('node');
   if (!v) return null;
@@ -155,8 +154,6 @@ class EnvCatalog {
   }
 
 /** 汇总：全部必填项状态（供面板/守卫快速判定环境就绪）。
- *  @param extra 附加条目（dsh/selfUpdate）
- *  @param sys 可选：已探测的系统条目（避免调用方已 probe 后又重 probe）
  *  无 sys 时探测一次（有 10s TTL 缓存）。 */
   summary(extra, sys) {
     const s = sys || this.probe();

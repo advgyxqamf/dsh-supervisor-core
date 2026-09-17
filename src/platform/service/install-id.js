@@ -27,7 +27,7 @@ function installIdPath() {
   return path.join(supervisorDir(), FILE_NAME);
 }
 
-/** 读取本机安装标识。@returns {{ id: string, source: string } | null}
+/** 读取本机安装标识。
  *  source 为 'env'/'file'/'created'（诊断用）；null 表示无法确定（读/写失败），
  *  调用方必须按无标识处理并如实告知，绝不随便造一个（契约：失败绝不静默新建）。 */
 function readInstallId() {

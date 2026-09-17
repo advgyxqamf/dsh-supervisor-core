@@ -49,8 +49,7 @@ function legacyShellDir() {
   return path.join(os.homedir(), '.dsh', 'shell');
 }
 
-/** 前向自愈迁移：旧位置存在、新位置不存在时整目录搬移。不双读、不复制；失败静默（下次启动再试）。
- *  @returns {string[]} 实际迁移的 [from -> to] 描述（供日志） */
+/** 前向自愈迁移：旧位置存在、新位置不存在时整目录搬移。不双读、不复制；失败静默（下次启动再试）。 */
 function migrateLegacy() {
   const moved = [];
   for (const [from, to] of [

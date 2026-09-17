@@ -15,7 +15,7 @@ const { npmEntry, githubEntry } = require('./policies/market-entry');
 
 const REGISTRY = 'https://registry.npmjs.org';
 const GH_API = 'https://api.github.com';
-const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 分钟
+const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const INDEX_FILE = 'plugin-market-cache.json';
 
 /** 社区源单条候选处理（单条失败跳过，不影响整体）。 */
@@ -115,7 +115,6 @@ class PluginMarket {
     const community = await this.indexCommunity();
     community.forEach(add);
 
-    // 分类 + 排序（按 stars/流行度）
     for (const p of plugins) {
       p.category = p.category || classify(p);
       p.stars = p.stars || 0;
@@ -166,7 +165,6 @@ class PluginMarket {
     const allNames = new Set();
     for (const query of queries) {
       try {
-        // 分页拉取所有候选（每页 250，最多 1000）
         for (let from = 0; from < 1000; from += 250) {
           const base = await this._npmOrigin();
           const url = base + '/-/v1/search?text=' + encodeURIComponent(query) + '&size=250&from=' + from;
@@ -180,7 +178,6 @@ class PluginMarket {
     }
     const names = [...allNames];
     this.logger.info && this.logger.info('npm candidates: ' + names.length);
-    // 并行验证 dsh.bundle
     const batch = 8;
     for (let i = 0; i < names.length; i += batch) {
       // 预算耗尽即停止发起新批次（已采集部分照常返回）。

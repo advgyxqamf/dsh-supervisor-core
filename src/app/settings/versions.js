@@ -2,7 +2,7 @@
 
 const srcpath = require('../../platform/util/srcpath');
 
-// app/settings/versions.js —— 内核自更新状态 / 管家自身版本检查门面。
+// 内核自更新状态 / 管家自身版本检查门面。
 // 导出形态 { methods }，方法经 this 协作。
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,7 +11,7 @@ const ex = require('../../platform/util/exec');
 // 平台知识唯一事实源（跨平台架构规范）：os/arch 到标签映射只在 src/platform/contract/matrix.js。
 const matrix = require('../../platform/contract/matrix');
 const { semverCompare } = require('../../shared/version');
-const deploy = require('../../platform/contract/deploy'); // 拆分携带：自更新形态判定（deploy.detect）
+const deploy = require('../../platform/contract/deploy'); // 自更新形态判定（deploy.detect）
 
 module.exports = {
   methods: {
@@ -23,7 +23,6 @@ module.exports = {
     guardCorePkg() {
       const raw = this.config.corePackageName;
       if (!raw) return null;
-      // 2026-09-13（跨平台架构规范化）：平台知识收口到 src/platform/contract/matrix.js。
       return String(raw).replace(/{os}/g, matrix.osTag()).replace(/{arch}/g, matrix.current().arch) || null;
     },
 
@@ -72,7 +71,6 @@ module.exports = {
     },
 
     // 管家自身版本检查（与 DSH 更新解耦）：本地仓库 git 视角，配了远程才 fetch 比对。
-    /** VCS 根解析：从**包根**上溯找最近的「外层」.git（排除自身嵌套仓）。
     /** VCS 根解析：从包根上溯找最近的外层 .git（排除自身嵌套仓）。
      *  命中嵌套仓会使其 HEAD 与真实外层仓脱节，导致 UI 版本/commit 失真；找不到外层仓时回退包根。
      *  包根用 srcpath.resolvePackageRoot()（按 package.json 上溯），不能靠 __dirname 相对路径。 */
@@ -98,7 +96,7 @@ module.exports = {
         const up = (ex.runOut('git', ['-C', root, 'rev-parse', '--abbrev-ref', '@{u}']) || '').trim();
         if (up) upstream = 'git-repo';
       } catch {}
-      // version = 进程运行版本（启动时固化，打包态为编译期常量）——语义明确标注（A3）。
+      // version = 进程运行版本（启动时固化，打包态为编译期常量）。
       // 磁盘实况版本（runningVersion vs diskVersion 的 updatePending 判定）在 async guardVersionCheck。
       return { version: this.guardVersion, runningVersion: this.guardVersion, commit, updateAvailable: false, upstream, latest: this.guardVersion };
     },
@@ -127,7 +125,7 @@ module.exports = {
         const ahead = (ex.runOut('git', ['-C', root, 'rev-list', '--count', 'HEAD..@{u}']) || '').trim();
         updateAvailable = parseInt(ahead, 10) > 0;
       } catch {}
-      // A3：磁盘运行位实况版本 vs 进程运行版本——不一致 = 「更新已安装、待重启生效」
+      // 磁盘运行位实况版本 vs 进程运行版本：不一致 = 「更新已安装、待重启生效」
       const dep = deploy.detect();
       let diskVersion = null;
       // launcher 形态同样有运行位自报版本（见 _readBinarySelfVersion 说明）。

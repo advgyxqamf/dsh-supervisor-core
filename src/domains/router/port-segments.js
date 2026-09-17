@@ -16,7 +16,7 @@ const POOLS = {
 };
 
 /** 逻辑段到物理池的映射。值 = 反转前 platform SEGMENT_POOL 的映射，逐字未改。 */
-// anchor = 池内显式起点（原实现按「同池段序乘 1000」得出同值，现显式固定，与申报顺序无关）。
+// anchor = 池内显式起点（与申报顺序无关）。
 const SEGMENTS = {
   proxyInstance: { pool: 'managed', anchor: 1000 },
   oauthCallback: { pool: 'managed', anchor: 2000 },

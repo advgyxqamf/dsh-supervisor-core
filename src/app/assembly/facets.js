@@ -16,7 +16,7 @@ const { installCollaborators } = require('./collaborators');
 const FACETS = [
   { name: 'assembly/bootstrap', mod: require('./bootstrap'), hostFirst: true },
   { name: 'assembly/api-rebind', mod: require('./api-rebind'), apiRebind: true },
-  // 级 2（2026-09-17）：session/machine + state/{store,fields,desired,upgrade-hold,main-store}
+  // 级 2：session/machine + state/{store,fields,desired,upgrade-hold,main-store}
   //   + control/{projection,specs} 已改为**真 ctor 工厂**，经 assembly/collaborators.js 装配，
   //   不再在此以 { methods }/{ hostFirst } 形态安装（见 collaborators.js）。
   { name: 'session/shutdown', mod: require('../session/shutdown'), hostFirst: true },

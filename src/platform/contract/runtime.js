@@ -11,10 +11,8 @@ const stateRoot = require('../service/state-root');
 const fs = require('node:fs');
 const path = require('node:path');
 
-/** 本内核理解的契约 schema。 */
 const SUPPORTED_SCHEMA = 2;
 
-/** 契约文件路径。 */
 function file() {
   return path.join(stateRoot.supervisorDir(), 'runtime.json');
 }

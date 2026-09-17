@@ -6,9 +6,8 @@ function owns(pathname) {
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
 
-    // 插件管理
     if (req.method === 'GET' && pathname === '/plugins/market') {
       const force = req.url.indexOf('refresh=1') >= 0;
       return sup.pluginMarket.getIndex(force).then(

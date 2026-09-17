@@ -1,7 +1,6 @@
 'use strict';
 
 // STEP7 分片 F —— 沙箱实例监督适配（heartbeat 拍 -> 实例域 + 目录同步）
-// 逐字搬迁自 src/app/daemons/control-view.js（纯搬迁，逻辑零改动）。
 // 导出形态按 STEP7-INTERFACE-CONTRACT §2 统一为 { methods }；方法内部继续使用 this。
 
 module.exports = {

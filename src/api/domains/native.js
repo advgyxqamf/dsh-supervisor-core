@@ -6,9 +6,8 @@ function owns(pathname) {
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, res, pathname, send, collectBody, originAllowed } = ctx;
 
-    // 原生 DSH 生命周期（唯一通道）：状态(含版本) / 检测更新 / 安装 / 升级 / 卸载
     if (req.method === 'GET' && pathname === '/native/status') {
       return send(200, {
         ...(sup.nativeManager ? sup.nativeManager.status() : { installed: false }),

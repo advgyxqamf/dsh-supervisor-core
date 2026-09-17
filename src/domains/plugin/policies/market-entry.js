@@ -4,7 +4,6 @@
 
 const { pickAuthor } = require('./classify');
 
-/** npm 源条目（纯构造）。 */
 function npmEntry(name, meta) {
   return {
     name,
@@ -20,7 +19,6 @@ function npmEntry(name, meta) {
   };
 }
 
-/** GitHub 源条目（纯构造）。 */
 function githubEntry(meta, r) {
   return {
     name: meta.name || r.name,

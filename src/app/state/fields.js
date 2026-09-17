@@ -14,9 +14,7 @@ function createFields(deps) {
   const reg = () => (typeof g.getManagedObjects === 'function' ? g.getManagedObjects() : null);
   const logger = () => (typeof g.getLogger === 'function' ? g.getLogger() : null);
 
-  /** 守卫 legacy 大写 phase -> 目录唯一词表。 */
   function toEntry(ph) { return legacyToEntryPhase(ph); }
-  /** 目录小写 phase -> 守卫 legacy 大写。 */
   function toLegacy(ph) { return entryToLegacyPhase(ph); }
 
   /** 读守卫视角 phase（大写；OBSERVED 按 observedOnly+adopted 合成）。守卫内唯一 phase 读口。 */
@@ -77,7 +75,6 @@ function createFields(deps) {
   function field(name, v) {
     return arguments.length >= 2 ? record.fieldOf(name, v, true) : record.fieldOf(name, undefined, false);
   }
-  /** entry.process 字段读写。 */
   function procField(name, v) {
     return arguments.length >= 2 ? record.procFieldOf(name, v, true) : record.procFieldOf(name, undefined, false);
   }

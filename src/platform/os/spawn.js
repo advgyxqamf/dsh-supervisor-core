@@ -13,11 +13,7 @@ const { spawn } = require('node:child_process');
 
 /** 独立进程组（后台常驻：主 DSH / daemon / 反代）。
  *  固定 detached:true（进程组语义不得因隐藏窗口而丢失，kill(-pid) 依赖它）与 windowsHide:true。
- *  stdio 默认 ignore，允许经 opts.stdio 覆盖；覆盖只动 stdio，不放开 detached/windowsHide。
- *  @param {string} cmd
- *  @param {string[]} args
- *  @param {{env?:object, stdio?:any, cwd?:string}} [opts]
- *  @returns {import('node:child_process').ChildProcess} */
+ *  stdio 默认 ignore，允许经 opts.stdio 覆盖；覆盖只动 stdio，不放开 detached/windowsHide。 */
 function detached(cmd, args, opts) {
   const o = opts || {};
   return spawn(cmd, args, Object.assign({}, o, {
@@ -30,11 +26,7 @@ function detached(cmd, args, opts) {
 
 /** 管道模式（需要读输出：npm install / 插件 CLI / frpc）。
  *  固定 stdio ['ignore','pipe','pipe'] 与 windowsHide:true；opts.detached 可显式覆盖（默认 false），
- *  因为是否自成进程组是调用方的生命周期决策，与窗口隐藏无关。
- *  @param {string} cmd
- *  @param {string[]} args
- *  @param {{env?:object, cwd?:string, detached?:boolean}} [opts]
- *  @returns {import('node:child_process').ChildProcess} */
+ *  因为是否自成进程组是调用方的生命周期决策，与窗口隐藏无关。 */
 function piped(cmd, args, opts) {
   const o = opts || {};
   return spawn(cmd, args, Object.assign({}, o, {
@@ -45,11 +37,7 @@ function piped(cmd, args, opts) {
 }
 
 /** 浏览器 / OS 打开（完全脱离本进程，且不读任何输出）：等价于 detached + stdio ignore，
- *  单独成入口是为语义自解释，同样固定 windowsHide:true。
- *  @param {string} cmd
- *  @param {string[]} args
- *  @param {{env?:object, cwd?:string}} [opts]
- *  @returns {import('node:child_process').ChildProcess} */
+ *  单独成入口是为语义自解释，同样固定 windowsHide:true。 */
 function detachedIgnored(cmd, args, opts) {
   const o = opts || {};
   return spawn(cmd, args, Object.assign({}, o, {

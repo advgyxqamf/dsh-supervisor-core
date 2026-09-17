@@ -23,7 +23,6 @@ function status() {
   return { kind: 'schtasks', on: guard || gui || watchdog, gui, watchdog, guard };
 }
 
-/** GUI 壳登录自启开关（schtasks DSH-Supervisor-GUI，ONLOGON）。 */
 function setAutostart(on, deps) {
   const errors = [];
   try {

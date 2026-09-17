@@ -3,15 +3,14 @@
 // 域：统一生命周期 API（status/lifecycle/healthz/readyz/events）。
 const { isInternalEvent } = require('../../platform/service/log/hub');
 
-// 旧 /start|/stop|/restart 路由已删除（前端无引用）；main 启停唯一入口 /lifecycle/dsh/{start|stop|restart}。
+// main 启停唯一入口 /lifecycle/dsh/{start|stop|restart}。
 function owns(pathname) {
   return pathname === '/status' || pathname.startsWith('/lifecycle') || pathname === '/healthz' || pathname === '/readyz' || pathname === '/events' || pathname.startsWith('/logs') || pathname === '/metrics' || pathname === '/session/stop' || pathname === '/session/status';
 }
 
 function handle(ctx) {
-  const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
+  const { sup, req, pathname, send, originAllowed } = ctx;
 
-    // API 路由
     if (req.method === 'GET' && pathname === '/status') {
       return send(200, sup.statusSummary());
     }
@@ -51,7 +50,7 @@ function handle(ctx) {
         return lc ? send(200, lc.snapshot()) : send(404, { error: '模块未注册: ' + id });
       }
       if (req.method === 'POST' && action) {
-        // 写动作统一经本入口，Origin 门禁在此（旧 /start|/stop|/restart 曾各自门禁，已删）。
+        // 写动作统一经本入口，Origin 门禁在此。
         if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
         const lc = lm.get(id);
         if (!lc) return send(404, { error: '模块未注册: ' + id });
@@ -119,18 +118,13 @@ function handle(ctx) {
       return send(200, { seq, events: list });
     }
 
-    // /logs/tail?stream=guard|router|lan|dsh|upgrade&n= 排障日志尾部；
-    // 注：原 /logs/events-tail 已删除（见下方说明），事件尾部读统一走 GET /events。
+    // /logs/tail?stream=guard|router|lan|dsh|upgrade&n= 排障日志尾部。
     if (req.method === 'GET' && pathname === '/logs/tail') {
       const u = new URL(req.url, 'http://localhost');
       const stream = u.searchParams.get('stream') || 'guard';
       const n = Math.min(Math.max(Number(u.searchParams.get('n') || 100) || 100, 1), 2000);
       return send(200, { stream, lines: sup.eventHub ? sup.eventHub.tailLog(stream, n) : [] });
     }
-    // /logs/events-tail 已删除：其语义与 GET /events?internal=1&after=0&limit=N 完全等价
-    //（两者都走 hub.read(0,n)），且五方（UI/CLI/壳/测试/CI）零消费者；CLI 的 events 命令直读文件。
-    // 保留「语义重复的第二个入口」是架构债（两条路径须同步演进）。
-
     // /logs/export?after=&limit= 审计导出（聚合流 JSONL 原文，离线备份）。
     if (req.method === 'GET' && pathname === '/logs/export') {
       const u = new URL(req.url, 'http://localhost');
@@ -146,8 +140,6 @@ function handle(ctx) {
       return send(200, sup.eventHub.metrics());
     }
 
-  // 旧 /start|/stop|/restart 路由已删除：main 启停唯一入口 /lifecycle/dsh/{start|stop|restart}
-  //（语义保持见上方 dsh 分支；其它模块启停 /lifecycle/{id}/{action}）。
   // 域内未匹配(方法/子路径)：全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });

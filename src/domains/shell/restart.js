@@ -35,7 +35,6 @@ async function checkUpdate(dist, opts) {
     if (!latest) {
       return { ok: false, installed, latest: null, updateAvailable: false, error: '未查询到壳发布版本（可能尚未发布）' };
     }
-    // 版本比较：复用内核同一份 semverCompare（避免两处语义分叉）
     const updateAvailable = Boolean(installed && semverCompare(latest, installed) > 0);
     return { ok: true, installed, latest, updateAvailable };
   } catch (e) {

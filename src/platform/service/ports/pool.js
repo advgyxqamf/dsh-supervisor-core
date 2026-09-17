@@ -16,7 +16,6 @@ const { PortAllocator } = require('./alloc');
 class PortRegistry {
   /** @param {object} [opts] { file, pools } — file 默认 <状态根>/supervisor/ports.json。 */
   constructor(opts) {
-    // os.homedir() 是三平台正确来源（Windows 用 USERPROFILE）——原 env.HOME||/tmp 在 Windows 落到盘根 tmp。
     this._file = (opts && opts.file) || path.join(stateRoot.supervisorDir(), 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
     this._allocLock = false;     // 分配互斥：探测(await)窗口内并发调用必须串行
@@ -129,7 +128,6 @@ class PortRegistry {
 
   recordOf(port) { return this._records.get(Number(port)) || null; }
 
-  /** 按 owner 查端口。 */
   byOwner(owner) {
     for (const r of this._records.values()) if (r.owner === owner) return r.port;
     return null;
