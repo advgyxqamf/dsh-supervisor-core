@@ -1,6 +1,6 @@
 # AUDIT-r5 架构一致性审计报告（Architecture Consistency）
 
-> 范围：/home/bowen/develop/plus。方式：只读静态审计。
+> 范围：内核仓根（相对路径 `./`）。方式：只读静态审计。
 > 约束遵守：未运行任何测试 / 门禁，未启动任何 daemon，未碰 /tmp/dsh-* 与状态根，
 > 未 commit / push，未改 package.json，未加依赖。本次**未修改 src/**（J 组约束：对 src/ 只报告），
 > 也未修改文档与测试（阈值裁决属主代理权限）。仅新建本报告。
