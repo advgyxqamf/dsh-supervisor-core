@@ -33,19 +33,27 @@
 其中第 3 条是**平台原生**问题：只有 Windows 构建能暴露，现已固化为门禁 **N-e**
 （`test-chain-completeness-test.js`），不再依赖 Windows CI 才发现。
 
-### 本机自检数据（不构成验收证据，仅存档）
+### 历史自检存档（**不构成验收证据**；结论只由 CI 裁决）
 
-全部结构门禁在严格模式下 exit 0；本机回归 126 条仅 1 项失败，
-且该项为**本机环境前件不满足**（本机 `$HOME` 存在 `.npmrc`）——
-该项在 CI 干净 runner 上**实际通过**（见上表 `test` job）。详见 `ACCEPTANCE-STANDARD.md` §1.2。
+⚠ **本表刻意不记通过条数**：条数随门禁演进每轮变化，写死必然过期 —— 本文件曾记
+「`domain-structure-gate-test` 76 passed」，而该门禁随后已增到 82 条（P3-B 加 DG-11 形态
+与 DG-12 合成样本自检），条目本身即假信息。**判定口径以「严格模式是否 exit 0」为准**，
+条数由 CI 输出，不在此处复制。
 
-| 门禁 | 结果 | 严格模式 |
-|---|---|---|
-| `domain-structure-gate-test`（**DG-1..16**） | **76 passed / 0 hard / 0 soft** | `DG_STRICT=1` → **exit 0** |
-| `directory-structure-gate-test`（DS-G1..G8, DS-9） | **19 passed / 0 hard / 0 soft** | `GATE_STRICT=1` → **exit 0** |
-| `layering-and-dependency-gate-test`（L-1..L-4, CROSS_LAYER） | **10 passed / 0 failed** | 硬失败 |
-| `standards-uniqueness-test`（U-1..U-5） | **8 passed / 0 failed** | 硬失败 |
-| `test-chain-completeness-test` | **10 passed / 0 failed** | 硬失败 |
+| 门禁 | 判定口径（不写条数） |
+|---|---|
+| `domain-structure-gate-test`（DG-1..16） | `DG_STRICT=1` → exit 0 |
+| `directory-structure-gate-test`（DS-G1..G8、DS-9） | `GATE_STRICT=1` → exit 0 |
+| `layering-and-dependency-gate-test`（L-1..L-4、CROSS_LAYER） | 硬失败（无严格开关） |
+| `standards-uniqueness-test`（U-1..U-5） | 硬失败 |
+| `test-chain-completeness-test`（N-a..N-f） | 硬失败 |
+| `comment-pin-gate-test`（CP-1 report-only / CP-4/CP-5 硬） | 自检硬失败；实盘需 `CP_STRICT=1` |
+| `app-this-ratchet-gate-test`（AT-1..AT-3） | 硬失败（棘轮） |
+| `docs-reference-gate-test`（DR-1/DR-2） | 硬失败 |
+
+历史注记：早期本机回归曾被记为「126 条仅 1 项失败」，其中该 1 项为**本机环境前件不满足**
+（本机 `$HOME` 有 `.npmrc`），在 CI 干净 runner 上通过。链现为 129 条；
+**条数同样不在此处维护**（见上）。详见 `ACCEPTANCE-STANDARD.md` §1.2。
 
 ---
 
