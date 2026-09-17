@@ -187,7 +187,10 @@ class ManagedRegistry {
     if (p.name !== undefined) e.name = String(p.name || e.id);
     if (p.ownership !== undefined) {
       const old = e.ownership.ports;
-      e.ownership = normalizeOwnership(p.ownership);
+      // 合并而非整体替换：update 是部分补丁接口，只提供 ports 的调用方不应把
+      //   rootPath/unit/daemonScript/processMode 静默清成 null（P3-E #7）。
+      //   现有唯一调用方（specs.upsert）始终传完整 ownership，故行为等价。
+      e.ownership = normalizeOwnership(Object.assign({}, e.ownership, p.ownership));
       this._syncPortsOwner(e, true);
       for (const op of old) { if (!e.ownership.ports.some((np) => np.port === op.port)) this._releasePort(op.port, e.id); }
     }

@@ -43,6 +43,7 @@ function createProjection(deps) {
         dsh.error = errText;
       } else if (ph === 'BACKOFF') {
         dsh._setPhase('starting');
+        dsh.healthy = false; // 退避中进程未在提供服务；必须落 healthy=false，否则视图沿用上一拍的 true 谎报健康（P3-E #8）
         dsh.error = '启动退避中';
       } else {
         dsh._setPhase('stopped');

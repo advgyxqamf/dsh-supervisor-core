@@ -159,7 +159,13 @@ class ManagedLifecycle {
    *  显式失败时保持运行态（与异常分支同一语义）并如实上报错误。
    */
   async stop(reason) {
-    if (this.phase === 'stopped') return { ok: true, already: true };
+    if (this.phase === 'stopped') {
+      // 已是 stopped 仍需落 desired：否则「desired=running 而 phase=stopped」（崩溃后未收敛/从未起来）
+      //   的模块被点停止后 desired 仍为 running，收敛回路会把它重新拉起，stop 不生效（P3-E #9）。
+      //   只改这条早退路径：显式失败路径（下方 prevPhase 恢复）必须保持 desired 不变（K4-d）。
+      this.desired = 'stopped';
+      return { ok: true, already: true };
+    }
     // 失败时恢复进入 stop 之前的那个 phase，而非硬编码 'running'：
     // 若停之前是 failed/backoff/installing（对失败模块点停止且底层 stop 又失败），
     // 硬编码 'running' 会把已知失败的模块显示成运行中，与观测相反。

@@ -11,6 +11,8 @@
 const { createStateStore } = require('../state/collaborator');
 const { createSession } = require('../session/machine');
 const { createControlPlane } = require('../control/collaborator');
+const { createCtl } = require('../ctl/collaborator');
+const { createOrphanScan } = require('../audit/collaborator');
 const { ENTRY_FIELDS, PROC_FIELDS } = require('../state/field-tables');
 
 // 薄委托切面 -> { 协作方公开名: host 上的既有方法名 }
@@ -178,14 +180,56 @@ function installThin(host) {
   }
 }
 
+/** 安装 audit 协作方（真 ctor 工厂）：覆盖 installThin 刚装上的转发器，
+ *  使 host.audit.orphan() 直达工厂（control/scheduler.js:30 的唯一消费点），
+ *  而不再经 host._orphanAudit()。THIN_SPEC.audit 仍保留为接口声明与装配期校验出处。
+ *  deps 全为惰性取值（装配期 host 尚未就绪）；抑制状态经 get/set 钩子与 host 字段同源。 */
+function installAuditFactory(host) {
+  host.audit = createOrphanScan({
+    getConfig: () => host.config,
+    getLogger: () => host.logger,
+    getEvents: () => host.events,
+    getInstances: () => host.instances,
+    getManagedObjects: () => host.managedObjects,
+    getCtl: () => host.ctl,
+    getDaemons: () => host.daemons,
+    getStopping: () => host._stopping,
+    getLastKey: () => host._lastOrphanKey,
+    setLastKey: (v) => { host._lastOrphanKey = v; },
+    getLastAt: () => host._lastOrphanAt,
+    setLastAt: (v) => { host._lastOrphanAt = v; },
+  });
+}
+
+/** 安装 ctl 协作方（真 ctor 工厂）：公开键 = THIN_SPEC.ctl（call/lanCall/lanPort/routerPort/routerFacade），
+ *  覆盖 installThin 的转发器，使 host.ctl.* 与 host._* 走同一实现。
+ *  getLanCtlCall 等宿主 getter 必须传 host 上的**实时**方法（每次调用重新取 + bind），
+ *  因为测试会覆写 host._lanCtlCall 来验证「门面路径剔除令牌」
+ *  （test/token-boundary-test.js:81 经 facade/lan.js:41 的 this.ctl.lanCall 生效）——
+ *  若在此固化实现，覆写面会失效。 */
+function installCtlFactory(host) {
+  host.ctl = createCtl({
+    getConfig: () => host.config,
+    getCtlCall: () => host._ctlCall.bind(host),
+    getLanCtlCall: () => host._lanCtlCall.bind(host),
+    getLanCtlPort: () => host._lanCtlPort.bind(host),
+    getRouterCtlPort: () => host._routerCtlPort.bind(host),
+    getRouterFacade: () => host._makeRouterFacade.bind(host),
+  });
+}
+
 /** 把协作方落到 host 实例（先真 ctor，后薄委托；validate 时校验薄委托目标存在）。 */
 function installCollaborators(host, options) {
   installState(host);
   installSession(host);
   installControl(host);
   installThin(host);
+  // 工厂化切面：必须在 installThin 之后（要覆盖 ctl/audit 转发器）且 installState/Control 之后
+  //   （domain-actions 经 state/views/lifecycleManager 取事实）。
+  installCtlFactory(host);
+  installAuditFactory(host);
   if (options && options.validate) assertCollaboratorTargets(host);
   return host;
 }
 
-module.exports = { THIN_SPEC, SPEC: THIN_SPEC, assertCollaboratorTargets, installCollaborators };
+module.exports = { THIN_SPEC, assertCollaboratorTargets, installCollaborators };

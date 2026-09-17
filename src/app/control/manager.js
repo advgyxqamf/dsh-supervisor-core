@@ -70,18 +70,11 @@ class LifecycleManager {
     if (lc.startable === false) return { ok: false, error: '模块不可启停（' + lc.kind + ':' + lc.id + '）' }; // B1 执法
     // 委托 lc.restart()：ManagedLifecycle 内 _restart 回调优先（如 dsh 经 requestRestart
     // 停旧拉新），无回调才退化为 stop -> start（通用模块）。
-    if (typeof lc.restart === 'function') {
-      const r = await lc.restart();
-      return { ok: r.ok !== false, error: r.error, ...lc.snapshot() };
-    }
-    const wasRunning = lc.desired === 'running' || lc.phase === 'running';
-    const r1 = await lc.stop('restart');
-    if (wasRunning || lc.desired === 'running') {
-      lc._monitoring = true;
-      const r2 = await lc.start();
-      return { ok: r2.ok !== false, error: r2.error, ...lc.snapshot() };
-    }
-    return { ok: r1.ok !== false, ...lc.snapshot() };
+    // register 只接受 ManagedLifecycle 实例（instanceof 执法），而 restart 是其原型方法，
+    // 故 lc.restart 恒为函数；stop->start 回退由 entry.js 的 ManagedLifecycle.restart()
+    // 唯一承担（test/lifecycle-restart-failure-test.js P-a..P-e 锁定），此处不再保留副本。
+    const r = await lc.restart();
+    return { ok: r.ok !== false, error: r.error, ...lc.snapshot() };
   }
 
   /** 全部模块状态（统一状态出口，面板只调这一个）。 */
