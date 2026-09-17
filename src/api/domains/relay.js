@@ -23,7 +23,9 @@ function handle(ctx) {
         }
         if (act === 'expose') {
           if (!j.id) return send(400, { ok: false, error: 'need id' });
-          return Promise.resolve(sup.setLanFrp(j.id, !!j.frpEnabled, j.remotePort)).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: e.message }));
+          // 与 :21 的 settings/install/toggle 同规：结果 {ok:false}（如空令牌被暴露闸拒绝）不得回 200，
+          //   否则 UI 显示「已开启」而实际未开（FIX-1 暴露闸的可观测面收口）。
+          return Promise.resolve(sup.setLanFrp(j.id, !!j.frpEnabled, j.remotePort)).then((r) => send(r && r.ok !== false ? 200 : 400, r)).catch((e) => send(500, { ok: false, error: e.message }));
         }
         return send(404, { error: 'not found' });
       });

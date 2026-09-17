@@ -72,13 +72,18 @@ function createServer(sup) {
     const identity = identify(req);
 
     // 访问密钥门卫（第三层，apiAccessKey 可选配置）
-    // 非回环请求（0.0.0.0 局域网 / FRP 通道）必须携带 Authorization: Bearer <key>
-    // 或 ?access_key=<key>；回环豁免——CLI/同机面板语义必需。
+    // fail-closed：非回环请求（0.0.0.0 局域网 / FRP 通道）必须携带**匹配的** key ——
+    //   未配置 key 时同样拒绝，**不再「整层跳过」**。否则 apiHost='0.0.0.0' 且未设 key 时，
+    //   局域网任意主机可零认证驱动写 API（配合 security.js 对无 Origin 请求的放行与
+    //   Host 允许 RFC1918，构成完整旁路）。回环豁免——CLI/同机面板语义必需。
     // OPTIONS 预检豁免（浏览器跨源探测不发自定义头，给 204 而非 401）。
     const accessKey = (sup && sup.config && sup.config.apiAccessKey) || null;
-    if (accessKey && !identity.loopback && req.method !== 'OPTIONS' && !requestHasAccessKey(req, accessKey)) {
+    if (!identity.loopback && req.method !== 'OPTIONS' && (!accessKey || !requestHasAccessKey(req, accessKey))) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: '需要访问密钥（apiAccessKey）：请求头 Authorization: Bearer <key> 或 ?access_key=<key>' }));
+      const why = accessKey
+        ? '需要访问密钥（apiAccessKey）：请求头 Authorization: Bearer <key> 或 ?access_key=<key>'
+        : '未配置访问密钥（apiAccessKey）：非回环请求一律拒绝。请先设置访问密钥，或将 apiHost 收回 127.0.0.1';
+      return res.end(JSON.stringify({ error: why }));
     }
 
     // OPTIONS 预检：壳源放行（含 Allow-*），其余跨站预检不给任何 CORS 头
