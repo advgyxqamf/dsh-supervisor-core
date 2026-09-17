@@ -37,12 +37,18 @@ const APP = path.join(ROOT, 'src', 'app');
 
 // 基线（本轮实测，按 src/app 直接子目录；未列出的目录基线为 0）
 const BASELINE_BY_DIR = {
-  main: 141, control: 54, daemons: 43, facade: 13, settings: 8, native: 3, ctl: 0, self: 1, assembly: 1,
+  main: 141, control: 54, daemons: 29, facade: 0, settings: 8, native: 3, ctl: 0, self: 1, assembly: 1,
 };
-const BASELINE_TOTAL = 264; // = 上述各项之和（原文口径上界；剥注释实测 262，松弛量 2）
+const BASELINE_TOTAL = 237; // = 上述各项之和（原文口径上界；剥注释实测 235，松弛量 2）
 // 收紧记录（棘轮**第一次真实下降**，2026-09-17）：P3-A 完成 ctl 切面工厂化后，ctl 的
 //   this.X() 由 3 降到 0 —— 故 ctl 基线 3->0、总量 267->264。记录于此以说明本门禁**可升可降**：
 //   下调永远允许（真实下降时），上调须按上方纪律注明理由与新增调用点归属。
+// 收紧记录（棘轮**第二次真实下降**，2026-09-17 阶段六 B-1）：facade/daemons **原地去 this**
+//   —— 实现体不再经 this 的隐式方法调用取事实，改经按 host 缓存的惰性 deps（WeakMap）；
+//   方法名、{ methods } 外壳与逐字方法体一律保留（装配路径与读源码形态的门禁均不变）。
+//   facade 13->0（router 7->0、main 5->0、ports 1->0；lan/status 原为 0 未动）；
+//   daemons 43->29（identity 6->0、runtime 8->0；process.js 的 29 处是 DaemonLifecycle **类**
+//   自身实例的方法，this=实例而非 host，不属本棘轮治理范围）。总量 264->237（剥注释实测 235）。
 
 const passed = [], failed = [];
 function check(name, ok, evidence) {
