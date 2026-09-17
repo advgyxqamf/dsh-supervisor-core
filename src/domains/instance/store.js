@@ -39,6 +39,7 @@ class InstanceStore {
     }
     for (const inst of this.instances) {
       model.normalizeInstance(inst);
+      this._stripLegacyStateKeys(inst);
       // 唯一令牌节点：沙箱实例登记“源”（journald 单元 dsh-web@<id>），令牌获取/分发由服务统一负责。
       // 只登记 journald 单元（天然持久、-g 取最近行=当前进程新令牌）；不登记 file——沙箱重启轮换新令牌
       // 只打 journal，若复用恢复文件会缓存旧令牌 block journal。
@@ -46,6 +47,15 @@ class InstanceStore {
     }
     this.syncPorts();
     return this.instances;
+  }
+
+  /** 清历史遗留的未声明 state 字段。**只在内存删、本方法不写盘**；下次 save（5s tick 或任意内容变化）
+   *  由 save() 全量序列化内存数组而自然落地，故幂等：文件既已无该键，再 load 即无键可删。
+   *  state.version：阶段五已停止写入（upgrade.js 的两处赋值删除），且内核/测试/壳仓**零消费者**、
+   *  createRecord 声明的 state 形状不含它（version 显示走 readInstalledVersion 实时读盘）。
+   *  同型先例：model.normalizeInstance 同样在加载期删遗留键 dshToken（有测试断言该行为）。 */
+  _stripLegacyStateKeys(inst) {
+    if (inst.state && Object.prototype.hasOwnProperty.call(inst.state, 'version')) delete inst.state.version;
   }
 
   /** 损坏现场隔离：先告警，再把损坏文件改名为 .corrupt-<ts> 保留现场，最后清空内存。

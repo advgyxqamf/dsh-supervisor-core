@@ -173,45 +173,79 @@ RT1 把 index.js 改为 **ctor 组装 + 删除这两行**。
 
 调用链（启动期，非写时）：
 
-1. `src/domains/instance/lifecycle.js:53` `sandbox.effectiveCommand(instancesRoot, deps.dshBin, inst)`；
-2. `src/domains/instance/sandbox.js:31-34` 三分支：沙箱域且 `command` 为空 → `sandboxCommand()` 默认；
-   **`command` 非空 → 原样返回该数组**；否则 `defaultCommand()`；
-3. `src/domains/instance/lifecycle.js:60` `service.startTransient({ unit, cmd: cmdArr, env, props, workingDir })`；
+1. `src/domains/instance/lifecycle.js` 的 `_systemdStart(inst)`：
+   `sandbox.effectiveCommand(instancesRoot, deps.dshBin, inst)`（按符号定位；行号随重构漂移，不写死）；
+2. `src/domains/instance/sandbox.js` 的 `effectiveCommand()` 三分支：沙箱域且 `command` 为空 →
+   `sandboxCommand()` 默认；**`command` 非空 → 原样返回该数组**；否则 `defaultCommand()`；
+3. 同文件 `service.startTransient({ unit, cmd: cmdArr, env, props, workingDir })`；
 4. `src/platform/os/service.js` 的 `startTransient` 拼 `systemd-run`（仅 Linux + systemd 支持沙箱；
    能力判定见 `src/domains/instance/sandbox.js`）。
 
 即：**非空 `command` 是「原样 argv 覆盖」语义**，守卫不再解释其内容。
 
-### §8.4 守卫当前提供的保证（写时闸）
+### §8.4 守卫当前提供的保证（写时闸 + 启动期执行边界复校）
 
-`src/api/domains/instances.js` 的 `commandShapeError()`（由 `/instances/add` 调用）：
+**(一) 写时闸** —— `src/api/domains/instances.js` 的 `commandShapeError()`（由 `/instances/add` 调用）：
 
 - **结构闸**：必须是字符串数组；单项非空、≤4096 字符；项数 ≤64；拒 NUL/CR/LF；非数组或空项 → 400。
-- **入口白名单**（形态 A，`command[0]` 为 node 族时）：`command[1]` 必须存在、必须是**绝对路径**，
-  且为 DSH 入口之一（官方包内入口 `<前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js`、
-  `dsh` 族 basename、或配置的 `dshBin`）；否则 400。
-- **形态 B**（`command[0]` 自身为 dsh 族入口）：其后为参数。
+- **入口判定**（形态 A，`command[0]` 为 node 族时）：`command[1]` 必须存在、必须是**绝对路径**，
+  且为 DSH 入口之一（官方包内入口、`dsh` 族 basename、或配置的 `dshBin`）；否则 400。
+- **形态 B**（`command[0]` 自身为 dsh 族入口）：其后为参数；相对路径（含分隔符）**拒绝**。
+- 形态与路径类判定由 `src/platform/os/exec-path.js` 的 `commandEntryViolation()` 统一给出
+  （与下述启动期复校**共用同一实现**，不存第二份）；官方包内入口的形态由 `exec-path.dshJsIn()` 推出。
 - 写路径另受鉴权保护：`src/api/transport/server.js` 的非回环 fail-closed 闸（无 key 或 key 不匹配 → 401）。
+
+**(二) 启动期执行边界复校** —— `src/domains/instance/lifecycle.js` 的 `_systemdStart()` 内，
+在 `effectiveCommand()` 之后、`startTransient()` 之前调用 `commandEntryViolation(cmdArr, ...)`。
+
+**适用范围 = 沙箱实例（`inst.domain === 'sandbox'`）**。理由：本契约的 `command` 覆盖面是沙箱实例，
+其值来自 `POST /instances/add` 的请求体（真正的攻击面）；native/main 的命令则来自**操作者配置文件**
+（`cfg.command`，如 `['node', <本地 mock 绝对路径>, port]`），不是 API 供给 —— 对配置文件做执行边界
+复校既不必要，也会误拒合法入口。**非沙箱一律不进入本复校**（源码即 `inst.domain === 'sandbox' ? ... : null`）。
+
+- **允许位置**（realpath 后判定，两侧都解析软链）：
+  ① 位于**该实例 `installDir`** 之下的入口；或
+  ② **精确等于** `exec-path.knownDshEntries()` 给出的已知 DSH 入口（其值由 `resolveDsh()`/`dshJsIn()`
+     推出 —— 即「DSH 在哪」的单一事实源；解析顺序：`DSH_BIN` → `PATH` → 标准目录 → `npmRoot`）。
+- **裸名放行**：不含路径分隔符的入口（如 `dsh`）交给 exec 的 PATH 解析，本层不判 ——
+  内核默认命令 `[node, <dshBin>]` 正是此形态（native/main 依赖它，不得误拒）。
+- **相对路径**（含分隔符但不绝对）**拒绝**：会按调用方 workingDir 解析，而沙箱实例的 workingDir 是
+  **沙箱内可写**的 data 目录 ⇒ 这正是「低权限（沙箱可写）→ 高权限（守卫执行）」方向。
+- **ENOENT / 不可解析一律 fail-closed**：否则「先提交、后由外部创建」可绕过。
+- 不通过时：**不启动**，写 `inst.state.lastError`、发 `inst_start_refused` 事件、记 warn，返回 `{ok:false}`。
 
 ### §8.5 已知未保证（台账，不得据此假设安全）
 
-- **basename 改名绕过**：`["node", "/tmp/evil/dsh.js"]` 与形态 B `["/tmp/evil/dsh"]` 仍会放行 ——
-  白名单本质是 basename / 路径形态判定，不是 realpath 收口。
-- **伪包内路径**：`["node", "/tmp/node_modules/@deepseek-ai/dsh/lib/bin.js"]` 可匹配「包内入口」形态。
-- 上述两项属**纵深防御**范畴：该变更路径位于**已鉴权操作者**信任域内，而该域本就具备代码执行面
+- **写时闸仍按 basename/形态放行**（`["node","/tmp/evil/dsh.js"]`、形态 B `["/tmp/evil/dsh"]`、
+  伪包内路径 `/tmp/node_modules/@deepseek-ai/dsh/lib/bin.js`）：`/instances/add` 时 `inst.id`
+  尚未生成、**取不到该实例的安装根**，故写时无法做包含性判定 —— 这是**有意的分层**：
+  写时=形态校验，执行时=归属复校。后果是「可提交、不会执行」：这些值能落库，但 §8.4(二) 会在启动时拒绝。
+- **裸名形态无法收口**：`[node, dsh]` 一类交给 PATH/PATHEXT 解析，realpath 不可得；
+  若 PATH 中含有低权限可写目录，则解析结果不受本契约约束（同用户可写 ⇒ 该威胁模型已超出本契约）。
+- **内核已知入口自身被替换**：`knownDshEntries()` 指向的文件若被同权限者改写，本契约不提供完整性保证
+  （下载/安装路径的完整性由各自机制负责，不在此处）。
+- 上述各项属**纵深防御**范畴：该变更路径位于**已鉴权操作者**信任域内，而该域本就具备代码执行面
   （`/plugins/install` → npm install 后由 DSH 进程加载插件代码）。故**不新增能力**，只是更换执行入口。
 
-### §8.6 待决（不在本契约承诺内）
+### §8.6 定案（原「待决」三项的处置）
 
-- **运行时执行边界是否复校**：**待决**。当前闸只在**写时**校验，启动期直接消费持久化值。
-  若做启动期复校，精确挂点是 `src/domains/instance/lifecycle.js:53`（此时 `inst.id` 与
-  `sandbox.installDir(instancesRoot, inst)` 均可得，可做 realpath 包含性判定）。
-  设计草案、与既有覆盖语义的冲突证据、以及三种替代方案见
-  `design-notes/_p3-c-api-hardening.md` §8；本轮**不实施**。
-- **前置证据（有利）**：沙箱域进入 `_systemdStart` 之前，`start()` 会用
-  `src/domains/instance/lifecycle.js:92-97` 检查默认 DSH 入口是否存在，不存在则先安装并**直接返回**
-  （本次不启动）。故挂点处**默认命令**的安装根必然已存在，realpath 判定不会因「尚未安装」而 ENOENT。
-- **前置缺口（须决策）**：用户**显式** `command` 指向尚不存在路径时的语义（fail-closed 会拒
-  「先提交、后由外部创建」的用法）；非 sandbox 域（native/main）不经过上述 existsSync 前置，须单独定义；
-  以及 §8.1 记作「通用示例」的 `/usr/local/bin/dsh` 是否必须继续支持。
+- **运行时执行边界是否复校**：**已复校**（§8.4(二)）。原设计草案与三种替代方案见
+  `design-notes/_p3-c-api-hardening.md` §8；本轮采用其**方案 A**（已知 DSH 安装位置集合），
+  实施记录见 `design-notes/_p6-c-command-boundary.md`。
+- **原前置缺口 1（显式 `command` 指向尚不存在路径）**：**取 fail-closed**，即拒绝
+  「先提交、后由外部创建」的用法。这是**有意行为变更**：该用法此前会通过写时闸并落库。
+- **原前置缺口 2（非 sandbox 域 native/main）**：**已定案 = 整体排除在 §8.4(二) 之外**
+  （不按"裸名放行"覆盖，而是**不进入**该复校）。理由：native/main 的命令源是**操作者配置文件**
+  `cfg.command`（不是 API 供给），且实测其形态可为 `['node', <本地绝对路径>, …]`（如测试的 mock 目标），
+  按沙箱的"安装根包含性"判它必然误拒。其命令由 `app/native/command.js` 从 `config.command` 构建并
+  经平台 spawn 拉起，**本来就不经 `_systemdStart`** —— 该排除是纵深防御而非修复某条实路径。
+- **原前置缺口 3（`/usr/local/bin/dsh` 是否继续支持）**：**当且仅当**它正是内核解析器
+  （`resolveDsh()`）能解析出的入口时继续支持。理由：`resolveDsh()` 是「DSH 在哪」的单一事实源，
+  由它定义合法入口才与既有解析链一致（`DSH_BIN` → `PATH` → 标准目录 → `npmRoot`）；
+  不在其中的绝对路径入口会在写时（`files=knownDshEntries()` 未命中）或启动时被拒，错误文案给出可用形态。
+  ⚠ 注：`standardDirs()` 在 **darwin** 含 `/usr/local/bin`，**linux 不含**，故该路径在 Linux 上
+  须经 `PATH` 命中（systemd 用户服务的默认 PATH 通常含 `/usr/local/bin`）。
+- **仍未复校（登记，不在本契约承诺内）**：若产品要求「允许指向内核解析器之外的任意 DSH 安装」，
+  则需回到方案 B（公开 API 只收附加参数、入口一律由解析器决定，属契约变更、需 UI 协调）或方案 C
+  （保留自由 command + 显式确认位 + 事件留痕）。本轮不实施。
 

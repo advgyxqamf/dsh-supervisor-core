@@ -1,6 +1,8 @@
 'use strict';
 
 const platform = require('../../platform/os/index');
+// 执行边界的单一事实源：形态/路径类判定与启动期复校共用 exec-path 的同一纯函数（见 §8.4）。
+const execPath = require('../../platform/os/exec-path');
 
 // 域：实例管理 API（沙箱实例 CRUD/启停/open-web/版本更新）。
 const crypto = require('node:crypto');
@@ -124,23 +126,43 @@ function commandShapeError(command, dshBin) {
   const isAbsolute = (p) => /^(?:[A-Za-z]:[\\/]|[\\/])/.test(String(p));
   // 官方 DSH 包内入口：<任意前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js —— 内核自己的
   //   exec-path.dshJsIn()/resolveDsh() 产出的就是它，若不放行则「内核规范入口被自己拒绝」。
-  const isDshPackageEntry = (p) =>
-    baseOf(p) === 'bin.js' && normPath(p).indexOf('/node_modules/@deepseek-ai/dsh/') >= 0;
+  // 官方 DSH 包内入口。**复用 exec-path.dshJsIn 作单一事实源**（原先在此硬编码
+  //   '/node_modules/@deepseek-ai/dsh/' 子串，与内核解析器各写一份、有漂移风险）：
+  //   先按规范尾巴取出前缀，再用 dshJsIn 重新拼出入口，归一后须与原文逐字一致。
+  //   较原实现略严：'.../@deepseek-ai/dsh/其它/bin.js' 这类非规范尾形不再放行。
+  const PKG_TAIL = '/node_modules/@deepseek-ai/dsh/lib/bin.js';
+  const isDshPackageEntry = (p) => {
+    if (baseOf(p) !== 'bin.js') return false;
+    const n = normPath(p);
+    if (n.length <= PKG_TAIL.length || n.slice(-PKG_TAIL.length) !== PKG_TAIL) return false;
+    const prefix = n.slice(0, -PKG_TAIL.length);
+    try { return normPath(execPath.dshJsIn(prefix)) === n; } catch { return false; }
+  };
   // 配置的 DSH 可执行名（严格相等）；但不接受把 node 自己当 DSH 入口，否则 [node, node] 会通过。
   const isConfiguredDshBin = (p) => typeof dshBin === 'string' && dshBin !== '' && p === dshBin
     && !NODE_HEAD.has(baseOf(dshBin));
   const FORMS = '可用 [node, <绝对路径的 DSH 入口>, ...参数] 或 [<DSH 入口>, ...参数]';
+  // 决策复用执行边界的同一纯函数（**单一事实源**，与启动期 realpath 复校同规）：
+  //   requireAbsoluteEntry=true  —— 形态 A（node 打头）必须绝对路径（P4 语义，不变）；
+  //   allowEntry                 —— 保留 P4 的 basename/包形态/dshBin 白名单（**不削弱**）；
+  //   files=knownDshEntries()    —— 追加「内核自己解析出的已知 DSH 入口」（SSOT 复用，
+  //                                 替代原先在 api 层硬编码包路径形态的做法）。
+  const sharedErr = execPath.commandEntryViolation(command, {
+    requireAbsoluteEntry: true,
+    files: execPath.knownDshEntries({ dshBin }),
+    allowEntry: (entry) => isDshPackageEntry(entry) || DSH_ENTRY.has(baseOf(entry)) || isConfiguredDshBin(entry),
+  });
+  if (!sharedErr) return null;
   if (NODE_HEAD.has(baseOf(command[0]))) {
     const entry = command.length > 1 ? command[1] : '';
     if (!entry || !isAbsolute(entry)) {
       return 'command[0] 为 node 时，command[1] 必须是**绝对路径**的 DSH 入口（相对路径按沙箱 data 目录解析，已禁止）；' + FORMS;
     }
-    if (isDshPackageEntry(entry) || DSH_ENTRY.has(baseOf(entry)) || isConfiguredDshBin(entry)) return null;
     return 'command[0] 为 node 时 command[1] 必须是 DSH 入口（dsh / dsh.js / dsh-supervisor / dsh-supervisor.js，'
       + '或 <前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js）；' + FORMS;
   }
-  if (DSH_HEAD.has(baseOf(command[0])) || isConfiguredDshBin(command[0])) return null;
-  return 'command[0] 只接受 DSH/node 入口；' + FORMS + '；需要其它可执行请走插件安装通道';
+  // 形态 B：入口自身即 DSH。相对路径（含分隔符）会被按沙箱可写工作目录解析 ⇒ 由共享判据拒绝（较 P4 收紧）。
+  return sharedErr + '；' + FORMS + '；需要其它可执行请走插件安装通道';
 }
 
 function handle(ctx) {

@@ -8,6 +8,8 @@ const monitor = require('../../platform/service/monitor');
 const guardian = require('../../shared/guardian');
 const sandbox = require('./sandbox');
 const stateMachine = require('./state-machine');
+// 执行边界复校的单一事实源（与 api 形态闸共用同一纯函数；见 exec-path.commandEntryViolation）。
+const execPath = require('../../platform/os/exec-path');
 function createLifecycle(deps) {
   const { store, service, logger, events, tokens, tasks, systemdDir, systemdTemplatePath, hooks, instancesRoot } = deps;
   const isSandboxSupported = deps.isSandboxSupported;
@@ -52,6 +54,29 @@ function createLifecycle(deps) {
     try {
       const cmdArr = sandbox.effectiveCommand(instancesRoot, deps.dshBin, inst);
       if (!cmdArr || !cmdArr.length) return { ok: false, error: '实例未配置启动命令' };
+      // 执行边界复校（EXECUTION-CONTRACT §8.4）：effectiveCommand 对**用户显式 command** 原样返回，
+      //   故在执行前用 realpath 归属复校收口「basename 改名绕过」与「伪包内路径」残留。
+      //   允许位置 = 该实例安装根之下，或内核自己解析出的已知 DSH 入口（exec-path 单一事实源）；
+      //   ENOENT/不可解析一律 fail-closed（否则「先提交、后由外部创建」可绕过）。
+      //   ⚠ **适用范围仅 sandbox**：§8 的 command 覆盖契约是沙箱实例的（值来自 POST /instances/add 的
+      //   请求体 = 真正的攻击面，api 侧另有 requireAbsoluteEntry 形态闸）；native/main 的命令来自
+      //   **操作者配置文件 cfg.command**（如 ['node', <mock 绝对路径>, port]），不是 API 供给 ——
+      //   对配置文件做"执行边界复校"既不必要、也会误拒合法入口（P3-C 设计 §10.3 记「非 sandbox 域
+      //   须单独定义」，此处即该定义：排除）。裸名（[node, 裸 dshBin]）另由判据本身放行。
+      const boundary = inst.domain === 'sandbox'
+        ? execPath.commandEntryViolation(cmdArr, {
+            roots: [sandbox.installDir(instancesRoot, inst)],
+            files: execPath.knownDshEntries({ dshBin: deps.dshBin }),
+          })
+        : null;
+      if (boundary) {
+        const msg = '启动命令未通过执行边界复校：' + boundary;
+        inst.state.lastError = msg;
+        store.save();
+        if (events) events.append('inst_start_refused', { id: inst.id, name: inst.name, error: msg });
+        logger.warn && logger.warn('[' + inst.id + '] ' + msg);
+        return { ok: false, error: msg };
+      }
       if (probe(inst).running) return { ok: false, error: '端口 ' + inst.port + ' 已被占用' }; // 端口被占：不启动
       const props = sandbox.unitProps(inst);
       const { env, workingDir } = sandbox.sandboxEnv(instancesRoot, inst);
