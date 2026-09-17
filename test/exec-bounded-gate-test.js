@@ -39,42 +39,9 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 const EXEC_MODULE = path.join('src', 'platform', 'util', 'exec.js');
 
 /** 剥离注释（行注释 + 块注释），保留换行以维持行号。 */
-function stripComments(src) {
-  // 逐字符扫描：正确跳过字符串字面量内的 // 与 /* */
-  let out = '';
-  let i = 0;
-  let state = 'code'; // code | line | block | sq | dq | tpl
-  while (i < src.length) {
-    const c = src[i];
-    const n2 = src[i + 1];
-    if (state === 'code') {
-      if (c === '/' && n2 === '/') { state = 'line'; out += '  '; i += 2; continue; }
-      if (c === '/' && n2 === '*') { state = 'block'; out += '  '; i += 2; continue; }
-      if (c === "'") { state = 'sq'; out += c; i++; continue; }
-      if (c === '"') { state = 'dq'; out += c; i++; continue; }
-      if (c === '`') { state = 'tpl'; out += c; i++; continue; }
-      out += c; i++; continue;
-    }
-    if (state === 'line') {
-      if (c === '\n') { state = 'code'; out += c; } else { out += ' '; }
-      i++; continue;
-    }
-    if (state === 'block') {
-      if (c === '*' && n2 === '/') { state = 'code'; out += '  '; i += 2; continue; }
-      out += (c === '\n') ? c : ' ';
-      i++; continue;
-    }
-    // 字符串内部：原样保留（但换行在单/双引号里非法，模板里合法）
-    if (state === 'sq' || state === 'dq' || state === 'tpl') {
-      if (c === '\\') { out += c + (n2 || ''); i += 2; continue; }
-      if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) {
-        state = 'code';
-      }
-      out += c; i++; continue;
-    }
-  }
-  return out;
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（空格占位，保长度/行号）。
+const { blankComments } = require('./_strip');
+function stripComments(src) { return blankComments(src); }
 
 /** 收集 `src/` 下的 .js **以及 `bin/` 下的入口脚本**（排除测试与构建产物）。
  *

@@ -40,21 +40,10 @@ const readOsDir = (d) => fs.readdirSync(path.join(POS, d)).filter((f) => f.endsW
 /** 剥离注释：A6「历史错误声明不得重现」必须只看**代码**。
  *  ⚠ 修复过程会在注释里**引用旧声明的原文**（用于解释病因），
  *    不剥离就会把解释文字误判为实际代码（首版即因此 3 项误报）。 */
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')   // 块注释
-    .split('\n')
-    .map((l) => {
-      // 行注释：需避开字符串内的 //（本仓该场景罕见，此处保守处理：仅剥离行首注释）
-      const i = l.indexOf('//');
-      if (i < 0) return l;
-      // 引号内的 // 不视为注释
-      const before = l.slice(0, i);
-      const quotes = (before.match(/['"`]/g) || []).length;
-      return quotes % 2 === 1 ? l : before;
-    })
-    .join('\n');
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（去掉引号奇偶启发式 ——
+//   该启发式对多层/转义引号不可靠）。语义等价或更强：字符串/正则字面量感知，只多删注释。
+const { stripComments: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
 
 const { capabilityProfile } = require(POS);
 const autostart = require(path.join(POS, 'autostart'));

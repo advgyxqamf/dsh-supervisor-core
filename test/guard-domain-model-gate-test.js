@@ -72,27 +72,9 @@ function matchBrace(src, openIdx) {
 /** 去除 // 行注释与块注释（跳过字符串/模板串，避免 'http://' 之类被误伤）。
  *  ⚠ 引用判据必须只看**代码**：任务硬约束「删除前 grep 证明零真实引用（注释不算）」——
  *  同理门禁也不得因一句「已删除 _guardianEvent」的说明性注释而误报。 */
-function stripComments(src) {
-  let out = '';
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    const n = src[i + 1];
-    if (c === '/' && n === '/') { while (i < src.length && src[i] !== String.fromCharCode(10)) i++; continue; }
-    if (c === '/' && n === '*') { i += 2; while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; continue; }
-    if (c === "'" || c === '"' || c === BT) {
-      const q = c; out += c; i++;
-      while (i < src.length) {
-        if (src[i] === '\\') { out += src[i] + (src[i + 1] || ''); i += 2; continue; }
-        out += src[i]; i++;
-        if (src[i - 1] === q) break;
-      }
-      continue;
-    }
-    out += c; i++;
-  }
-  return out;
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（删注释、保行结构）。
+const { stripComments: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
 
 /** 取含 kind: '<kind>' 的申报对象字面量（从它所属的 '{' 到配对 '}'）。 */
 function entrySpecOf(src, kind) {

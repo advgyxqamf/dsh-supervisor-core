@@ -141,9 +141,8 @@ check('E-e 源码调用 tasks.stepState 推进状态', /tasks\.stepState\(task\.
   //   （facade 只读）—— 判据改读新模块。
   const sup = fs.readFileSync(path.join(ROOT, 'src', 'app', 'domain-actions', 'router.js'), 'utf8');
   // ⚠ 剥离注释行后再判（说明文字里会引用这些写法 —— 本仓多次被自己的注释骗过）。
-  const stripComments = (s) => s.split(String.fromCharCode(10))
-    .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
-    .join(String.fromCharCode(10));
+  // 阶段六 P6-A：统一走 test/_strip.js（只丢「整行都是注释」的行；字符串/正则字面量感知）。
+  const { dropCommentLines: stripComments } = require('./_strip');
   // ⚠ 2026-09-17 P6-B B-1：runtime.js 实现体已**原地去 this**（改经惰性 deps），调用点由
   //   `this._disableRouterPersist()` 变为 `d.disableRouterPersist()` ⇒ 判据一律**形态无关**
   //   （只锁「该调用发生且受返回值判定约束」，不锁 this./d. 前缀）。判据本意不变。

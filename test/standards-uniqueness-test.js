@@ -76,20 +76,10 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 //   的递归 glob）会被当成**块注释开启符**，把其后直到下一个块注释**结束符**的**代码**一并吞掉
 //   —— 本门禁曾因此把 acceptance 门禁的 STD 常量与 readFileSync 调用行误删，使 U-1b 误报「不真读」。
 //   （本注释刻意不写出那两个两字符序列，避免自己触发同一问题。）
-function stripComments(src) {
-  const noLine = String(src).split(String.fromCharCode(10))
-    .map((l) => { const i = l.indexOf('//'); return i >= 0 ? l.slice(0, i) : l; })
-    .join(String.fromCharCode(10));
-  return noLine
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(String.fromCharCode(10))
-    .map((l) => {
-      const t = l.trim();
-      if (t.startsWith('*')) return '';
-      return l;
-    })
-    .join(String.fromCharCode(10));
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（去掉手写正则链）。
+//   语义等价或更强 —— 只多删注释文本，不多删任何代码；字符串/正则字面量感知。
+const { stripComments: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
 /** 在 s 中按标识符边界找 name（避免 SPEC 命中 SPECIAL）。 */
 function hasIdent(s, name) {
   let i = 0;

@@ -34,40 +34,9 @@ const HIDE_RE = /windowsHide\s*:\s*true/;
 const BT = String.fromCharCode(96); // 反引号
 
 /** 剥离注释（行注释 + 块注释），保留换行以维持行号；字符串字面量原样保留。 */
-function stripComments(src) {
-  let out = '';
-  let i = 0;
-  let state = 'code'; // code | line | block | sq | dq | tpl
-  while (i < src.length) {
-    const c = src[i];
-    const n2 = src[i + 1];
-    if (state === 'code') {
-      if (c === '/' && n2 === '/') { state = 'line'; out += '  '; i += 2; continue; }
-      if (c === '/' && n2 === '*') { state = 'block'; out += '  '; i += 2; continue; }
-      if (c === "'") { state = 'sq'; out += c; i++; continue; }
-      if (c === '"') { state = 'dq'; out += c; i++; continue; }
-      if (c === BT) { state = 'tpl'; out += c; i++; continue; }
-      out += c; i++; continue;
-    }
-    if (state === 'line') {
-      if (c === '\n') { state = 'code'; out += c; } else { out += ' '; }
-      i++; continue;
-    }
-    if (state === 'block') {
-      if (c === '*' && n2 === '/') { state = 'code'; out += '  '; i += 2; continue; }
-      out += (c === '\n') ? c : ' ';
-      i++; continue;
-    }
-    if (state === 'sq' || state === 'dq' || state === 'tpl') {
-      if (c === '\\') { out += c + (n2 || ''); i += 2; continue; }
-      if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === BT)) {
-        state = 'code';
-      }
-      out += c; i++; continue;
-    }
-  }
-  return out;
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（空格占位，保长度/行号）。
+const { blankComments } = require('./_strip');
+function stripComments(src) { return blankComments(src); }
 
 /** 收集 src/ 下全部 .js 文件（排除 node_modules/.git）。 */
 function jsFiles() {
