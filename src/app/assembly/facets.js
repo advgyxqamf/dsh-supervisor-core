@@ -43,9 +43,12 @@ const FACETS = [
   { name: 'facade/main', mod: require('../facade/main') },
   { name: 'facade/status', mod: require('../facade/status'), hostFirst: true },
   // 域写动作下沉 app/domain-actions/（facade 只读），同一装配契约。
-  { name: 'domain-actions/router', mod: require('../domain-actions/router') },
-  { name: 'domain-actions/lan', mod: require('../domain-actions/lan') },
-  { name: 'domain-actions/main', mod: require('../domain-actions/main') },
+  //   ⚠ P6-B：三者已改为**真 ctor 工厂**（实现体经显式 deps 取事实，不再直连 this），
+  //   故不再走 `f.mod.methods` 分支 —— 用 factory 名在装配期构造，并把产物**平铺安装**到 host，
+  //   保证 api 消费面（sup.setRouterRunning / patchDshMain / setLanFrp …）名字逐个不变。
+  { name: 'domain-actions/router', mod: require('../domain-actions/router'), factory: 'createRouterActions' },
+  { name: 'domain-actions/lan', mod: require('../domain-actions/lan'), factory: 'createLanActions' },
+  { name: 'domain-actions/main', mod: require('../domain-actions/main'), factory: 'createMainActions' },
   { name: 'audit/orphan-scan', mod: require('../audit/orphan-scan') },
   { name: 'settings/env', mod: require('../settings/env') },
   { name: 'settings/node-lts', mod: require('../settings/node-lts') },
@@ -84,6 +87,24 @@ function installHostFirst(host, mod) {
  * @param host  组装上下文（Supervisor 实例）
  * @param deps  { createServer } 由 root 注入（app 不得 require api，DS-3）
  */
+/** 域写动作工厂的惰性 deps：装配期 host 尚未就绪，故一律 getter（与 collaborators.js 同范式）。
+ *  覆盖三个工厂实际取用的全部成员（router: config/daemons/lifecycleManager/router/state/views；
+ *  lan: ctl/daemons/lifecycleManager/lan；main: daemons/events/logger/state/views）。 */
+function domainActionDeps(host) {
+  return {
+    getConfig: () => host.config,
+    getDaemons: () => host.daemons,
+    getState: () => host.state,
+    getViews: () => host.views,
+    getRouter: () => host.router,
+    getLan: () => host.lan,
+    getCtl: () => host.ctl,
+    getEvents: () => host.events,
+    getLogger: () => host.logger,
+    getLifecycleManager: () => host.lifecycleManager,
+  };
+}
+
 function installFacets(host, deps) {
   const d = deps || {};
   for (const f of FACETS) {
@@ -94,6 +115,8 @@ function installFacets(host, deps) {
       continue;
     }
     if (f.hostFirst) { installHostFirst(host, f.mod); continue; }
+    // 真 ctor 工厂切面（域写动作）：构造后平铺安装，平铺名与旧 { methods } 逐字一致。
+    if (f.factory) { installMethods(host, f.mod[f.factory](domainActionDeps(host))); continue; }
     if (f.mod.methods) installMethods(host, f.mod.methods);
     if (f.mod.accessors) installAccessors(host, f.mod.accessors);
     // 字段 helper（_mXxx/_mSetXxx）由生成器产出于实例上（取代挂原型）。
