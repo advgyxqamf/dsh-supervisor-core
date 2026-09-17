@@ -188,11 +188,11 @@ domains/<domain>/
 └── instances/    运行期对象（仅 router）
 ```
 
-**硬规则**：每域**必须**有 `index.js`；域内子目录**只允许** `providers/`/`instances/`；单文件 **≤400 行**、`index.js` **≤150 行**。
+**硬规则**：每域**必须**有 `index.js`；域内子目录**只允许** `providers/`/`instances/`；单文件 **≤300 行**、`index.js` **≤150 行**。
 
 > ⚠ **2026-09-17 取严（R3/R11）**：原值「单文件 ≤450 / `index.js` ≤200」已被主代理裁决**收紧**为
-> 「**门面 ≤150 行 / 单文件 ≤400 行**」，与域内 SSOT `DOMAIN-STRUCTURE-DESIGN.md` §2 的
-> **DF-1（门面 ≤150）/ DF-2（单文件 ≤400）** 逐字一致。本文件与域内 SSOT 不允许存在两套阈值。
+> 「**门面 ≤150 行 / 单文件 ≤300 行**」，与域内 SSOT `DOMAIN-STRUCTURE-DESIGN.md` §2 的
+> **DF-1（门面 ≤150）/ DF-2（单文件 ≤300）** 逐字一致。本文件与域内 SSOT 不允许存在两套阈值。
 
 ---
 
@@ -210,7 +210,7 @@ domains/<domain>/
 | **DS-6** | 层内 require 图无环（单位 = 路径前 3 段，SCC 检测） |
 | **DS-7** | 禁止把外部方法集挂到原型：`Object.defineProperties(X.prototype, ...)` **与** `Object.assign(X.prototype, ...)` 均禁（右值不限；先剥注释，见 R6 与 DS-G3） |
 | **DS-8** | 每域必须有 `index.js`；域内子目录仅 `providers/`/`instances/` |
-| **DS-9** | 单文件 **≤400 行**、`index.js` **≤150 行**（R11 取严，= DF-1/DF-2） |
+| **DS-9** | 单文件 **≤300 行**、`index.js` **≤150 行**（R11 取严，= DF-1/DF-2） |
 | **DS-10** | 硬编码路径归零：daemon 脚本位置唯一来源 `platform/util/srcpath.DAEMON_REL`，cmdline 匹配由它派生 |
 | **DS-11** | daemon 入口**保留 basename `daemon.js`**（只改目录）——否则同时打断 5 处 cmdline 匹配 |
 | **DS-12** | 命名按职责/主体，禁止 `*-view`/`*-mixin`/`*-part` 等"从哪切出来"的名字 |

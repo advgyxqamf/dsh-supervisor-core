@@ -61,13 +61,13 @@
 | S1 | 版本提升 | `bash release/scripts/bump.sh --core <ver>` | ✅ | 只允许递增 |
 | S2 | 版本一致性预检 | `npm run verify:versions` | ✅ | 修派生处 |
 | S3 | 前端产物 | `bash release/scripts/build-ui.sh` | ✅ | 修 UI 构建 |
-| S4 | 全量回归 | `npm test` | ✅ | 修缺陷（含注入验证）|
+| S4 | 全量回归（**由 CI 执行**）| `xvfb-run -a npm test`（本机不得执行）| ✅ | 修缺陷（含注入验证）|
 | S5 | **推向 CI**（commit + tag + push）| `git push origin HEAD --tags` | ✅ | **此后一切构建/发布都在 CI 内完成** |
 | S6 | CI 四平台构建 | 自动（`build` job，4 runner 矩阵）| ✅ | 看该平台日志 |
 | S7 | CI 四平台发布 | 自动（`build` job 内 `ci-core.sh --publish`）| ✅ | npm 同版本不可重发 → 提版本重来 |
 | S8 | 发布后验证 | 见 §5 | ✅ | 立即处置（见 §6）|
 
-> **本地只做到 S4**（门禁 + 前端产物）；**S5 起全部在 CI 内完成**。
+> **本地只完成 S0–S3**（凭据 / 版本 / 前端产物）；**S4（全量回归）由推送后的 CI test job 执行**，**S5 起全部在 CI 内完成**（见 ACCEPTANCE-STANDARD：本机不得执行任何测试）。
 > 本地可用 `npm run build:launcher:all` 仅在 **CI 内**生效（有 `GITHUB_ACTIONS` 守卫，本地一律 exit 2）。
 
 ## 2. 平台矩阵（单一事实源）
@@ -210,7 +210,7 @@
     },
     {
       "id": "S4",
-      "cmd": "npm test"
+      "cmd": "CI: xvfb-run -a npm test"
     },
     {
       "id": "S5",

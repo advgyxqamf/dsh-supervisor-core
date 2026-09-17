@@ -11,7 +11,7 @@
 // ## 锁定不变量
 //   U-1  全部规范（发布/凭据/改代码/令牌/无窗口/发布通道）存在，且各自被门禁引用
 //   U-2  README 文档索引把**每一份**已登记规范标为「唯一事实源」
-//   U-3  其它文档**不得**自称为发布流程规范（不得出现「唯一事实源」标记）
+//   U-3  其它文档**不得**自称规范（不得出现「唯一事实源 / 唯一规范 / 唯一权威 / 定版 SSOT」标记）
 //   U-4  根级文档清单与 README 索引**一一对应**（无未登记文档、无悬空条目）
 //   U-5  反向：判据能识别缺失规范 / 未登记文档（门禁非空转）
 // ═══════════════════════════════════════════════════════════════════════════
@@ -45,6 +45,9 @@ const STANDARDS = {
   '守护域模型': { file: 'GUARD-DOMAIN-MODEL.md', gate: 'test/guard-domain-model-gate-test.js' },
   '供应商网关架构': { file: 'PROVIDER-GATEWAY-ARCHITECTURE.md', gate: 'test/provider-gateway-gate-test.js' },
   '目录结构与分层': { file: 'DIRECTORY-STRUCTURE-DESIGN.md', gate: 'test/directory-structure-gate-test.js' },
+  // 2026-09-17：DOMAIN-STRUCTURE-DESIGN.md 原先以「定版 SSOT / 唯一权威」自称，规避 U-3 的字面量检查；
+  //   登记入表后由本门禁（U-1/U-2）保护，U-3 同时堵住该措辞。
+  '域内结构': { file: 'DOMAIN-STRUCTURE-DESIGN.md', gate: 'test/domain-structure-gate-test.js' },
   '验收与测试': { file: 'ACCEPTANCE-STANDARD.md', gate: 'test/acceptance-standard-gate-test.js' },
 };
 
@@ -82,7 +85,9 @@ const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
     if (Object.values(STANDARDS).some((s) => s.file === f)) continue;
     if (f === 'README.md' || f === 'CHANGELOG.md') continue;
     const head = fs.readFileSync(path.join(ROOT, f), 'utf8').split(String.fromCharCode(10)).slice(0, 80).join(String.fromCharCode(10));
-    if (head.includes('唯一事实源') || head.includes('唯一规范')) offenders.push(f);
+    // 「定版 SSOT」「唯一权威」是 2026-09-17 审计发现的对 U-3 的规避措辞（DOMAIN-STRUCTURE-DESIGN
+    //   曾用其自称唯一权威却不含「唯一事实源」字面量）。一并检出，堵住同类规避。
+    if (/唯一事实源|唯一规范|唯一权威|定版\s*SSOT/.test(head)) offenders.push(f);
   }
   check('U-3 只有已登记的规范可自称「唯一事实源」', offenders.length === 0, offenders.join(', ') || 'ok');
 }

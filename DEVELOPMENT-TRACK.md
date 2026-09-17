@@ -191,7 +191,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 | 允许 | 禁止 |
 |---|---|
 | 读写**本仓工作区**（当前工作目录）内文件 | 改/删 `~/.local/state/dsh-supervisor/`（系统的状态根） |
-| 跑本仓测试（`npm test`，自带隔离 tmp） | 停/启/改 `dsh-supervisor.service`（系统已安装的服务） |
+| 在本仓工作区内改代码 + `node --check` 语法自校（**测试一律由 CI 裁决**，本机不得跑测试） | 停/启/改 `dsh-supervisor.service`（系统已安装的服务） |
 | 读系统状态用于**诊断**（只读） | 覆盖 `/usr/bin/dsh-supervisor-gui`、`~/.npm-global/lib/node_modules/@dsh-sup/*` |
 | 操作 `/tmp` 下**自己创建的具名路径** | 触碰 `~/.dsh`（DSH 自身的数据目录） |
 
@@ -224,7 +224,7 @@ DSH 与 AI 运行时**都在** `/tmp` 用 `dsh-*` / `dsh-spill-*` / `dsh-subproc
 
 ## 7. CI 强制（服务器端兜底，2026-09-13 启用）
 
-本机门禁能拦住错误，但「本机没跑就提交」是常见疏漏。故在 GitHub 侧加了**服务端兜底**。
+本机只能做 `node --check` 等只读自校（**测试一律由 CI 裁决**），「没推送就跑 CI」是常见疏漏。故在 GitHub 侧加了**服务端兜底**。
 
 ### 内核仓 `advgyxqamf/dsh-supervisor-core` · `master` 分支保护
 
@@ -337,7 +337,7 @@ required 只设 `precheck` 与 `test` 两个**无条件** job；`build` 不设�
 | 编号 | 判据 | 阈值 |
 |---|---|---|
 | DF-1 | 门面 `index.js` 只做组合与导出 | **≤150 行** |
-| DF-2 | 任何单文件 | **≤400 行** |
+| DF-2 | 任何单文件 | **≤300 行** |
 | DF-3 | 纯计算与副作用（IO/定时/进程）不混同一文件 | — |
 | DF-4 | 零隐式 `this` 跨文件 | **0 处** |
 | DF-5 | 域内依赖图无环（且禁方法集合并到同一 this） | 0 环 |
@@ -347,7 +347,7 @@ required 只设 `precheck` 与 `test` 两个**无条件** job；`build` 不设�
 ### 8.3 施工方式
 
 - **主代理 + 12+ 子代理并行**；子代理**文件归属互斥**，须完整转达执行契约，**验证自己做**（不外包）。
-- **批 0–10**（先立门禁后重构；每批：`node --check` → `require` 加载 → 跑相关测试 → 再提交）：
+- **批 0–10**（先立门禁后重构；每批：`node --check` → `require` 加载 → 提交并推送，相关测试由 CI 裁决（本机不得跑测试，见 ACCEPTANCE-STANDARD））：
 
 | 批 | 内容 |
 |---|---|
@@ -369,7 +369,7 @@ required 只设 `precheck` 与 `test` 两个**无条件** job；`build` 不设�
 
 | 项 | 要求 |
 |---|---|
-| `DIRECTORY-STRUCTURE-DESIGN.md` DS-9 | 已取严为 **门面 ≤150 / 单文件 ≤400**（R3/R11），与 DF-1/DF-2 逐字一致 |
+| `DIRECTORY-STRUCTURE-DESIGN.md` DS-9 | 已取严为 **门面 ≤150 / 单文件 ≤300**（R3/R11），与 DF-1/DF-2 逐字一致 |
 | `DIRECTORY-STRUCTURE-DESIGN.md` DS-G3 | 除 `Object.defineProperties` 外，**同时禁 `Object.assign(X.prototype, ...)`**（R6；右值不限、须先剥注释） |
 | README 文档索引 | 根级 md **全部登记**（`standards-uniqueness-test` U-4）；`EXECUTION-CONTRACT.md` 已登记 |
 | `CROSS_LAYER`（`layering-and-dependency-gate-test.js`）| 域改造**只在同层内搬文件**，理论不新增跨层边；确因新边（如 `app/domain-actions/*` → 域）报 L-2 失败时**按实跑报错补登记**，**不得放宽判据**、不得凭猜测预登记 |
@@ -379,4 +379,4 @@ required 只设 `precheck` 与 `test` 两个**无条件** job；`build` 不设�
 
 `standards-uniqueness`、`test-chain-completeness`、`layering-and-dependency-gate`、
 `directory-structure-gate`、`no-dev-path`、`no-cross-repo`；
-以及每域相关测试（改哪域跑哪域）。
+以及每域相关测试（改哪域由 CI 跑哪域；本机不得跑测试）。

@@ -1,8 +1,8 @@
-# 域内结构设计 · 定版 SSOT（DOMAIN-STRUCTURE-DESIGN）
+# 域内结构设计（DOMAIN-STRUCTURE-DESIGN）
 
-> **状态**：**执行中**（v1 定版 2026-09-17；同日进入 12+ 子代理并行施工，批 0–10）。本文件是**域内分层/拆分的唯一权威**。
+> **状态**：**执行中**（v1 定版 2026-09-17；同日进入 12+ 子代理并行施工，批 0–10）。本文件是**域内分层/拆分的唯一事实源（SSOT）**。U-2/U-3 由 test/standards-uniqueness-test.js 机器校验。
 > **来源**：12 份设计文档（`design-notes/`，6085 行）+ 主代理裁决 R1–R12。
-> **与前一份 SSOT 的关系**：`DIRECTORY-STRUCTURE-DESIGN.md` 管**跨层/跨域**（五层结构）；
+> **与前一份唯一事实源的关系**：`DIRECTORY-STRUCTURE-DESIGN.md` 管**跨层/跨域**（五层结构）；
 > 本文件管**域内**（每个域内部怎么切）。两者互补。
 
 ## §1 问题陈述
@@ -246,7 +246,7 @@ shell/
 |---|---|
 | **R1** | DF-5 真实含义 = 禁把两文件方法合并到同一 this（**不是**修 require 环）；扫描须先剥注释 |
 | **R2** | 子目录白名单放宽为：`providers instances policies model store handlers core jobs` |
-| **R3** | 阈值取严：门面 **≤150**、单文件 **≤400**（同步改 DS-9） |
+| **R3** | 阈值取严：门面 **≤150**、单文件 **≤300**（同步改 DS-9） |
 | **R4→R6** | mixin 判据替换为 R6 三件套（右值不限 + 分片导出 + 反自检含变量样本），**先剥注释** |
 | **R5** | `daemon.js` 文件名**不得改**（5 处 cmdline 匹配依赖） |
 | **R7** | `app/facade/**` **只读**；写动作下沉 `app/domain-actions/` |
@@ -297,7 +297,7 @@ shell/
 | 编号 | 判据 | 来源 |
 |---|---|---|
 | DG-1 | 门面 ≤150 行 | DF-1 |
-| DG-2 | 单文件 ≤400 行 | DF-2 |
+| DG-2 | 单文件 ≤300 行 | DF-2 |
 | DG-3 | 纯模块不得 require `node:fs`/`node:net`/`node:child_process` | DF-3 |
 | DG-4 | 域内跨文件 `this` 调用 = 0（**须排除 extends 与已声明抽象占位**） | DF-4 |
 | DG-5 | 域内 require 图无环 | DF-5 |
