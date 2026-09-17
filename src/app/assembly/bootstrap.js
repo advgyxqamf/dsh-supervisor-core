@@ -42,17 +42,27 @@ function _bootstrap(host) {
     // 并暴露 _lastHeartbeatAt / _heartbeatStalls，使心跳停摆可观测而非隐形。
     host._lastHeartbeatAt = Date.now();
     host._heartbeatStalls = 0;
+    // 心跳代际（自增 beat id）：stall 兜底可放行下一拍，而上一拍的 promise 仍在 await；
+    // 若旧拍迟到结算时无条件清 busy，就会清掉新拍的标记 → 第三拍与新拍并发（两拍重叠根因）。
+    // 故 guard 与 .finally 都只在本拍仍是当前代际时才复位 busy。
+    host._heartbeatBeat = host._heartbeatBeat || 0;
     // 拍宽必须在 setInterval 之前求值：它同时用作间隔与超时阈值。
     const heartbeatIv = host.config.probeIntervalMs || 5000;
     host._heartbeatTimer = setInterval(() => {
       if (host._heartbeatBusy) return;
       host._heartbeatBusy = true;
       const iv = heartbeatIv;
+      const beat = ++host._heartbeatBeat; // 本拍代际
       host._lastHeartbeatAt = Date.now();
-      // 兜底释放（阈值 = 拍宽 × 12：远大于任何正常拍，又保证必定恢复）。unref：不拖住进程退出。
-      const stallMs = Math.max(30000, iv * 12);
+      // 兜底释放阈值必须大于「最坏单拍上界」：单对象超时 = iv × ADAPTER_TIMEOUT_TICKS(6)，
+      //   循环串行，故 N 个对象全部卡死的最坏整拍 = N × 6 × iv。阈值低于它会在正常最长拍
+      //   中途误释放 busy，放行第二拍而第一拍仍在 await —— 两拍并发监督/收敛。
+      //   取最坏上界 + 一拍余量，并保底 max(30000, iv × 12)。unref：不拖住进程退出。
+      const objCount = (host.managedObjects && typeof host.managedObjects.count === 'function')
+        ? host.managedObjects.count() : 1;
+      const stallMs = Math.max(30000, iv * 12, objCount * 6 * iv + iv);
       const guard = setTimeout(() => {
-        if (host._heartbeatBusy) {
+        if (host._heartbeatBusy && beat === host._heartbeatBeat) {
           host._heartbeatBusy = false;
           host._heartbeatStalls++;
           if (host.logger && host.logger.warn) {
@@ -63,7 +73,11 @@ function _bootstrap(host) {
       if (guard && typeof guard.unref === 'function') guard.unref();
       Promise.resolve(host.managedObjects ? host.managedObjects.heartbeat(iv) : null)
         .catch(() => {})
-        .finally(() => { clearTimeout(guard); host._heartbeatBusy = false; });
+        .finally(() => {
+          clearTimeout(guard);
+          // 归属判断：仅当代际仍属本拍时才复位，迟到的旧拍不得清掉新拍的标记。
+          if (beat === host._heartbeatBeat) host._heartbeatBusy = false;
+        });
     }, heartbeatIv);
     // 远程控制：为已开启远程控制的实例补建代理（幂等）。
     // relay/frpc 由独立 lan-daemon 承载：守卫只写状态并拉起/监督 daemon，不在本地建 relay。

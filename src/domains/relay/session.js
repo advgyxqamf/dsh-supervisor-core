@@ -30,6 +30,7 @@ function createSession(opts) {
 
   let dshCookie = null; // "name=value"（dsh-auth-*）——派生结果，非令牌本身
   let bootstrapping = null; // 进行中的换取 Promise（防并发重复换取）
+  let bootstrapEpoch = 0; // 令牌换代序号：refresh 后旧代在途换取的结果必须丢弃，不得覆盖新 cookie
   // 注入状态（可诊断层）：经 status() 暴露，LAN 面板据此显示「远程就绪/正在注入/令牌缺失」。
   const state = { tokenSet: !!dshTokenOf(), cookieReady: false, lastAttemptAt: null, lastOkAt: null, lastError: null, lastErrorAt: null };
 
@@ -57,19 +58,34 @@ function createSession(opts) {
     }
   }
 
+  /** 发起一次换取；结果仅在仍是当前代时落进派生状态（旧代迟到即丢弃）。 */
+  function startBootstrap(dshToken, via) {
+    const myEpoch = bootstrapEpoch;
+    let pr;
+    pr = bootstrapDshCookie(targetHost, targetPort, dshToken).then((c) => {
+      if (bootstrapping === pr) bootstrapping = null;
+      if (myEpoch !== bootstrapEpoch) return null; // 期间已 refresh：旧 cookie 不得覆盖新值
+      dshCookie = c;
+      recordReady(c, via);
+      return c;
+    }).catch((e) => {
+      if (bootstrapping === pr) bootstrapping = null;
+      if (myEpoch === bootstrapEpoch) recordFail('令牌换取异常: ' + (e && e.message));
+      return null;
+    });
+    bootstrapping = pr;
+    return pr;
+  }
+
   /** 令牌变化时重置并重新换取 cookie（TK-4：值始终由 dshTokenOf() 按需读取）。 */
   function refreshDshSession() {
     const dshToken = dshTokenOf() || '';
+    bootstrapEpoch += 1; // 换代：在途的旧代换取结果作废
     state.tokenSet = !!dshToken;
     dshCookie = null;
     state.cookieReady = false;
     bootstrapping = null;
-    if (dshToken) {
-      bootstrapDshCookie(targetHost, targetPort, dshToken).then((c) => {
-        if (c) dshCookie = c;
-        recordReady(c, 'refresh');
-      }).catch((e) => { recordFail('令牌换取异常: ' + (e && e.message)); });
-    }
+    if (dshToken) startBootstrap(dshToken, 'refresh');
   }
 
   /** 确保已持有 DSH cookie；未持有且令牌池有令牌时尝试换取（懒加载，幂等）。 */
@@ -78,15 +94,7 @@ function createSession(opts) {
     const dshToken = dshTokenOf() || '';
     state.tokenSet = !!dshToken;
     if (!dshToken) return Promise.resolve(null);
-    if (!bootstrapping) {
-      bootstrapping = bootstrapDshCookie(targetHost, targetPort, dshToken).then((c) => {
-        dshCookie = c;
-        bootstrapping = null;
-        recordReady(c, 'lazy');
-        return c;
-      }).catch((e) => { bootstrapping = null; recordFail('令牌换取异常: ' + (e && e.message)); return null; });
-    }
-    return bootstrapping;
+    return bootstrapping || startBootstrap(dshToken, 'lazy');
   }
 
   /** 把 DSH cookie 合并进客户端 Cookie 串（同名则保留客户端值，避免重复段）。纯拼接。 */

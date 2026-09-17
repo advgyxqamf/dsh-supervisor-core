@@ -83,6 +83,30 @@ function handleOpen(ctx) {
   }).catch((e) => { dropOpenWebCode(code); deny(500, (e && e.message) || 'open failed'); });
 }
 
+// command 的 fail-closed 闸 = 结构闸 + 入口白名单（N11 / 审计 A2）：command 会被原样经
+//   startTransient 交给 systemd-run，任意二进制因此等同「以守卫身份执行任意命令」。
+// 信任边界：/instances/add 已经 originAllowed + （LAN 时）access key 鉴权，属操作者信任边界；
+//   但「任意可执行」不由本端点承担 —— 只收 DSH/node 入口，路径存在性不作为放行依据。
+// 400 契约：结构非法或入口不在白名单 → 400 { ok:false, error }；缺失/[] = 走沙箱默认命令。
+function commandShapeError(command, dshBin) {
+  if (command === undefined || command === null) return null;
+  if (!Array.isArray(command)) return 'command 必须为参数数组';
+  if (!command.length) return null; // 空数组 = 用沙箱默认命令，保持既有行为
+  if (command.length > 64) return 'command 参数过多（上限 64）';
+  for (const a of command) {
+    if (typeof a !== 'string') return 'command 每项必须为字符串';
+    if (!a.length) return 'command 不允许空参数';
+    if (a.length > 4096) return 'command 单个参数过长（上限 4096）';
+    if (/[\0\r\n]/.test(a)) return 'command 含非法字符（NUL/换行）';
+  }
+  // 入口白名单：只认 node / dsh 系列（大小写不敏感以兼容 Windows；两种分隔符都切，避免依赖宿主平台）。
+  const ENTRY = new Set(['node', 'node.exe', 'dsh', 'dsh.exe', 'dsh.js', 'dsh-supervisor', 'dsh-supervisor.js']);
+  const base = String(command[0]).split(/[\\/]/).pop().toLowerCase();
+  if (ENTRY.has(base)) return null;
+  if (typeof dshBin === 'string' && dshBin && command[0] === dshBin) return null; // 配置的 DSH 可执行名（严格相等）
+  return 'command[0] 只接受 DSH/node 入口（node、dsh、dsh-supervisor 等）；需要其它可执行请走插件安装通道';
+}
+
 function handle(ctx) {
   const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
   function openInSystemBrowser(url) { return platform.browser.open(url); }
@@ -135,6 +159,8 @@ function handle(ctx) {
         try {
           const j = body ? JSON.parse(body) : {};
           if (act === 'add') {
+            const cmdErr = commandShapeError(j.command, sup.instances && sup.instances.dshBin);
+            if (cmdErr) return send(400, { ok: false, error: cmdErr });
             // addInstance 为 async（含端口占用探测）：必须等结果再作答，否则 send 收到的是
             // Promise（r.ok 恒 undefined 导致恒 400，且响应体不可序列化）。
             return Promise.resolve(sup.instances.addInstance(j))

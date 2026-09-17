@@ -103,7 +103,7 @@ async function detectCommandCodeBilling(ctx) {
   // （weekly.used + monthlyRemaining 约等于月上限）。有 monthlyCapUsd 且 monthlyRemaining 可数时
   // 推导 monthly = { percent, resetsAt }，使前端每月格子显示真实百分比（曾长期 monthly=null）。
   const monthlyCap = q.monthlyCapUsd ? num(q.monthlyCapUsd) : null;
-  const derivedMonthly = (monthlyCap !== null && Number.isFinite(Number(monthlyRemaining)) && monthlyRemaining >= 0)
+  const derivedMonthly = (hasCredits && monthlyCap !== null && Number.isFinite(Number(monthlyRemaining)) && monthlyRemaining >= 0)
     ? (() => {
         const used = Math.min(monthlyCap, Math.max(0, monthlyCap - monthlyRemaining));
         const pct = monthlyCap > 0 ? Math.min(100, Math.round((used / monthlyCap) * 100)) : 0;

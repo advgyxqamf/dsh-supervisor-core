@@ -124,7 +124,7 @@ function createForwarder(deps) {
       }
       inflight.begin(acc);
       const out = await forwardOnce(attemptTarget, req.method, req.headers, sendBody, acc.key, res);
-      if (clientAborted) { endInflight(acc, activeProv); return; }
+      if (clientAborted) { endInflight(acc, activeProv); try { if (out.res) out.res.destroy(); if (out.upstreamReq) out.upstreamReq.destroy(); } catch {} return; }
       if (out.phase === 'net-error') {
         endInflight(acc, activeProv);
         const inst = parse.instOf(rt.prov, acc);
@@ -281,7 +281,7 @@ function createForwarder(deps) {
       responseGuard = setTimeout(() => { const err = new Error('response timeout after 180s'); req.destroy(err); settle({ phase: 'net-error', error: err.message }); }, 180000);
       req.on('socket', (s) => { s.setNoDelay(true); s.setKeepAlive(true, 15000); });
       req.on('error', (e) => settle({ phase: 'net-error', error: e.message }));
-      const onClientClose = () => settle({ phase: 'client-abort' });
+      const onClientClose = () => { try { req.destroy(); } catch {} settle({ phase: 'client-abort' }); };
       if (clientRes && typeof clientRes.once === 'function') clientRes.once('close', onClientClose);
       req.on('response', () => clientRes.removeListener('close', onClientClose));
       req.end(bodyBuf);

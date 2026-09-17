@@ -81,7 +81,7 @@ async function expectedSha256({ asset, download: dl, report, logger, cache }) {
     }
     return sum;
   } catch (e) {
-    c[asset] = null;
+    // 不缓存失败：离线一次不得让生命周期级 _sumCache 在本进程内永久跳过 sha256
     if (report) report('warn: 取官方校验和失败(' + e.message + ')，跳过完整性校验');
     if (logger && logger.warn) logger.warn('[frp] 取官方校验和失败：' + e.message + ' —— 本次不做 sha256 校验（镜像仍受 https 保护）');
     return null;
