@@ -77,37 +77,46 @@ async function install(host, version) {
   host.installLog = [];
   const task = beginTask(host, 'install', { to: version || null, createdBy: 'user' });
   let target = version;
-  if (!target) {
-    target = await host._latestVersion().catch(() => null);
+  // 锁释放统一走 finally：本函数缺它时与 uninstallOrCleanup 不对称，而锁一旦滞留，
+  //   startInstall/startUninstall 与升级的并发闸会永久拒绝全部安装类操作。
+  //   现状「每一环调用都自带守卫」，故暂无已知可达的抛出路径（逐路径核验见
+  //   design-notes/_p4-e-uncertain.md §1.2）；此处是补健壮性，不是修在跑的故障。
+  //   下方三处显式置 null 保留：冗余但无害，删它们需先证分支覆盖。
+  try {
     if (!target) {
-      host.installing = null;
-      if (task) host.tasks.fail(task.id, '无法从镜像源获取最新版本');
-      return { ok: false, error: '无法从镜像源获取最新版本' };
+      target = await host._latestVersion().catch(() => null);
+      if (!target) {
+        host.installing = null;
+        if (task) host.tasks.fail(task.id, '无法从镜像源获取最新版本');
+        return { ok: false, error: '无法从镜像源获取最新版本' };
+      }
     }
-  }
-  const registry = await host._selectRegistry();
-  const pkg = host.config.packageName || PKG_DEFAULT;
-  if (task) host.tasks.log(task.id, '安装 ' + pkg + '@' + target + (registry ? ' via ' + registry : ''));
-  if (host.events) host.events.append('native_install_started', { version: target, registry });
-  if (host.logger.info) host.logger.info('native install: ' + pkg + '@' + target + (registry ? ' via ' + registry : ''));
-  const res = await host._runInstall(target, registry);
-  if (!res.ok) {
+    const registry = await host._selectRegistry();
+    const pkg = host.config.packageName || PKG_DEFAULT;
+    if (task) host.tasks.log(task.id, '安装 ' + pkg + '@' + target + (registry ? ' via ' + registry : ''));
+    if (host.events) host.events.append('native_install_started', { version: target, registry });
+    if (host.logger.info) host.logger.info('native install: ' + pkg + '@' + target + (registry ? ' via ' + registry : ''));
+    const res = await host._runInstall(target, registry);
+    if (!res.ok) {
+      host.installing = null;
+      host.lastInstall = { ok: false, version: null, error: res.error, at: new Date().toISOString(), log: host.installLog.slice(-8) };
+      if (host.events) host.events.append('native_install_failed', { error: res.error, output: res.output });
+      if (task) host.tasks.fail(task.id, res.error);
+      return { ok: false, error: res.error, output: res.output };
+    }
+    // 数据认领：仅首装（manifest 尚不存在）尝试；~/.dsh 已有用户数据时不认领（防误删）。
+    const isFirstInstall = !host._manifest();
+    host._recordManifest(target, isFirstInstall ? host._claimDataPaths() : []);
+    const ver = host.installedVersion();
     host.installing = null;
-    host.lastInstall = { ok: false, version: null, error: res.error, at: new Date().toISOString(), log: host.installLog.slice(-8) };
-    if (host.events) host.events.append('native_install_failed', { error: res.error, output: res.output });
-    if (task) host.tasks.fail(task.id, res.error);
-    return { ok: false, error: res.error, output: res.output };
+    host.lastInstall = { ok: true, version: ver || target, error: null, at: new Date().toISOString(), log: host.installLog.slice(-8) };
+    if (host.events) host.events.append('native_installed', { version: target });
+    if (host.logger.info) host.logger.info('native installed: ' + (ver || target));
+    if (task) { host.tasks.log(task.id, '安装完成，版本 ' + (ver || target)); host.tasks.succeed(task.id); }
+    return { ok: true, version: ver || target };
+  } finally {
+    host.installing = null;
   }
-  // 数据认领：仅首装（manifest 尚不存在）尝试；~/.dsh 已有用户数据时不认领（防误删）。
-  const isFirstInstall = !host._manifest();
-  host._recordManifest(target, isFirstInstall ? host._claimDataPaths() : []);
-  const ver = host.installedVersion();
-  host.installing = null;
-  host.lastInstall = { ok: true, version: ver || target, error: null, at: new Date().toISOString(), log: host.installLog.slice(-8) };
-  if (host.events) host.events.append('native_installed', { version: target });
-  if (host.logger.info) host.logger.info('native installed: ' + (ver || target));
-  if (task) { host.tasks.log(task.id, '安装完成，版本 ' + (ver || target)); host.tasks.succeed(task.id); }
-  return { ok: true, version: ver || target };
 }
 
 /** 启动安装（API 用）：同步前置检查，通过则后台执行并立即返回（进度经 status 轮询）。 */

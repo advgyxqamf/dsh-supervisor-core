@@ -5,6 +5,11 @@
 const pidlook = require('../../platform/os/pidlookup');
 const platform = require('../../platform/os/index');
 
+/** SIGKILL 之后的复核窗口（ms）：信号投递与内核回收需要时间，
+ *  在同一拍断言 isAlive 会把「正在死」误判成「杀不掉」（假失败）。
+ *  仍在存活才判定「停止落空」并上报（D12）。 */
+const ADOPT_KILL_VERIFY_MS = 2000;
+
 module.exports = {
   methods: {
   /** 校验 pid 进程是否属于本守卫管理：cmdline 含配置的启动 bin，或符合 DSH 特征（兼容外部手动起的标准 DSH）。
@@ -57,14 +62,25 @@ module.exports = {
     }, this.config.stopGraceMs);
   },
 
-  /** 杀无句柄的接管实例（仅知 pid）。 */
+  /** 杀无句柄的接管实例（仅知 pid）。
+   *
+   *  失败不再静默（D12）：SIGKILL 投递后另给一次复核窗口，仍存活才判定「停止落空」，
+   *  发 stop_failed + warn —— 原实现只 append sigkill_sent 就算完，kill 失败与成功无法区分。
+   *
+   *  代际（gen）：本文件只有一个 _adoptKillTimer 槽位，后一次 kill 会覆盖前一次的句柄。
+   *  故每次调用自增 _adoptKillGen，定时器只在「本代仍是当前代」时才把槽位置回 null，
+   *  防止旧 timer 清掉新一次操作的句柄（清掉后 shutdown 就漏清它）。
+   *  注意代际只保护共享槽位：每个 timer 仍按自己的 pid 完成升级与复核，
+   *  不因换代而跳过，否则前一个 pid 的 SIGKILL 升级会被吞掉。 */
   _killAdopted(pid) {
+    const gen = (this._adoptKillGen = (this._adoptKillGen || 0) + 1);
+    const releaseSlot = () => { if (gen === this._adoptKillGen) this._adoptKillTimer = null; };
     this.events.append('sigterm_sent', { pid, adopted: true });
     try {
       process.kill(pid, 'SIGTERM');
     } catch {}
     this._adoptKillTimer = setTimeout(() => {
-      this._adoptKillTimer = null;
+      releaseSlot();
       if (pidlook.isAlive(pid)) {
         // 接管实例同样可能有子进程：Windows 上升级为整树（taskkill /T），
         // 否则会留下孤儿子进程占端口。
@@ -75,6 +91,18 @@ module.exports = {
           try { process.kill(pid, 'SIGKILL'); } catch {}
         }
         this.events.append('sigkill_sent', { pid, adopted: true, tree: platform.PLATFORM === 'win32' });
+        // 复核：SIGKILL 生效是异步的，须另起一拍才能断言成败。
+        const verify = setTimeout(() => {
+          releaseSlot();
+          if (!pidlook.isAlive(pid)) return;
+          this.events.append('stop_failed', { pid, adopted: true, reason: 'SIGKILL 后仍存活' });
+          if (this.logger && this.logger.warn) {
+            this.logger.warn('[main] 接管实例停止落空：pid ' + pid + ' 在 SIGKILL 后仍存活');
+          }
+        }, ADOPT_KILL_VERIFY_MS);
+        // unref：复核窗口纯观测，不应拖住进程退出（shutdown 亦会清 _adoptKillTimer）。
+        if (verify && typeof verify.unref === 'function') verify.unref();
+        this._adoptKillTimer = verify;
       }
     }, this.config.stopGraceMs);
   }

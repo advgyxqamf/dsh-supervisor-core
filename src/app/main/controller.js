@@ -164,6 +164,13 @@ module.exports = {
           } else {
             // 假死识别：进程在但 HTTP 挂时连续失败判故障。health-gate 只返回决策，执行在此
             //（health-gate 不反向调 _beginRestart；依赖单向 controller -> health-gate）。
+            //
+            // 契约（D11 声明化）：**假死自愈不受 guardian 约束** —— 上面两个死亡分支
+            //   （adopted_exit / child_exit）才看 guarded，本分支故意不看。理由：假死意味着进程
+            //   **仍活着且占着端口**；若在此前置 guarded 判断，不重启就落回 STOPPED，而 STOPPED
+            //   分支的 portUp 会走 adopt() 重新接管 → 下一拍又被判假死 → adopt 与假死判定
+            //   **无限空转**（每轮还伴随用户可见的相位抖动）。要改此语义必须先引入稳定态，
+            //   不能只加 guarded 判断。故此处保持「假死必自愈」，为有意设计而非遗漏。
             const healthDecision = this.main.applyHealthCheck(healthOk);
             if (healthDecision && healthDecision.restart) {
               this.main.beginRestart(healthDecision.reason || 'http_unhealthy', { countCrash: healthDecision.countCrash === true });

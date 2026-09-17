@@ -231,13 +231,27 @@ module.exports = {
     this.logger.info('stop: ' + reason);
     const child = this._mChild();
     const adoptedPid = this._mAdoptPid();
+    // 相位裁定（D12）：即便 kill 未能确认成功，仍置 STOPPED —— controller 的
+    //   portUp → adoptObserved 语义依赖 STOPPED；失败经 stop_failed 事件如实上报，
+    //   而不是把相位停在一个既非运行也非停止的中间态。
     this.state.setPhase('STOPPED');
     this._mSetChild(null);
     this._mSetAdopted(false);
     this._mSetAdoptPid(null);
     this._mSetFailStreak(0);
-    if (child && child.exitCode === null) this.main.killSequence(child);
-    else if (adoptedPid) this.main.killAdopted(adoptedPid);
+    // kill 派遣可能同步抛错（平台 signalProcess/killTree 实现抛）：原实现会让异常逃出
+    //   本方法、跳过 state.write()，且没有任何失败事件 —— 停止半执行而静默（D12）。
+    try {
+      if (child && child.exitCode === null) this.main.killSequence(child);
+      else if (adoptedPid) this.main.killAdopted(adoptedPid);
+    } catch (e) {
+      this.events.append('stop_failed', {
+        reason,
+        pid: adoptedPid || (child && child.pid) || null,
+        error: (e && e.message) || String(e),
+      });
+      if (this.logger && this.logger.warn) this.logger.warn('[main] stop 派遣失败: ' + ((e && e.message) || e));
+    }
     this.state.write();
   }
   },

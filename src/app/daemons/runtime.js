@@ -143,10 +143,24 @@ module.exports = {
         if (desiredRunning === false) {
           // 停止语义：仅停「本守卫管理」的 daemon；异主 daemon 不碰；否则由调用方停内嵌 router
           if (daemonActive && managed) {
+            // 归属校验（D10）：managed 是「本 stateDir 写过管理锁」的**静态授权**，不等于
+            //   「ctl 端口占用者就是我」（锁内 pid 从不比对）。若按端口 pid 直接 SIGTERM，
+            //   「陈旧锁 + 外来同名 daemon 占同 ctl 口」会误杀外来进程。故 kill 前先用
+            //   DaemonLifecycle.classify() 做**动态归属**判定（与 supervise.js 同源判据）。
+            //   external（占用者非本守卫代际）=> 拒绝停用且不碰进程/锁/身份。
+            //   其余保持既有行为：running/reclaiming 是本守卫或同 cmdMark 残留；barrier 是
+            //   换代窗口内刚拉起的本守卫 daemon（stop 请求下本就该停）；absent 无 pid 可杀。
+            const lcS = this._daemonLifecycle('router');
+            const c = (lcS && typeof lcS.classify === 'function') ? lcS.classify() : null;
+            if (c && c.mode === 'external') {
+              if (this.logger && this.logger.warn) {
+                this.logger.warn('[router] 停止：ctl ' + this.ctl.routerPort() + ' 被外部进程占用（pid=' + c.owner + '），拒绝停用以免误杀异主 daemon');
+              }
+              return { active: false, mode: 'embedded', refused: 'external' };
+            }
             const pid = pidlook.findListeningPid(this.ctl.routerPort());
             if (pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
             this.daemons.clearRouterDaemonLock();
-            const lcS = this._daemonLifecycle('router');
             if (lcS) { lcS._clearIdentity(); lcS._spawnWindowUntil = 0; }
             return { active: false, mode: 'daemon', stopping: true };
           }
