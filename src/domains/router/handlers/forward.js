@@ -129,7 +129,8 @@ function createForwarder(deps) {
         endInflight(acc, activeProv);
         const inst = parse.instOf(rt.prov, acc);
         const isTimeout = typeof out.error === 'string' && /timeout/i.test(out.error);
-        if (rt.prov && rt.prov.supports && rt.prov.supports('instanceLifecycle')) rt.prov.markInstanceNetFail(acc);
+        // 失败归属在下方按 activeProv + inst 收口。此处原有一处 rt.prov.markInstanceNetFail(acc)：
+        // proxy 实现要求实参带 pid（acc 无 pid -> 无操作），base 实现直接抛错 —— 冗余死调用，删除。
         log('ERR net fail key=' + maskKey(acc.key) + ' err=' + out.error);
         if (activeProv && activeProv.kind === 'proxy' && inst) {
           if (isTimeout && activeProv.supports && activeProv.supports('instanceLifecycle')) {
@@ -226,7 +227,12 @@ function createForwarder(deps) {
       completed = true;
       endInflight(acc, prov);
       log('STREAM_ABORTED key=' + maskKey(acc.key) + ' bytes=' + bytes);
-      if (prov && prov.supports && prov.supports('instanceLifecycle')) { try { prov.markInstanceNetFail(acc); } catch {} }
+      // 归属必须是**实例**而非账号对象：proxy.markInstanceNetFail 只在实参带 pid 时计数，
+      // 传 acc 等于不计数 —— 流式中断因此从不进入熔断（P3-F #5）。与 net-error 分支同一解析取实例。
+      if (prov && prov.supports && prov.supports('instanceLifecycle')) {
+        const inst = parse.instOf(prov, acc);
+        if (inst) { try { prov.markInstanceNetFail(inst); } catch {} }
+      }
       if (events) events.append('router_stream_aborted', { key: maskKey(acc.key), model: meta.model, bytes });
       try { res.destroy(); } catch {}
     };

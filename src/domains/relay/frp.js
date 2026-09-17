@@ -139,14 +139,18 @@ class FrpManager {
     // 必须监听 'error'：二进制存在但不可执行时 Node 会异步 emit 'error'，无监听器即未捕获异常。
     child.on('error', (e) => {
       pushLog('[spawn error] ' + ((e && e.message) || e));
-      if (this.child === child) this.child = null;
+      // 所有权守卫：只有仍是当前子进程时，其事件才可影响状态与重启排期。守卫若已换新进程，
+      // 旧进程迟到的 error/exit 仍排期重启会毒化重试计数，最终让真实崩溃不再自愈（FIX-7 B1 同型）。
+      if (this.child !== child) return;
+      this.child = null;
       if (!this._intentionalStop) this._scheduleRestart();
     });
     child.stdout.on('data', (c) => String(c).split('\n').forEach(pushLog));
     child.stderr.on('data', (c) => String(c).split('\n').forEach(pushLog));
     child.on('exit', (code) => {
       pushLog('[exited code=' + code + ']');
-      if (this.child === child) this.child = null;
+      if (this.child !== child) return; // 陈旧子进程（已被新进程取代）的退出不得触发重启
+      this.child = null;
       // 兜底重启：非主动 stop、且配置仍应运行时，按退避重拉（最多 5 次，封顶 60s）。
       if (!this._intentionalStop) this._scheduleRestart();
     });

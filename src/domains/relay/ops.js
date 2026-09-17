@@ -143,11 +143,31 @@ class LanManager {
     }
     return { ok: false, error: '未知 frp 操作: ' + action };
   }
-  /** 实例变化后同步 frpc 配置与进程（尽力而为，不抛异常影响主流程）。 */
+  /** 实例变化后同步 frpc 配置与进程（尽力而为，不抛异常影响主流程）。
+   *  执行边界复校暴露闸：写入口（setFrp / patchDshMain）已过 core.validateFrpExposure，但冷启动
+   *  是直接按磁盘态组装隧道 —— 历史遗留的「frpEnabled 为真但远程令牌为空」会绕开写侧闸，在网络
+   *  边界重现公网零认证暴露。故建隧道前对每个启用项复用同一事实源复校，不过闸即跳过该隧道。 */
   syncFrpc() {
     if (!this.frp) return;
     try {
-      const r = this.frp.syncFromInstances(this.lanInstances || []);
+      const all = this.lanInstances || [];
+      const safe = all.filter((inst) => {
+        if (!inst.frpEnabled) return true;
+        const v = validateFrpExposure({
+          enabled: true,
+          remoteToken: String(inst.remoteToken || inst.token || ''),
+          frpRemotePort: inst.frpRemotePort,
+          peers: all,
+          selfId: inst.id,
+        });
+        if (!v.ok) {
+          if (this.logger && this.logger.warn) this.logger.warn('[frpc] 实例 ' + inst.id + ' 公网暴露未过闸，已跳过建隧道：' + v.error);
+          if (this.events) this.events.append('lan_frp_blocked', { id: inst.id, reason: v.error });
+          return false;
+        }
+        return true;
+      });
+      const r = this.frp.syncFromInstances(safe);
       if (r && r.needInstall) this.logger.info && this.logger.info('frpc not installed; WAN exposure pending install');
     } catch (e) {
       this.logger.warn && this.logger.warn('frpc sync failed: ' + e.message);

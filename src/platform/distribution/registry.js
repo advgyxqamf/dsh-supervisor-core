@@ -202,18 +202,30 @@ async function registryInfo(state) {
 /** 保存全局镜像源配置（mode/手动源/候选），并立即重测。 */
 async function setRegistryConfig(state, cfg) {
   const rc = state.registryConfig || {};
+  let rejected = [];
   if (cfg && typeof cfg === 'object') {
     if (cfg.mode === 'manual' || cfg.mode === 'auto') rc.mode = cfg.mode;
     if (typeof cfg.manualOrigin === 'string') rc.manualOrigin = cfg.manualOrigin.trim();
     if (Array.isArray(cfg.origins)) {
-      const list = cfg.origins.map((x) => String(x).trim()).filter((x) => policies.isValidOrigin(x));
-      if (list.length) rc.origins = list;
+      const raw = cfg.origins.map((x) => String(x).trim());
+      const list = raw.filter((x) => policies.isValidOrigin(x));
+      // 非法项不得静默丢弃：用户改了自己的镜像源却不知道哪条被丢。收集后在下方经日志与返回值暴露。
+      rejected = raw.filter((x) => x && !policies.isValidOrigin(x));
+      if (list.length) rc.origins = list; // 全部非法时保留既有 origins（不写成空）
     }
   }
   state.registryConfig = rc;
   saveRegistryConfig(state);
   state.selectedRegistry = null; // 清缓存，立即重测
-  return registryInfo(state);
+  const info = await registryInfo(state);
+  if (rejected.length) {
+    if (state.logger && state.logger.warn) {
+      state.logger.warn('[registry] 已忽略 ' + rejected.length + ' 个非法镜像源（需 http(s):// 前缀）：' +
+        rejected.slice(0, 3).join(', ') + (rejected.length > 3 ? ' …' : ''));
+    }
+    info.rejectedOrigins = rejected; // 调用方（/dist/registry）直接回传本对象，UI 可见
+  }
+  return info;
 }
 
 module.exports = {

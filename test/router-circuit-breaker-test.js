@@ -62,6 +62,60 @@ const inflight = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'mo
     /markInstanceNetFail/.test(strip(fwd)), '已改');
   check('R-b 该方法确实定义在 proxy.js',
     /markInstanceNetFail\s*\(instOrAcc\)/.test(proxy), '有定义');
+
+  // ── R-b 升级（P3-B）：从「字符串出现过」升级为「实参正确 + 确实计数」的行为断言 ──
+  //   旧断言只查 markInstanceNetFail 字符串存在，故 forward.js 传错实参也绿。
+  //   真实缺陷：markInstanceProblem 以 instOrAcc.pid 判定实参是否为实例；传累加器 acc
+  //   （无 pid）会**静默早退、完全不计数** —— 流式中断不进熔断（forward.js:132 与 :229）。
+  //   ⚠ 本断言为硬判据，必须与修复 forward.js 两处实参的改动**同批提交**。
+  const fwdCode = strip(fwd);
+  const callArgs = [];
+  for (const line of fwdCode.split(String.fromCharCode(10))) {
+    const mm = line.match(/(?:markInstanceNetFail|markInstanceProblem)\s*\(([^)]*)/);
+    if (mm) callArgs.push(mm[1].trim());
+  }
+  check('R-b 定位到熔断调用点（forward.js）', callArgs.length >= 1, '共 ' + callArgs.length + ' 处');
+  const BARE_ACC = /^(?:acc|okAcc|activeAcc|rt\.acc)$/;
+  const bare = callArgs.filter((a) => BARE_ACC.test(a));
+  check('R-b 熔断调用点不得传无 pid 的累加器实参（缺陷形态 markInstanceNetFail(acc)）',
+    bare.length === 0, bare.length ? ('缺陷实参: ' + bare.join(', ')) : 'ok');
+  const INST_SHAPED = /instOf\s*\(|\.instance\b|\binst\b|\w*[Ii]nst\b/;
+  const unshaped = callArgs.filter((a) => !INST_SHAPED.test(a));
+  check('R-b 熔断调用点实参须为实例形态（instOf()/inst/ .instance）',
+    unshaped.length === 0, unshaped.length ? ('可疑实参: ' + unshaped.join(', ')) : 'ok');
+  check('R-b 反向：缺陷样本 (acc) 被检出', BARE_ACC.test('acc') === true, 'hit');
+  check('R-b 反向：正确样本 parse.instOf(prov, acc) 不误报',
+    BARE_ACC.test('parse.instOf(prov, acc)') === false, 'miss');
+  check('R-b 反向：正确样本 inst 不误报', BARE_ACC.test('inst') === false, 'miss');
+
+  // ── 行为面：沙箱内执行真实的 markInstanceProblem 本体，证明「计数」语义与实参形状要求 ──
+  const mBody = proxy.match(/markInstanceProblem\(instOrAcc, reason\) \{[\s\S]*?\n  \}/);
+  check('R-b 定位到 markInstanceProblem 实现', !!mBody, mBody ? 'ok' : '未找到');
+  let impl = null;
+  if (mBody) {
+    try {
+      const inner = mBody[0].replace(/^markInstanceProblem\(instOrAcc, reason\)\s*\{/, '');
+      impl = new Function('instOrAcc', 'reason', inner.slice(0, inner.lastIndexOf(String.fromCharCode(10) + '  }')));
+    } catch { impl = null; }
+  }
+  check('R-b 行为断言前提：本体可在沙箱求值（不 require 产品状态根）', typeof impl === 'function', typeof impl);
+  if (typeof impl === 'function') {
+    const restarts = [];
+    const stub = { restartInstance: (inst, why) => { restarts.push(why); } };
+    const inst = { pid: 4242 };
+    impl.call(stub, inst, 'net-error');
+    check('R-b 行为：实例实参被计数（_unhealthyCount 1 / healthy=false）',
+      inst._unhealthyCount === 1 && inst.healthy === false, JSON.stringify({ n: inst._unhealthyCount, healthy: inst.healthy }));
+    const acc = { key: 'k', instance: inst };
+    impl.call(stub, acc, 'net-error');
+    check('R-b 行为：累加器实参（无 pid）静默不计数 —— 即缺陷形态',
+      acc._unhealthyCount === undefined, JSON.stringify({ accN: acc._unhealthyCount }));
+    const inst2 = { pid: 7 };
+    impl.call(stub, inst2, 'net-error');
+    impl.call(stub, inst2, 'net-error');
+    check('R-b 行为：连续 2 次计入 -> 触发重启一次并清零点',
+      restarts.length === 1 && inst2._unhealthyCount === 0, JSON.stringify({ restarts: restarts.length, n: inst2._unhealthyCount }));
+  }
 }
 
 // ── R-c：_restartPending 必须有读取点 ──

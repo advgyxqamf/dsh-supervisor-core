@@ -18,8 +18,8 @@ const PLATFORM = process.platform;
 
 function run(cmd, args, opts) {
   // 经统一执行器（默认 15s 硬超时 + SIGKILL，防 systemd/dbus 挂起时无限阻塞）；调用方 timeoutMs 仍生效。
-  // 必须原样透传 opts，不得强制 stdio ignore：否则要读输出的调用（如 isUnitActive 传 encoding）会
-  // 拿不到 stdout，isUnitActive 恒 false，实例就绪判定与「仍活跃则不删」的保护全部失效。
+  // 必须原样透传 opts，不得强制 stdio ignore：否则要读 stdout 的调用（如 isUnitActive 经 runDetail
+  // 读单元状态）会拿不到输出，实例就绪判定与「仍活跃则不删」的保护全部失效。
   return exec.run(cmd, args, opts || {});
 }
 
@@ -35,10 +35,20 @@ const systemd = {
   },
   // run() 失败返回 null 而不抛，故原 try/catch 是死代码、恒返回 true（N5）。如实回传成败。
   resetFailed(unit) { return run('systemctl', ['--user', 'reset-failed', unit], { timeoutMs: 10000 }) !== null; },
+  /** 单元活跃判定（三态）：确认 active -> true；确认不活跃 -> false；查询未完成 -> null（未知）。
+   *  旧实现把「查询未完成」折成 false，而 run() 失败只返回 null，于是
+   *  instance/ops.js 删除数据目录前的 null 保护成了不可达死分支，is-active 超时时仍会 rmSync
+   *  沙箱数据（FIX-5 A 的根因）。调用方按「!== false 才放行删除」消费本函数。 */
   isUnitActive(unit) {
     if (!unit) return true; // 无单元约束 -> 视为通过（调用方语义）
-    try { return (run('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8', timeoutMs: 8000 }) || '').toString().trim() === 'active'; }
-    catch { return false; }
+    try {
+      const r = exec.runDetail('systemctl', ['--user', 'is-active', unit], { timeoutMs: 8000 });
+      if (r.timedOut) return null; // 超时 -> 查询未完成，未知（绝不当作「不活跃」）
+      const state = String(r.stdout || '').trim(); // is-active 把状态打到 stdout（非零退出时同样有）
+      if (state === 'active') return true;
+      if (state || r.code !== null) return false; // systemctl 已作答 -> 确认不活跃
+      return null; // 未能执行（如 ENOENT）-> 未知
+    } catch { return null; }
   },
   transientUnitFile(unit) {
     let uid = 0;

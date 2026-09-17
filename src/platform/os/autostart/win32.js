@@ -7,19 +7,20 @@
 
 const ex = require('../../util/exec');
 
+/** 任务是否存在（/Query 成功且输出含任务名）。 */
+function hasTask(tn) {
+  try {
+    const out = ex.runOut('schtasks', ['/Query', '/TN', tn], { stdio: ['ignore', 'pipe', 'ignore'] });
+    return !!out && out.includes(tn);
+  } catch { return false; }
+}
+
 /** 自启状态（三个任务职责分离）：DSH-Supervisor 为守卫守护进程（壳建立），
  *  DSH-Supervisor-GUI 为登录时打开桌面壳（本开关管理），DSH-Supervisor-Watchdog 为每 5 分钟保活（归壳）。 */
 function status() {
-  let guard = false, gui = false, watchdog = false;
-  const has = (tn) => {
-    try {
-      const out = ex.runOut('schtasks', ['/Query', '/TN', tn], { stdio: ['ignore', 'pipe', 'ignore'] });
-      return !!out && out.includes(tn);
-    } catch { return false; }
-  };
-  guard = has('DSH-Supervisor');
-  gui = has('DSH-Supervisor-GUI');
-  watchdog = has('DSH-Supervisor-Watchdog');
+  const guard = hasTask('DSH-Supervisor');
+  const gui = hasTask('DSH-Supervisor-GUI');
+  const watchdog = hasTask('DSH-Supervisor-Watchdog');
   return { kind: 'schtasks', on: guard || gui || watchdog, gui, watchdog, guard };
 }
 
@@ -30,7 +31,12 @@ function setAutostart(on, deps) {
       const r = ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-GUI', '/SC', 'ONLOGON', '/RL', 'HIGHEST', '/F', '/TR', '"' + deps.guiCommand() + '"']);
       if (!r.ok) errors.push('schtasks gui: ' + (r.error || '执行失败'));
     } else {
-      ex.run('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-GUI', '/F']);
+      // 先查再删：任务本就不存在时 schtasks /Delete 会返回非零，但期望状态已达成，属幂等成功，
+      // 不得报失败；只有真的发起删除且失败才计入 errors（旧实现丢弃结果，恒报 ok:true）。
+      if (hasTask('DSH-Supervisor-GUI')) {
+        const r = ex.runDetail('schtasks', ['/Delete', '/TN', 'DSH-Supervisor-GUI', '/F']);
+        if (!r.ok) errors.push('schtasks gui delete: ' + (r.error || '执行失败'));
+      }
     }
   } catch (e) { errors.push('gui autostart: ' + e.message); }
   return { ok: errors.length === 0, errors, ...status() };
