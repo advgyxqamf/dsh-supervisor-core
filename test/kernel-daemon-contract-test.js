@@ -104,7 +104,11 @@ const kernelCreatesWatchdog = (src) =>
   src.includes("'/TN', 'DSH-Supervisor-Watchdog'") || /writeFileSync\([^)]*watchdog\.ps1/.test(src);
 check('D-8 内核不再创建 watchdog 任务', !auto.includes("'/TN', 'DSH-Supervisor-Watchdog'"), 'ok');
 check('D-8 内核不再写 watchdog.ps1', !/writeFileSync\([^)]*watchdog\.ps1/.test(auto), 'ok');
-check('D-8 注释明确所有者=桌面壳', /所有者 = \*\*桌面壳\*\*/.test(auto), 'ok');
+// 判据只要求「所有者」与「桌面壳」在注释中相邻出现，不钉死排版形态（'= **桌面壳**' 与
+// '所有者都是桌面壳' 等价）——注释符号清理不得让本判据静默失去覆盖面。
+check('D-8 注释明确所有者=桌面壳', /所有者[^\n]{0,12}桌面壳/.test(auto), 'ok');
+check('D-8 反向：未声明所有者的样本被判违规',
+  !/所有者[^\n]{0,12}桌面壳/.test("schtasks /Create /TN DSH-Supervisor-GUI /SC ONLOGON"), 'ok');
 // 反向：旧形态（内核建 watchdog）必须能被识别
 const legacyWatchdog = "ex.runDetail('schtasks', ['/Create', '/TN', 'DSH-Supervisor-Watchdog', '/SC', 'MINUTE']);";
 check('D-8 反向：旧形态被识别', kernelCreatesWatchdog(legacyWatchdog), 'ok');
