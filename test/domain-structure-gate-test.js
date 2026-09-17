@@ -122,13 +122,40 @@ function readBrace(s, openIdx) {
   }
   return s.slice(openIdx + 1);
 }
+/** 方法定义的受支持形态（DG-14 用）。**不再只认「2-6 空格的方法简写」** —— 原判据在重构
+ *  （工厂化把方法改写为「name: function」/箭头属性、或改变缩进）后会**抽不到方法体 ⇒ 判据恒绿
+ *  = 静默失覆盖**，而 DG-14 正是靠它判定「app/facade/* 无写动作」。本仓已四次因「门禁看不见」而假绿。
+ *    A 方法简写          name(args) {              （含 async / get / set / static）
+ *    B 属性函数          name: function (args) {
+ *    C 属性箭头（块体）  name: (args) => {          （含 async）
+ *  缩进上界 8：用于排除**方法体内部**的嵌套对象成员（更深缩进视为嵌套，非本文件方法定义）。 */
+const METHOD_FORMS = [
+  /^[ \t]{2,8}(?:async\s+)?(?:get\s+|set\s+|static\s+)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm,
+  /^[ \t]{2,8}([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?function\s*\([^)]*\)\s*\{/gm,
+  /^[ \t]{2,8}([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?\([^)]*\)\s*=>\s*\{/gm,
+];
 function methodBodies(src) {
+  const found = [];
+  for (const re of METHOD_FORMS) {
+    let m;
+    while ((m = re.exec(src))) {
+      if (KEYWORDS.has(m[1])) continue;
+      const open = m.index + m[0].length - 1;
+      found.push({ at: m.index, name: m[1], body: readBrace(src, open) });
+    }
+  }
+  found.sort((a, b) => a.at - b.at);
+  const seen = new Set();
+  return found.filter((f) => { const k = f.at + ':' + f.name; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+/** 抽取器**无法**取体的成员形态：属性箭头**无块体**（name: (a) => expr）—— 无花括号可 readBrace。
+ *  返回这些形态的名字，由 DG-14 显式判为违规，使门禁对未知形态**失败可见**而非静默失覆盖。 */
+const UNSUPPORTED_METHOD_FORM = /^[ \t]{2,8}([A-Za-z_$][\w$]*)\s*:\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*(?!\{)/gm;
+function unsupportedMethodForms(src) {
   const out = []; let m;
-  const re = /^\s{2,6}(?:async\s+)?(?:get\s+|set\s+|static\s+)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm;
-  while ((m = re.exec(src))) {
+  while ((m = UNSUPPORTED_METHOD_FORM.exec(src))) {
     if (KEYWORDS.has(m[1])) continue;
-    const open = m.index + m[0].length - 1;
-    out.push({ name: m[1], body: readBrace(src, open) });
+    out.push(m[1]);
   }
   return out;
 }
@@ -943,6 +970,22 @@ console.log('扫描: ' + ENTRIES.length + ' 个 src/**/*.js，' + DOMAINS.length
   const v = facadeWriteViolations(files, FACADE_EXCEPTIONS);
   judge('DG-14 app/facade/* 无写动作（应下沉 app/domain-actions/）', v.length === 0,
     v.length ? v.length + ' 处: ' + short(v.map((x) => x.rel + ':' + x.method)) : 'ok（' + files.length + ' 文件）');
+  // 覆盖守卫：抽取器**取不到体**的形态必须显式报出（否则判据静默失覆盖 —— 本仓已四次因此假绿）。
+  const un = files.filter((f) => unsupportedMethodForms(f.src).length)
+    .map((f) => f.rel + ':' + unsupportedMethodForms(f.src).join(','));
+  judge('DG-14 无未支持的成员形态（表达式体箭头无法取体 ⇒ 显式报出，不静默失覆盖）',
+    un.length === 0, un.length ? un.join(' | ') : 'ok');
+  // 每形态各一组自检：证明抽取器对该形态**不盲**（合成样本，不依赖真实数据）。
+  selfcheck('DG-14 反向：形态 B（name: function）命中写动词',
+    facadeWriteViolations([{ rel: 'app/facade/x.js', src: strip('module.exports = {\n  methods: {\n    setRouterRunning: function () {}\n  }\n};') }], {}).length === 1, 'hit');
+  selfcheck('DG-14 反向：形态 C（name: () => {}）命中写动词',
+    facadeWriteViolations([{ rel: 'app/facade/x.js', src: strip('module.exports = {\n  methods: {\n    patchX: () => {}\n  }\n};') }], {}).length === 1, 'hit');
+  selfcheck('DG-14 反向：深缩进（8 空格）的方法简写仍被抽到',
+    facadeWriteViolations([{ rel: 'app/facade/x.js', src: strip('module.exports = {\n  methods: {\n        setRouterRunning() {}\n  }\n};') }], {}).length === 1, 'hit');
+  selfcheck('DG-14 反向：表达式体箭头被报为未支持形态（失败可见）',
+    unsupportedMethodForms(strip('module.exports = {\n  methods: {\n    setX: () => doIt()\n  }\n};')).length === 1, 'hit');
+  selfcheck('DG-14 反向：块体箭头不被误报为未支持形态',
+    unsupportedMethodForms(strip('module.exports = {\n  methods: {\n    setX: () => { doIt(); }\n  }\n};')).length === 0, 'miss');
   selfcheck('DG-14 反向：setRouterRunning 命中',
     facadeWriteViolations([{ rel: 'app/facade/x.js', src: strip('module.exports = { methods: {\n  setRouterRunning() {}\n} };') }], {}).length === 1, 'hit');
   selfcheck('DG-14 反向：只读 routerStatusView 不命中',
