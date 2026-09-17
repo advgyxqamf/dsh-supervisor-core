@@ -62,7 +62,21 @@ function walk(dir, out) {
 }
 const files = walk(SRC, []);
 const rel = (f) => path.relative(SRC, f).split(path.sep).join('/');
-const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+// ⚠ 顺序：**先行注释、再块注释**。原为「先块后行」——行注释里的 glob 形态（斜杠+星号）会被当成
+//   块注释开符，把其后直到下一个结束符的**代码**一并吞掉（实测：src/supervisor.js 被吞 9 行、
+//   src/domains/router/providers/base.js 被吞 29 行、src/platform/os/service.js 被吞 7 行），
+//   使本门禁的「原型混入」「门面词表」等判据对那段区间**失明**（假阴性）。
+const strip = (s) => s.replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+// 自检（合成样本，不依赖真实数据）：行注释里的 glob 不吞后续代码；真块注释仍被剥离。
+{
+  const LF9 = String.fromCharCode(10);
+  // 以拼接构造 glob 形态：避免源码里出现「斜杠+星号」相邻，给别的门禁制造假开符（本类缺陷的成因）
+  const GLOB = 'src/' + String.fromCharCode(42, 42);
+  const kept = strip('// 见 ' + GLOB + LF9 + 'const KEEP_MARKER_9f3 = 1;').indexOf('KEEP_MARKER_9f3') >= 0;
+  check('DS-G9 剥离顺序：行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
+  const gone = strip('/* SECRET_9f3 */ const Y = 1;').indexOf('SECRET_9f3') < 0;
+  check('DS-G9 反向：真块注释仍被剥离（修复未漏剥）', gone, gone ? 'ok' : '漏剥');
+}
 
 /** 依赖边（from → to 的域粒度单元） */
 function edgeUnit(relPath) {

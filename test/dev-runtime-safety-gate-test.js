@@ -37,17 +37,30 @@ const SCAN_EXT = new Set(['.js', '.cjs', '.mjs', '.sh', '.bash', '.yml', '.yaml'
 const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react']);
 const SKIP_FILE = new Set([SELF]);
 
-/** 剥离注释：注释里**举例说明**禁令（如本文件的样本）不构成违规。 */
+/** 剥离注释：注释里**举例说明**禁令（如本文件的样本）不构成违规。
+ *  ⚠ 顺序：**先行注释 → 再块注释 → 最后清 JSDoc 续行**。
+ *  原为「先块后行」：行注释里出现的 glob 形态（斜杠+两个星号）构成**假块注释开符**，会把其后
+ *  直到下一个结束符的**代码**一并吞掉（本仓实测：`src/domains/router/providers/base.js` 被吞 29 行、
+ *  `test/domain-structure-gate-test.js` 被吞 174 行）→ 本门禁对那段区间**失明**（假阴性）。
+ *  第 3 步必须在块正则**之后**：多行块注释的结束行以星号开头，提前清空会让块正则漏剥。 */
 function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(String.fromCharCode(10))
-    .map((l) => {
-      const t = l.trim();
-      if (t.startsWith('//') || t.startsWith('#') || t.startsWith('*')) return '';
-      return l;
-    })
-    .join(String.fromCharCode(10));
+  const LF = String.fromCharCode(10);
+  const noLine = String(src).split(LF)
+    .map((l) => { const t = l.trim(); return (t.startsWith('//') || t.startsWith('#')) ? '' : l; })
+    .join(LF);
+  const noBlock = noLine.replace(/\/\*[\s\S]*?\*\//g, '');
+  return noBlock.split(LF).map((l) => (l.trim().startsWith('*') ? '' : l)).join(LF);
+}
+
+// ── R-G4：剥离顺序自检（门禁自身完整性，合成样本，不依赖真实数据）──
+{
+  const LF = String.fromCharCode(10);
+  // 以拼接构造 glob 形态：避免源码里出现「斜杠+星号」相邻，给别的门禁制造假开符（本类缺陷的成因）
+  const GLOB = 'src/' + String.fromCharCode(42, 42);
+  const kept = stripComments('// 见 ' + GLOB + LF + 'const KEEP_MARKER_9f3 = 1;').indexOf('KEEP_MARKER_9f3') >= 0;
+  check('R-G4 剥离顺序：行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
+  const gone = stripComments('/* SECRET_9f3 */ const Y = 1;').indexOf('SECRET_9f3') < 0;
+  check('R-G4 反向：真块注释仍被剥离（修复未漏剥）', gone, gone ? 'ok' : '漏剥');
 }
 
 function walk(dir, out) {
