@@ -125,7 +125,6 @@ router/
 ├── providers/pool.js    ≤200  实例池策略（纯）
 ├── providers/restart.js ≤180  重启编排
 ├── providers/direct.js  ≤120  直连 provider
-├── instances/proxy-instance.js ≤12  re-export shim（过渡）→ 最终删除
 ├── proxy-apps.js / port-segments.js  保留
 └── daemon.js            ≤120  仅装配 + 启动（**文件名不变**）
 ```

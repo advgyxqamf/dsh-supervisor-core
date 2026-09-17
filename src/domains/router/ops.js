@@ -3,7 +3,7 @@
 // Q7 供应商注册表（CRUD）+ Q12 服务生命周期 + 端口释放；并持有 Q2 域状态容器。
 // 副作用经注入的 endpoint/scheduler/ports 执行（手法 B），本文件不 require 实现。
 //
-// 契约导出：createState(opts), createOps(deps), findProvider(providers, id), releaseProviderPorts(p, ports)。
+// 契约导出：createState(opts), createOps(deps), findProvider(providers, id)。
 // createOps deps = { state, store, logger, events, dist, ports, endpoint, scheduler,
 //                    createDirect, createProxy, apps, presets, save }
 
@@ -159,4 +159,4 @@ function createOps(deps) {
   return { addDirectProvider, addProxyProvider, removeProvider, start, stop, stopAndWait, stopAllInstances };
 }
 
-module.exports = { createState, createOps, findProvider, releaseProviderPorts };
+module.exports = { createState, createOps, findProvider };
