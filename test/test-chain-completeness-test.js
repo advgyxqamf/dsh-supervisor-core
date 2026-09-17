@@ -20,7 +20,8 @@
 //   N-c  助手/fixture（`_` 前缀或非 `*-test.js`）不被误报
 //   N-d  反向：判据能识别"未入链的测试"（门禁非空转）
 //   N-e  scripts.test 长度 < 8000（Windows cmd.exe 命令行 8191 上限；
-//        实测只有 windows-latest 会因此失败，Linux/macOS 不受限）
+//        实测只有 windows-latest 会因此失败，Linux/macOS 不受限。
+//        向链中新增测试后必须复核本判据（docs-reference-gate 入链时仍在限内）
 //   N-f  链中每个条目都真实存在（防链引用已删除文件，运行到该条才炸）
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -116,9 +117,10 @@ function isTestFile(name) {
 //   2026-09-17 CI 实测：windows-latest 报 "The command line is too long."，
 //   而 ubuntu-22.04 / macos-latest / macos-14 三个矩阵同时全绿。
 //   本判据把该平台差异固化为门禁，不再依赖 Windows CI 才发现。
+//   新增 docs-reference-gate-test.js 入链后长度仍 < 8000，故阈值不变。
 {
   const len = require(path.join(ROOT, 'package.json')).scripts.test.length;
-  const LIMIT = 8000; // 8191 上限留 ~190 字符余量
+  const LIMIT = 8000; // 8191 上限留余量；任何入链新增都必须重新复核本判据
   check('N-e scripts.test 长度 < 8000（Windows cmd 命令行 8191 上限）', len < LIMIT, len + ' 字符');
   // 反向：判据非空转（构造超长样本必须被检出）
   const longSample = 'x'.repeat(9000);

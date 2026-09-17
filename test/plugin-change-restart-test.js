@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// ⛔ 卸载类测试（项目政策，2026-08-31）：本脚本含插件卸载（PluginManager.uninstall）场景，涉及卸载类操作，
-// 已从 npm test 自动测试链排除，仅允许作为独立脚本显式单独调用（node test/plugin-change-restart-test.js 或 npm run test:plugin-change-restart）；
-// 除非用户明确指令，禁止擅自运行。
+// 卸载类测试（项目政策，2026-08-31）：本脚本含插件卸载（PluginManager.uninstall）场景，涉及卸载类操作，
+// 已纳入 npm test（CI）自动测试链执行；测试结论只能由 CI 裁决，本地不单独复跑
+// （如需排查，可显式执行 node test/plugin-change-restart-test.js 或 npm run test:plugin-change-restart）。
 
 // 插件管理双机制（原生宿主 × 沙箱实例）核心行为测试：
 //  - 卸载：官方 CLI + bundles 清理 + 跨层残留（home 补丁层/原生 overlay/profile 补丁层）清理

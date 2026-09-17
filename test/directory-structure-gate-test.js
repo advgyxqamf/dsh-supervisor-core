@@ -13,7 +13,7 @@
 //   DS-G5 层内 require 图无环（单位 = 路径前 3 段）
 //   DS-G6 每域有 index.js；域内子目录白名单 = R2（DOMAIN-STRUCTURE-DESIGN §6）
 //   DS-G7 src/supervisor.js ≤200 行；不含 setInterval/writeState/_mSet
-//   DS-9 门面 index.js ≤150 / 单文件 ≤400（R3 取严；初始 report-only）
+//   DS-9 门面 index.js ≤150 / 单文件 ≤300（R3 取严；初始 report-only）
 //   DS-G8 反向：判据能识别旧形态（门禁非空转）
 //
 // ## 为什么有本门禁
@@ -25,7 +25,7 @@
 // 进度：§6 步骤1/2/3/4/5 已落地——dist 域已解体（步骤3），ctl dispatcher 上移 platform/ctl（步骤4），
 //   跨域边 2 → 1 → 0（relay/daemon.js 不再 require router 域：改向下消费 L0 的 platform/ctl/server.js）。
 // ⚠ 迁移未完成（域结构改造并行进行中）：本批新补的严格判据（DS-G3b 的 assign 形态、
-//   DS-9 的严阈值 ≤150/≤400）初始为 report-only —— 只打印 RED、不计入退出码；
+//   DS-9 的严阈值 ≤150/≤300）初始为 report-only —— 只打印 RED、不计入退出码；
 //   GATE_STRICT=1 可整体转硬失败。既有判据（DS-G1..G8）保持硬失败，保证「不退化」。
 //   （DS-G6 已随步骤6 guard→app 平移通过；DS-G8 证明判据非空转。）
 // ═══════════════════════════════════════════════════════════════════════════
@@ -227,10 +227,10 @@ for (const f of files) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DS-9 行数阈值（R3 取严：门面 index.js ≤150 / 单文件 ≤400）
+// DS-9 行数阈值（R3 取严：门面 index.js ≤150 / 单文件 ≤300，与 DG-2 同值）
 // ═══════════════════════════════════════════════════════════════════════════
 {
-  const FACADE_MAX = 150, FILE_MAX = 400;
+  const FACADE_MAX = 150, FILE_MAX = 300;
   const facadeOver = files
     .filter((f) => path.basename(f) === 'index.js' && countLines(fs.readFileSync(f, 'utf8')) > FACADE_MAX)
     .map((f) => rel(f) + '(' + countLines(fs.readFileSync(f, 'utf8')) + ')');
@@ -239,13 +239,13 @@ for (const f of files) {
   const fileOver = files
     .filter((f) => countLines(fs.readFileSync(f, 'utf8')) > FILE_MAX)
     .map((f) => rel(f) + '(' + countLines(fs.readFileSync(f, 'utf8')) + ')');
-  check('DS-9 [report-only] 任何 src/**/*.js ≤400 行', fileOver.length === 0,
+  check('DS-9 [report-only] 任何 src/**/*.js ≤300 行', fileOver.length === 0,
     fileOver.length ? fileOver.length + ' 个: ' + fileOver.slice(0, 4).join(', ') : 'ok', true);
-  // 反向自检：401 行命中、400 行不命中（纯字符串，不落盘）。
-  const overSample = Array.from({ length: 401 }, () => 'x;').join(String.fromCharCode(10));
-  const edgeSample = Array.from({ length: 400 }, () => 'x;').join(String.fromCharCode(10));
-  check('DS-G8 反向：DS-9 判据能识别 401 行超限', countLines(overSample) > FILE_MAX, 'hit');
-  check('DS-G8 反向：DS-9 对 400 行边界不误报', !(countLines(edgeSample) > FILE_MAX), 'miss');
+  // 反向自检：301 行命中、300 行不命中（纯字符串，不落盘）。
+  const overSample = Array.from({ length: 301 }, () => 'x;').join(String.fromCharCode(10));
+  const edgeSample = Array.from({ length: 300 }, () => 'x;').join(String.fromCharCode(10));
+  check('DS-G8 反向：DS-9 判据能识别 301 行超限', countLines(overSample) > FILE_MAX, 'hit');
+  check('DS-G8 反向：DS-9 对 300 行边界不误报', !(countLines(edgeSample) > FILE_MAX), 'miss');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// ⛔ 卸载类测试（项目政策，2026-08-31）：本脚本含 POST /native/uninstall（控制面板对 DSH 原生卸载）契约断言，
-// 已从 npm test 自动测试链排除，仅允许作为独立脚本显式单独调用（node test/api-contract-test.js 或 npm run test:api-contract）；
-// 除非用户明确指令，禁止擅自运行。
+// 卸载类测试（项目政策，2026-08-31）：本脚本含 POST /native/uninstall（控制面板对 DSH 原生卸载）契约断言，
+// 已纳入 npm test（CI）自动测试链执行；测试结论只能由 CI 裁决，本地不单独复跑
+// （如需排查，可显式执行 node test/api-contract-test.js 或 npm run test:api-contract）。
 
 // API 契约断言测试：对 createServer 的响应对未来回归设防。
 // 覆盖审计修复的关键契约：202 异步受理带 ok、key/use 路由 await（Promise 序列化回归）、
