@@ -62,20 +62,25 @@ function walk(dir, out) {
 }
 const files = walk(SRC, []);
 const rel = (f) => path.relative(SRC, f).split(path.sep).join('/');
-// ⚠ 顺序：**先行注释、再块注释**。原为「先块后行」——行注释里的 glob 形态（斜杠+星号）会被当成
-//   块注释开符，把其后直到下一个结束符的**代码**一并吞掉（实测：src/supervisor.js 被吞 9 行、
-//   src/domains/router/providers/base.js 被吞 29 行、src/platform/os/service.js 被吞 7 行），
-//   使本门禁的「原型混入」「门面词表」等判据对那段区间**失明**（假阴性）。
-const strip = (s) => s.replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
-// 自检（合成样本，不依赖真实数据）：行注释里的 glob 不吞后续代码；真块注释仍被剥离。
+// 剥离注释 = test/_strip.js 的**字符级词法**（test/ 下唯一实现）。
+//   原为两条正则链（阶段五已把顺序改为「先行注释、再块注释」，但那只堵住「行注释里的 glob」；
+//   **字符串/正则字面量里的同形字符**仍会被当成注释开符并吞掉后续代码 → 门禁对该区间失明（假阴性）。
+//   词法实现只在**真注释**处剥离，字符串/正则字面量原样保留 —— 这是本阶段要根除的一类。
+const { stripComments } = require('./_strip');
+const strip = stripComments;
+// 自检（合成样本，硬判据，不依赖真实数据）：四条必须同时成立。
 {
   const LF9 = String.fromCharCode(10);
-  // 以拼接构造 glob 形态：避免源码里出现「斜杠+星号」相邻，给别的门禁制造假开符（本类缺陷的成因）
-  const GLOB = 'src/' + String.fromCharCode(42, 42);
+  const ST = String.fromCharCode(42);   // 单个星号
+  const GLOB = 'src/' + ST + ST;        // 拼接构造 glob：源码里不写出「斜杠+星号」相邻序列（否则给别的门禁制造假开符）
   const kept = strip('// 见 ' + GLOB + LF9 + 'const KEEP_MARKER_9f3 = 1;').indexOf('KEEP_MARKER_9f3') >= 0;
-  check('DS-G9 剥离顺序：行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
+  check('DS-G9 ① 行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
   const gone = strip('/* SECRET_9f3 */ const Y = 1;').indexOf('SECRET_9f3') < 0;
-  check('DS-G9 反向：真块注释仍被剥离（修复未漏剥）', gone, gone ? 'ok' : '漏剥');
+  check('DS-G9 ② 反向：真块注释仍被剥离', gone, gone ? 'ok' : '漏剥');
+  const strKept = strip("const S = '" + GLOB + "';" + LF9 + 'const STR_MARKER_9f3 = 1;').indexOf('STR_MARKER_9f3') >= 0;
+  check('DS-G9 ③ 字符串字面量里的 glob 不吞代码（本轮根除目标）', strKept, strKept ? 'ok' : '被吞（假阴性）');
+  const reKept = strip('const RE = /a[b/]c/;' + LF9 + 'const RE_MARKER_9f3 = 1;').indexOf('RE_MARKER_9f3') >= 0;
+  check('DS-G9 ④ 正则字面量不被误当注释', reKept, reKept ? 'ok' : '被吞');
 }
 
 /** 依赖边（from → to 的域粒度单元） */

@@ -37,20 +37,24 @@ const read = (rel) => {
   try { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); } catch { return ''; }
 };
 /** 去注释（行注释 + 块注释）——避免"注释提及"被误判为"代码存在"。
- *  ⚠ 顺序：**先行注释、再块注释**。原为「先块后行」——行注释里的 glob 形态（斜杠+星号）会被当成
- *  块注释开符并吞掉后续代码（实测：src/domains/router/providers/base.js 被吞 6–36 行共 29 行代码，
- *  而本门禁的 baseSrc 判据正是在剥注释后的文本上计数，故对该区间失明）。 */
-const stripComments = (s) => s.replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
-// 自检（合成样本）：行注释里的 glob 不吞后续代码；真块注释仍被剥离。
+ *  实现 = test/_strip.js 的**字符级词法**（唯一实现）。原为两条正则链：阶段五已改对顺序，但正则仍
+ *  区分不了「真注释」与「字符串/正则字面量里的同形字符」—— baseSrc 的计数判据会被字符串里的 glob
+ *  吞掉区间而**失明**（实测原实现下 base.js 6–36 行不可见）。词法实现消除该类。 */
+const { stripComments } = require('./_strip');
+// 自检（合成样本，硬判据）：四条必须同时成立。
 {
   const LF9 = String.fromCharCode(10);
-  // 以拼接构造 glob 形态：避免源码里出现「斜杠+星号」相邻，给别的门禁制造假开符（本类缺陷的成因）
-  const GLOB = 'src/' + String.fromCharCode(42, 42);
+  const ST = String.fromCharCode(42);
+  const GLOB = 'src/' + ST + ST;
   const kept = stripComments('// 见 ' + GLOB + LF9 + 'const KEEP_MARKER_9f3 = 1;').indexOf('KEEP_MARKER_9f3') >= 0;
   // 编号取 PG-10：PG-9 已被「入口 require.main 守卫」判据占用（HEAD 既有），避免标签重复。
-  check('PG-10 剥离顺序：行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
+  check('PG-10 ① 行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
   const gone = stripComments('/* SECRET_9f3 */ const Y = 1;').indexOf('SECRET_9f3') < 0;
-  check('PG-10 反向：真块注释仍被剥离（修复未漏剥）', gone, gone ? 'ok' : '漏剥');
+  check('PG-10 ② 反向：真块注释仍被剥离', gone, gone ? 'ok' : '漏剥');
+  const strKept = stripComments("const S = '" + GLOB + "';" + LF9 + 'const STR_MARKER_9f3 = 1;').indexOf('STR_MARKER_9f3') >= 0;
+  check('PG-10 ③ 字符串字面量里的 glob 不吞代码（本轮根除目标）', strKept, strKept ? 'ok' : '被吞（假阴性）');
+  const reKept = stripComments('const RE = /a[b/]c/;' + LF9 + 'const RE_MARKER_9f3 = 1;').indexOf('RE_MARKER_9f3') >= 0;
+  check('PG-10 ④ 正则字面量不被误当注释', reKept, reKept ? 'ok' : '被吞');
 }
 
 const PROXY = 'src/domains/router/providers/proxy.js';

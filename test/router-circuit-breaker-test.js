@@ -53,9 +53,17 @@ const inflight = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'mo
 // ── R-b：markNetFail 死调用 ──
 // 剥离注释后不得再有 markNetFail 的**调用**（形如 .markNetFail( ）
 {
-  const strip = (s) => s.split(String.fromCharCode(10))
-    .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
-    .join(String.fromCharCode(10));
+  // 注释剥离统一走 test/_strip.js（阶段六）。原实现只丢「// 开头的整行」——语义等价且字符串/正则感知，
+  // 并额外丢掉「整行都是块注释」的行（原先会被当代码）。glob 用拼接构造，避免源码出现危险序列。
+  const { dropCommentLines } = require('./_strip');
+  const strip = dropCommentLines;
+  {
+    const G = 'src/' + String.fromCharCode(42, 42);
+    check('R-b 剥离：// 行注释里的 glob 不吞后续代码',
+      strip('// ' + G + '\nconst K = 1;').indexOf('K = 1') >= 0, 'ok');
+    check('R-b 剥离：字符串里的 glob 不吞代码',
+      strip("const P = '" + G + "';\nconst K = 2;").indexOf('K = 2') >= 0, 'ok');
+  }
   check('R-b handlers/forward 不再调用不存在的 markNetFail',
     !/\.markNetFail\s*\(/.test(strip(fwd)), '已改');
   check('R-b 改用真实存在的 markInstanceNetFail',

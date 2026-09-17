@@ -20,7 +20,19 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  <- ' + x : '')); };
 const LF = String.fromCharCode(10);
 // 源码级断言必须区分「代码」与「说明代码的文字」：剥离整行注释后再匹配（本仓已多次踩坑）。
-const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join(LF);
+// 注释剥离统一走 test/_strip.js（阶段六）。原实现丢「// 或块注释续行（星号或块开符）开头的整行」——
+// 新实现语义等价且**字符串/正则感知**，并只丢「整行都是注释」的行：像『块注释开头的代码行』
+// （形如：块开符 + 注释 + 代码）原先会被**整行丢掉**（丢代码），现已修正为保留。
+const { dropCommentLines: stripCommentLines } = require('./_strip');
+{
+  const G = 'src/' + String.fromCharCode(42, 42);
+  check('S-3 剥离：// 行注释里的 glob 不吞后续代码',
+    stripCommentLines('// ' + G + LF + 'const K = 1;').indexOf('K = 1') >= 0, 'ok');
+  check('S-3 剥离：块注释开头的代码行不再被整行丢掉',
+    stripCommentLines('/* c */ const K = 2;').indexOf('K = 2') >= 0, 'ok');
+  check('S-3 剥离：纯块注释整行被丢掉',
+    stripCommentLines('/* only */' + LF + 'const K = 3;').indexOf('only') < 0, 'ok');
+}
 
 // 测试主体包进 async IIFE：本套测试自 2026-09-11 起含 await（checkUpdate/restartShell），
 // 而 CommonJS 顶层不允许 await —— 之前全同步掩盖了这一点。

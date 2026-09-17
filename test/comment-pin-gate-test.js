@@ -36,6 +36,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { scanText } = require('./_strip'); // 单一字符级词法（test/ 下唯一实现）
 const ROOT = path.join(__dirname, '..');
 const TEST_DIR = path.join(ROOT, 'test');
 const STRICT = process.env.CP_STRICT === '1';
@@ -56,54 +57,12 @@ function record(name, ok, evidence, hard) {
 const judge = (n, c, e) => record(n, !!c, e, STRICT);
 const selfcheck = (n, c, e) => record(n, !!c, e, true);
 
-// ── 词法地基：一次扫描产出「剥注释文本」与「内联正则字面量」 ──
-// 字符串字面量**原样保留**（故断言命中字符串不算钉注释）；块注释以换行占位保行结构；
-// 正则与除号按「前一个有意义字符」启发式区分（标准做法）。
-function isRegexStart(prev) { return prev === '' || '(,=:[!&|?{};+-*%~^<>'.indexOf(prev) >= 0; }
-function scanText(src) {
-  let stripped = '';
-  const regexes = [];
-  let i = 0; const n = String(src || '').length; let prev = '';
-  while (i < n) {
-    const c = src[i], d = src[i + 1];
-    if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
-    if (c === '/' && d === '*') {
-      i += 2;
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') stripped += '\n'; i++; }
-      i += 2; continue;
-    }
-    if (c === '"' || c === "'" || c === String.fromCharCode(96)) {
-      const q = c; stripped += c; i++;
-      while (i < n) {
-        const e = src[i]; stripped += e; i++;
-        if (e === '\\') { if (i < n) { stripped += src[i]; i++; } continue; }
-        if (e === q) break;
-      }
-      prev = q; continue;
-    }
-    if (c === '/' && isRegexStart(prev)) {
-      let body = '', j = i + 1, inClass = false, closed = false;
-      while (j < n) {
-        const e = src[j];
-        if (e === '\\') { body += e + (src[j + 1] || ''); j += 2; continue; }
-        if (e === '[') inClass = true;
-        else if (e === ']') inClass = false;
-        else if (e === '\n') break;
-        else if (e === '/' && !inClass) { closed = true; break; }
-        body += e; j++;
-      }
-      if (closed) {
-        let k = j + 1, flags = '';
-        while (k < n && /[a-z]/i.test(src[k])) { flags += src[k]; k++; }
-        regexes.push({ body, flags });
-        stripped += src.slice(i, k);
-        prev = 'x'; i = k; continue;
-      }
-    }
-    stripped += c; if (!/\s/.test(c)) prev = c; i++;
-  }
-  return { stripped, regexes };
-}
+// ── 词法地基：走 `test/_strip.js` 的**单一字符级词法**（阶段六统一）──
+//   原先此处自持一份 scanText。现统一由 _strip.js 提供，避免 test/ 下并存多份注释剥离实现 ——
+//   本仓已三次因「正则剥注释」不准：CP 的 distinctive 阈值滤掉 2/5 登记钉子 / U-1b 的顺序错误 /
+//   阶段五 4 道门禁「先块后行」把行注释里的 glob 当块开符而吞掉代码（实测吞 174/80/47/29/17 行）。
+//   语义与原实现完全一致：字符串字面量原样保留（故断言命中字符串不算钉注释）；块注释以换行占位
+//   保行结构；正则与除号按「前一个有意义字符」启发式区分（标准做法）。
 
 /** 具区分度：≥4 个连续汉字，或 ≥6 字符的 ASCII 标识符。小模式不参与判定（防泛匹配噪音）。
  *  ★ 但**包含任一已登记钉子特征串**的模式必须始终参与判定 —— 否则登记表会静默失覆盖：

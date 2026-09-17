@@ -44,7 +44,23 @@ const check = (n, c, x) => {
   results.push(!!c);
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : ''));
 };
-const strip = (s) => s.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+// 注释剥离统一走 test/_strip.js 的单一字符级词法（阶段六）。原实现只丢「// 开头的整行」——
+// 新实现语义等价且**字符串/正则感知**，并额外丢掉「整行都是块注释」的行（原先会被当代码，是假阳性来源）。
+const { dropCommentLines } = require('./_strip');
+const strip = dropCommentLines;
+// 合成样本自检（硬判据，不依赖真实数据）。glob 用拼接构造，避免源码自身出现「斜杠+两星号」相邻序列。
+{
+  const G = 'src/' + String.fromCharCode(42, 42);
+  check('S-1 剥离：// 行注释里的 glob 不吞后续代码',
+    strip('// 见 ' + G + '\nconst KEEP_A = 1;').indexOf('KEEP_A') >= 0, 'ok');
+  check('S-1 剥离：字符串里的 glob 不吞代码',
+    strip("const P = '" + G + "';\nconst KEEP_B = 2;").indexOf('KEEP_B') >= 0, 'ok');
+  check('S-1 剥离：块注释整行被丢掉却保留其后的代码',
+    strip('/* note */\nconst KEEP_C = 3;').indexOf('KEEP_C') >= 0
+      && strip('/* note */\nconst KEEP_C = 3;').indexOf('note') < 0, 'ok');
+  check('S-1 剥离：正则字面量不被误当注释',
+    strip('const re = /a/g;\nconst KEEP_D = 4;').indexOf('KEEP_D') >= 0, 'ok');
+}
 /** 读整个域（递归全部 .js）——域拆分后单文件读取会静默失去覆盖面。 */
 const readDomain = (rel) => {
   const out = [];

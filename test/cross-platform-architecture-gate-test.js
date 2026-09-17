@@ -34,11 +34,17 @@ const check = (n, c, x) => {
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : ''));
 };
 
-/** 去掉整行注释（// 与块注释续行 *）——本仓多次被自己的说明文字骗过。 */
-function stripComments(src) {
-  return src.split(String.fromCharCode(10))
-    .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
-    .join(String.fromCharCode(10));
+/** 去掉整行注释——本仓多次被自己的说明文字骗过。
+ *  统一走 test/_strip.js（阶段六）：语义等价且**字符串/正则感知**；并只丢「整行都是注释」的行，
+ *  故『块开符 + 注释 + 代码』这类开头的代码行不再被整行丢掉（原实现会丢代码）。 */
+const { dropCommentLines } = require('./_strip');
+function stripComments(src) { return dropCommentLines(src); }
+{
+  const G = 'src/' + String.fromCharCode(42, 42);
+  check('S-4 剥离：// 行注释里的 glob 不吞后续代码',
+    stripComments('// ' + G + '\nconst K = 1;').indexOf('K = 1') >= 0, 'ok');
+  check('S-4 剥离：块注释开头的代码行不再被整行丢掉',
+    stripComments('/* c */ const K = 2;').indexOf('K = 2') >= 0, 'ok');
 }
 
 function collectJs(dir) {
