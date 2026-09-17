@@ -37,9 +37,9 @@ const APP = path.join(ROOT, 'src', 'app');
 
 // 基线（本轮实测，按 src/app 直接子目录；未列出的目录基线为 0）
 const BASELINE_BY_DIR = {
-  main: 96, control: 54, daemons: 29, facade: 0, settings: 8, native: 3, ctl: 0, self: 1, assembly: 1,
+  main: 68, control: 54, daemons: 29, facade: 0, settings: 8, native: 3, ctl: 0, self: 1, assembly: 1,
 };
-const BASELINE_TOTAL = 192; // = 上述各项之和（原文口径上界；剥注释实测 190，松弛量 2）
+const BASELINE_TOTAL = 164; // = 上述各项之和（原文口径上界；剥注释实测 162，松弛量 2）
 // 收紧记录（棘轮**第一次真实下降**，2026-09-17）：P3-A 完成 ctl 切面工厂化后，ctl 的
 //   this.X() 由 3 降到 0 —— 故 ctl 基线 3->0、总量 267->264。记录于此以说明本门禁**可升可降**：
 //   下调永远允许（真实下降时），上调须按上方纪律注明理由与新增调用点归属。
@@ -53,6 +53,9 @@ const BASELINE_TOTAL = 192; // = 上述各项之和（原文口径上界；剥�
 //   —— decide 25->0、health-gate 12->0、shadow 5->0、signals 3->0（共 45）。基线 main 141->96、
 //   总量 237->192（剥注释实测 190）。**未转换且不计入下调**：controller.js 28、process.js 68
 //   （二者带源码形态钉子，见 design-notes/_p6-b2-main-inplace.md）。
+// 收紧记录（棘轮**第四次真实下降**，2026-09-17 阶段六 B-2 续）：controller.js 28->0
+//   （phase switch 抽取器同批改为形态无关）。基线 main 96->68、总量 192->164（剥注释实测 162）；
+//   **仍未转换**：process.js 68。
 
 const passed = [], failed = [];
 function check(name, ok, evidence) {

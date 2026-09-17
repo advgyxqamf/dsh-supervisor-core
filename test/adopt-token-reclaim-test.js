@@ -88,9 +88,11 @@ function removedHits(src, symbols) {
  *  为什么单独抠出来：TK-2 的不变式是「phase 迁移决策不读令牌池」——必须能精确断言
  *  switch 内部干净，而不是只断言整个文件里没有某个名字。 */
 function extractPhaseSwitch(src) {
-  const key = 'switch (this.state.phase())';
-  const i = src.indexOf(key);
-  if (i < 0) return null;
+  // ⚠ 2026-09-17 阶段六 B-2：controller.js 原地去 this 后 phase switch 变为 switch (d.state().phase())。
+  //   判据改为**形态无关**：匹配任意接收者（this/d/…）的 .state().phase()。判据本意不变。
+  const m = /switch\s*\(\s*[A-Za-z_$][\w$]*\.state\(\)\.phase\(\)\s*\)/.exec(src);
+  if (!m) return null;
+  const i = m.index;
   const open = src.indexOf('{', i);
   if (open < 0) return null;
   let depth = 0;

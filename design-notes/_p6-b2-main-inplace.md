@@ -11,12 +11,12 @@
 | `src/app/main/health-gate.js` | 12 | **0** | |
 | `src/app/main/shadow.js` | 5 | **0** | |
 | `src/app/main/signals.js` | 3 | **0** | 同批改 `process-tree-kill-test` 两条形态钉子 |
-| `src/app/main/controller.js` | 28 | 28 | **未转换**（见 §4） |
+| `src/app/main/controller.js` | 28 | **0** | 同批改 phase switch 抽取器为形态无关（见 §2.3） |
 | `src/app/main/process.js` | 68 | 68 | **未转换**（见 §4） |
 | `src/app/main/port-rederive.js` | 0 | 0 | 无需改 |
 
-- `test/app-this-ratchet-gate-test.js` 基线按纪律**第三次下调**：`main 141->96`、`BASELINE_TOTAL 237->192`
-  （剥注释实测 190，松弛量 2）。收紧记录已写入常量旁注释。
+- `test/app-this-ratchet-gate-test.js` 基线按纪律**下调两次**：先 `main 141->96 / 总量 237->192`（4 文件），
+  后 `main 96->68 / 总量 192->164`（controller 落地）。当前剥注释实测 162，松弛量 2。收紧记录已写入常量旁注释。
 
 ## 1. 做法
 
@@ -36,6 +36,12 @@
    `/signalChild\(child, 'SIGTERM'\)/`；同批把 `_killSequence` 函数体内的 `indexOf` 比序样本
    （`_signalChild(child, 'SIGTERM')` / `_killTree(child`）改为符号形态。**判据本意不变**：仍锁
    「SIGKILL 升级路径走 killTree」「优雅期先 SIGTERM 再（超时）整树」「_killAdopted 体内走 killTree(pid」。
+3. **`adopt-token-reclaim-test` 的 phase switch 抽取器**（原硬编码 `indexOf('switch (this.state.phase())')`）
+   改为**形态无关正则** `/switch\s*\(\s*[A-Za-z_$][\w$]*\.state\(\)\.phase\(\)\s*\)/` —— 同时匹配
+   `this.state.phase()` 与 `d.state().phase()`，其合成反例样本（legacySwitch）仍被命中；**判据本意不变**
+   （锁「phase switch 内不读令牌池」）。
+4. **controller.js 源码零 ASCII `token`**（`adopt-token-reclaim-test.js:127` 含注释判定）：
+   新增 deps 成员名与头注**一律不含该标识符**（最终 `grep -c token` = 0）。
 
 ## 3. 逐文件 deps 映射（要点）
 
@@ -56,11 +62,10 @@
 
 | 文件 | 计数 | 硬理由 |
 |---|---|---|
-| `src/app/main/controller.js` | 28 | ① `heartbeat-selfheal-test.js` 直接断言其源码文本 `this._heartbeatBusy = false;` / `this._heartbeatTimer = setInterval(` / `const heartbeatIv = this.config.probeIntervalMs`（4 条）；② `adopt-token-reclaim-test.js` 断言 controller.js **源码零 "token" 引用（含注释）** ⇒ deps 成员名不得含 token；③ `token-contract-gate` 读 `_dshConverge` 体。三项均需同批改测试/或严格命名约束。 |
 | `src/app/main/process.js` | 68 | 与 controller 同属收敛热路径；且 `process-tree-kill-test` 的 `_killSequence/_killAdopted` 取体判据横跨 `process.js+signals.js`。逐文件转换前须先列全 `this.` 调用并核 `heartbeat-selfheal-test` 的 11 条正则。 |
 
-> 这两文件的转换不是不可行，而是**必须先同批处理各自的源码形态钉子**；本批只动零钉子文件，遵循
-> 作业单「部分完成优于硬推把热路径改坏」。
+> process.js 的转换不是不可行，而是**必须先同批处理其源码形态钉子**（含逐方法列全 this. 与
+> 核 heartbeat-selfheal-test 的源码断言）；遵循作业单「部分完成优于硬推把热路径改坏」。
 
 ## 5. CI 风险
 
