@@ -59,39 +59,55 @@ console.log('== ① frp 令牌闸两条路径同规 ==');
     /function validateFrpExposure\s*\(/.test(mgrCore) && /无效的公网端口/.test(mgrCore) && /已被实例「/.test(mgrCore), '有');
   check('① patchDshMain 调用同一份安全闸（消除重复实现，旧实现无 → 可绕过）',
     /validateFrpExposure\s*\(/.test(act), '有');
-  // 反向：闸必须在 _writeDshMain **之前**（否则已落盘半改状态）
-  const iGate = act.indexOf('validateFrpExposure');
-  const iWrite = act.indexOf('this.state.writeMainMeta(meta)');
+  // 反向：闸必须在落盘 **之前**（否则已落盘半改状态）。
+  // ⚠ P6-B-3：判据改为**形态无关** —— 实现已由 { methods }+this 改为真 ctor 工厂
+  //   （createMainActions(deps)，不再读 this），故不再要求 `this.state.` 前缀，只锁「该写入发生」。
+  //   同时把闸的定位由**导入行**改为**调用行**（`validateFrpExposure(`）：原写法 `indexOf('validateFrpExposure')`
+  //   命中的是文件头的 require（恒在落盘之前），判据近乎恒真；改为调用行后才是真正的顺序判定。
+  const WRITE_MAIN_META = 'writeMainMeta(meta)';
+  const iGate = act.indexOf('validateFrpExposure(');
+  const iWrite = act.indexOf(WRITE_MAIN_META);
   check('① 闸在落盘之前（不产生半改状态）', iGate > 0 && iWrite > 0 && iGate < iWrite,
     'gate@' + iGate + ' write@' + iWrite);
+  // 反向自检（合成样本，不依赖真实数据）：带前缀/裸两形态都命中，缺失时不命中。
+  check('① 反向：形态无关判据识别带前缀形态', 'this.state.writeMainMeta(meta);'.indexOf(WRITE_MAIN_META) >= 0, 'hit');
+  check('① 反向：形态无关判据识别裸形态', 'state.writeMainMeta(meta);'.indexOf(WRITE_MAIN_META) >= 0, 'hit');
+  check('① 反向：缺失该写入时不命中', 'const x = 1;'.indexOf(WRITE_MAIN_META) < 0, 'miss');
 
   // 行为：真实构造一个 patchDshMain 上下文，断言「无令牌开 frp」被拒
-  // ⚠ 步骤7 导出形态 { methods }；R7 后模块位于 app/domain-actions/main.js。
-  const mod = require(path.join(ROOT, 'src', 'app', 'domain-actions', 'main.js'));
+  //  P6-B-3：导出形态改为真 ctor 工厂 createMainActions(deps)（原地去 this）；本处按 deps
+  //   注入构造，判据本意（安全闸行为）不变。R7 后模块位于 app/domain-actions/main.js。
+  const { createMainActions } = require(path.join(ROOT, 'src', 'app', 'domain-actions', 'main.js'));
   const { installCollaborators } = require(path.join(ROOT, 'src', 'app', 'assembly', 'collaborators'));
-  const inst = Object.assign({}, mod.methods);
+  const inst = {};
   installCollaborators(inst);
   const written = [];
   // 级 2：state 已真 ctor 注入——注入点改为协作方方法（不再是 host._readDshMain 薄壳）。
   inst.state.readMainMeta = () => ({ guardian: false, remoteEnabled: false, remoteToken: '', frpEnabled: false, frpRemotePort: null, wanPort: null });
   inst.state.writeMainMeta = (m) => written.push(m);
   inst.dshMainView = () => ({ ok: true });
-  inst.lanDaemonEnabled = () => false;
   // R7：冲突清单改为注入的只读投影（不再直读 instances.instances）
   inst.exposurePeers = () => [];
   inst.config = { stateFile: '/tmp/x.json' };
   inst.logger = { warn() {} };
   inst.events = { append() {} };
-  const bad = inst.patchDshMain({ frpEnabled: true, frpRemotePort: 7001 });
+  // daemon 用**字面 stub**（非 installCollaborators 的转发器）：与本用例无关，
+  //   且不会随 daemons 切面的装配形态（P6-B-1 进行中）漂移。
+  const daemons = { enabled: () => false, syncLanState: () => {} };
+  const actions = createMainActions({
+    getState: () => inst.state, getViews: () => inst.views, getDaemons: () => daemons,
+    getEvents: () => inst.events, getLogger: () => inst.logger,
+  });
+  const bad = actions.patchDshMain({ frpEnabled: true, frpRemotePort: 7001 });
   check('① 行为：无令牌开 frp → 被拒（ok:false）', bad && bad.ok === false, JSON.stringify(bad));
   check('① 行为：被拒时**未落盘**（不产生半改状态）', written.length === 0, String(written.length));
-  const badPort = inst.patchDshMain({ remoteToken: 'tok', frpEnabled: true, frpRemotePort: 99999 });
+  const badPort = actions.patchDshMain({ remoteToken: 'tok', frpEnabled: true, frpRemotePort: 99999 });
   check('① 行为：令牌已设但端口非法 → 被拒', badPort && badPort.ok === false, JSON.stringify(badPort));
-  const good = inst.patchDshMain({ remoteToken: 'tok', frpEnabled: true, frpRemotePort: 7001 });
+  const good = actions.patchDshMain({ remoteToken: 'tok', frpEnabled: true, frpRemotePort: 7001 });
   check('① 行为：令牌+合法端口 → 通过', good && good.ok === true, JSON.stringify(good));
   check('① 行为：通过时**确实落盘一次**', written.length === 1, String(written.length));
   // 关闭 frp 不应被闸拦（关是安全方向）
-  const off = inst.patchDshMain({ frpEnabled: false });
+  const off = actions.patchDshMain({ frpEnabled: false });
   check('① 行为：关闭 frp 不被闸拦', off && off.ok === true, JSON.stringify(off));
 }
 

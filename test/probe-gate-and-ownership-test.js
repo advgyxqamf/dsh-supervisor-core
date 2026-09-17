@@ -140,6 +140,10 @@ check('E-e 源码调用 tasks.stepState 推进状态', /tasks\.stepState\(task\.
   //   已从 src/supervisor.js 下沉；2026-09-17 R7 再下沉 app/domain-actions/router.js#setRouterRunning
   //   （facade 只读）—— 判据改读新模块。
   const sup = fs.readFileSync(path.join(ROOT, 'src', 'app', 'domain-actions', 'router.js'), 'utf8');
+  // ⚠ 剥离注释行后再判（说明文字里会引用这些写法 —— 本仓多次被自己的注释骗过）。
+  const stripComments = (s) => s.split(String.fromCharCode(10))
+    .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
+    .join(String.fromCharCode(10));
   check('E-h 抽出 _disableRouterPersist 集中处置', /_disableRouterPersist\(\) \{/.test(sv), '有');
   // 三条 daemon 路径：① 已在跑 ② 拉起/接管成功 ③ supervisor.js 的兜底
   const n = (sv.match(/_disableRouterPersist\(\);/g) || []).length;
@@ -147,13 +151,17 @@ check('E-e 源码调用 tasks.stepState 推进状态', /tasks\.stepState\(task\.
   check('E-h 拉起/接管路径按返回值判定',
     /res\.mode === 'daemon'\).*_disableRouterPersist|_disableRouterPersist.*res\.mode/.test(sv)
       || /if \(res && res\.mode === 'daemon'\) this\._disableRouterPersist\(\);/.test(sv), '有');
+  // ⚠ P6-B-3：判据改为**形态无关** —— router.js 的实现已由 { methods }+this 改为真 ctor 工厂
+  //   （createRouterActions(deps)，不再读 this），故不再要求 `this.` 前缀。
+  //   判据本意不变：锁的是「该调用发生（不再内联 setPersistEnabled(false)）」。
+  const DISABLE_PERSIST_CALL = /disableRouterPersist\s*\(\s*\)\s*;/;
   check('E-h supervisor.js 兜底改用同一方法（不再内联）',
-    /this\.(?:daemons\.)?disableRouterPersist\(\);/.test(sup), '有');
+    DISABLE_PERSIST_CALL.test(stripComments(sup)), '有');
+  // 反向自检（合成样本，不依赖真实数据）：带前缀/裸两形态都命中，缺失时不命中。
+  check('E-h 反向：形态无关判据识别带前缀形态', DISABLE_PERSIST_CALL.test('this.daemons.disableRouterPersist();'), 'hit');
+  check('E-h 反向：形态无关判据识别裸形态', DISABLE_PERSIST_CALL.test('daemons.disableRouterPersist();'), 'hit');
+  check('E-h 反向：缺失该调用时不命中', !DISABLE_PERSIST_CALL.test('const x = 1;'), 'miss');
   // 反向：确认不再有内联的 setPersistEnabled(false) **代码**（方法本体保留一处）。
-  //   ⚠ 必须剥离注释行 —— 说明文字里会引用该写法（我第一版就踩了这个假阳性）。
-  const stripComments = (s) => s.split(String.fromCharCode(10))
-    .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
-    .join(String.fromCharCode(10));
   const inlineAll = (stripComments(sv) + stripComments(sup)).match(/setPersistEnabled\(false\)/g) || [];
   check('E-h 不再有散落的内联 setPersistEnabled(false)（仅方法本体保留）',
     inlineAll.length === 1, inlineAll.length + ' 处');
