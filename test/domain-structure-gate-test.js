@@ -21,7 +21,7 @@
 //   DG-9  contract.js 与实际导出/ctor 双向一致（未建即 FAIL）
 //   DG-10 消费方成员 ⊆ 目标域 PUBLIC_API（排除 domains/router 的 ProxyInstance）
 //   DG-11 域外无 .instances.instances 内部数组穿透
-//   DG-12 门禁非空转（文件/字节/this 调用下界 + 反向自检完备）
+//   DG-12 门禁非空转（合成样本抽取函数自检 + 反向自检完备；真实总量仅证据）
 //   DG-13 门禁不得以行号为断言目标（只作证据）
 //   DG-14 app/facade/* 只读，写动作应下沉 app/domain-actions/        （R7）
 //   DG-15 require() 必须在模块顶层，函数体内 0 处                     （DF-8）
@@ -344,24 +344,26 @@ function isInheritanceSCC(comp, model) {
 const RANK = {
   'index.js': 0, 'daemon.js': 0,
   // rank 1：编排 / 服务本体 / 入口适配
-  'ops.js': 1, 'scheduler.js': 1, 'handlers': 1, 'upgrade.js': 1, 'manager.js': 1,
+  'ops.js': 1, 'scheduler.js': 1, 'handlers': 1, 'upgrade.js': 1,
   'forward-core.js': 1, 'router-ops.js': 1, 'watchdog.js': 1, 'restart.js': 1, 'market.js': 1,
   'lifecycle.js': 1, 'updater.js': 1, 'proxy.js': 1, 'ports-bootstrap.js': 1,
   'endpoint.js': 1,
   // rank 2：纯核心 / 策略 / 会话 / 目标解析
-  'core.js': 2, 'policies': 2, 'policies.js': 2, 'switch.js': 2, 'journal.js': 2, 'jobs.js': 2, 'frpmgr.js': 2,
+  'core.js': 2, 'policies': 2, 'policies.js': 2, 'switch.js': 2, 'journal.js': 2, 'jobs.js': 2,
   'state-machine.js': 2, 'cli.js': 2, 'targets.js': 2, 'frp.js': 2, 'managed.js': 2, 'views.js': 2,
   'session.js': 2, 'tunnel.js': 2, 'market-net.js': 2, 'market-sources.js': 2,
   // frp-install.js 与 frp.js 同为原 frpmgr.js 的按副作用二分半（relay.md:216 判定 frp→frp-install 域内合法）：
   'frp-install.js': 2,
   // rank 3：模型 / 持久化 / 多实现 / 纯数据
-  'model.js': 3, 'store.js': 3, 'providers': 3, 'instances': 3, 'port-segments.js': 3, 'proxy-apps.js': 3,
+  'model.js': 3, 'store.js': 3, 'providers': 3, 'port-segments.js': 3, 'proxy-apps.js': 3,
   // 域契约文件（纯数据、零 require，与 model/store 同层）。此前未登记 → rank=null；
   //   当前无域内消费者故 DG-7 仍绿，一旦有人 require('./contract') 会以「未归类」误报而非做方向检查。
   'contract.js': 3,
   'layers.js': 3, 'ports.js': 3, 'config.js': 3, 'usage.js': 3, 'sandbox.js': 3,
-  // 子目录首段
-  'ops': 1, 'store': 3, 'model': 3, 'handlers': 1, 'policies': 2, 'core': 2, 'jobs': 2,
+  // 子目录首段（只登记**当前存在**的子目录：domains/*/{ops,policies,store,model,handlers,providers}）。
+  //   指向已删目录的条目是空转，且会静默"预放行"将来同名的新目录 —— 未登记一律 rank=null，
+  //   由 DG-7 以「未归类」报出，这才是本表想要的门禁语义。
+  'ops': 1, 'store': 3, 'model': 3, 'handlers': 1, 'policies': 2,
 };
 function rankOf(relInDomain) {
   const parts = relInDomain.split('/');
@@ -465,11 +467,14 @@ function consumerViolations(files, apiByDomain) {
   return { violations, unverifiable };
 }
 
-// ── DG-11 数组穿透 ──
-// 判据必须同时覆盖三种真实写法：this.instances.instances（原）、别名 instances.instances、
-//   经 getter 的 instances().instances。原判据要求字面点号前缀，后两种长期漏检
-//   （app/control/adapters.js、app/control/specs.js、domains/relay/managed.js）。
-const ARRAY_PIERCE = /\binstances\s*(?:\(\s*\))?\s*\.\s*instances\b/;
+// ─ DG-11 数组穿透 ──
+// 判据必须同时覆盖四种真实写法：this.instances.instances（原）、别名 instances.instances、
+//   经 getter 的 instances().instances、括号字符串取值 instances['instances']。
+//   原判据要求字面点号前缀，别名/调用形态长期漏检（app/control/adapters.js、app/control/specs.js、
+//   domains/relay/managed.js）；括号取值形态按同一「必须带 instances 接收者」口径补入 ——
+//   引号必须成对，故 instances['list'] 与裸 obj['instances'] 都不会误报。
+//   注：f.src 已由 strip() 剥注释，故注释里的写法不产生命中；字符串字面量被 strip 保留，故本形态可检出。
+const ARRAY_PIERCE = /\binstances\s*(?:\(\s*\))?\s*(?:\.\s*instances\b|\[\s*(['"])instances\1\s*\])/;
 function piercings(files) {
   return files.filter((f) => ARRAY_PIERCE.test(f.src)).filter((f) => !f.rel.startsWith('domains/instance/')).map((f) => f.rel);
 }
@@ -868,16 +873,54 @@ console.log('扫描: ' + ENTRIES.length + ' 个 src/**/*.js，' + DOMAINS.length
     piercings([{ rel: 'app/x.js', src: strip('const a = (instances && instances.instances) || [];') }]).length === 1, 'hit');
   selfcheck('DG-11 反向：调用形态（instances() && instances().instances）命中',
     piercings([{ rel: 'app/x.js', src: strip('const a = (instances() && instances().instances) || [];') }]).length === 1, 'hit');
+  selfcheck('DG-11 反向：括号取值形态（instances[\'instances\']）命中',
+    piercings([{ rel: 'app/x.js', src: strip("const a = (instances && instances['instances']) || [];") }]).length === 1, 'hit');
+  selfcheck('DG-11 反向：双引号括号形态（mgr.instances["instances"]）命中',
+    piercings([{ rel: 'app/x.js', src: strip('const a = mgr.instances["instances"];') }]).length === 1, 'hit');
+  selfcheck('DG-11 反向：括号取非穿透键（instances[\'list\']）不命中',
+    piercings([{ rel: 'app/x.js', src: strip("const a = instances['list'];") }]).length === 0, 'miss');
+  selfcheck('DG-11 反向：裸对象取 instances 键（obj[\'instances\']）不命中',
+    piercings([{ rel: 'app/x.js', src: strip("const a = obj['instances'];") }]).length === 0, 'miss');
 }
 
-// ── DG-12 非空转 + 反向自检完备 ──
+// ─ DG-12 非空转（合成样本；真实总量仅证据）──
+// 教训（HANDOFF §4.3）：用**真实总量**（文件数 / 字节数 / this 调用数）做下界会随注释精简与重构
+//   **自锁** —— 数据趋势向下，门禁迟早在与「判据有无分辨力」无关的地方假红。
+//   故改为：自建最小可判定输入，证明抽取函数（strip / countLines / thisCallNames）在给定输入上
+//   产出预期；真实总量只作 evidence 打印，**不参与判定**。
 {
+  // 合成样本判据（正反共用，纪律 1）：返回「未达预期」的项名；空数组 = 抽取函数行为符合预期。
+  const synthViolations = (o) => {
+    const c = o || {};
+    const bad = [];
+    if (countLines(c.lineSrc !== undefined ? c.lineSrc : 'a\nb\nc\n') !==
+      (c.expectLines !== undefined ? c.expectLines : 3)) bad.push('countLines');
+    const st = strip(c.commentSrc !== undefined ? c.commentSrc
+      : 'const a = 1; // 行注\n/* 块注 */\nconst b = "// 不是注释";\n');
+    if (st.includes('行注') || st.includes('块注')) bad.push('strip.comment');
+    if (!st.includes('const a = 1;') || !st.includes('const b =')) bad.push('strip.code');
+    if (!st.includes('// 不是注释')) bad.push('strip.stringLiteral'); // 字符串字面量不得被当注释剥掉
+    const thisSrc = c.thisSrc !== undefined ? c.thisSrc
+      : 'function f() {\n  // this.fake()\n  return this.real(x) + this.real(x);\n}\n';
+    if (thisCallNames(strip(thisSrc)).join(',') !==
+      (c.expectThis !== undefined ? c.expectThis : 'real,real')) bad.push('thisCallNames');
+    return bad;
+  };
+  const bad = synthViolations();
+  judge('DG-12 非空转（合成样本：strip / countLines / thisCallNames 在给定输入上产出预期）',
+    bad.length === 0, bad.length ? '未达预期: ' + bad.join(', ') : 'synth 5/5');
+  // 真实总量：仅 evidence（注释精简会持续压低字节数，故不得据此判定）
   const totalBytes = ENTRIES.reduce((a, e) => a + Buffer.byteLength(e.raw, 'utf8'), 0);
   const totalThis = ENTRIES.reduce((a, e) => a + thisCallNames(e.src).length, 0);
-  judge('DG-12 扫描产出非空集（文件 ≥140 / 字节 ≥500000 / this.X() ≥400）',
-    ENTRIES.length >= 140 && totalBytes >= 500000 && totalThis >= 400,
-    'files=' + ENTRIES.length + ' bytes=' + totalBytes + ' thisCalls=' + totalThis);
-  selfcheck('DG-12 反向：文件下界判据非恒真', !(0 >= 140), 'hit');
+  console.log('   DG-12 evidence（仅报告，不参与判定）: files=' + ENTRIES.length +
+    ' bytes=' + totalBytes + ' thisCalls=' + totalThis);
+  // 反向（永远硬失败，纪律 2：样本必须真与判据有交集）
+  selfcheck('DG-12 反向：错期望值会被合成判据报出（比较非恒真）',
+    synthViolations({ expectLines: 999 }).indexOf('countLines') >= 0, 'hit');
+  selfcheck('DG-12 反向：this 计数错期望值会被报出',
+    synthViolations({ expectThis: 'fake,real' }).indexOf('thisCallNames') >= 0, 'hit');
+  selfcheck('DG-12 反向：样本含注释标记且 strip 确实剥掉它（strip 退化为 no-op 必被检出）',
+    'const a = 1; // 行注'.includes('行注') && !strip('const a = 1; // 行注').includes('行注'), 'hit');
 }
 
 // ── DG-13 门禁不以行号为断言目标 ──

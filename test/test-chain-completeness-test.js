@@ -21,7 +21,11 @@
 //   N-d  反向：判据能识别"未入链的测试"（门禁非空转）
 //   N-e  scripts.test 长度 < 8000（Windows cmd.exe 命令行 8191 上限；
 //        实测只有 windows-latest 会因此失败，Linux/macOS 不受限。
-//        向链中新增测试后必须复核本判据（docs-reference-gate 入链时仍在限内）
+//         余量已近枯竭（2026-09-17 P3-B 实测 7899 字符 => 余量 101，约 2 个条目）。
+//        **纪律：今后新增判据必须并入既有门禁文件，不得新增链条目**；
+//        若确需新文件，必须先合并/退役一个旧条目，并同步本判据与 package.json#scripts.test。
+//        头部已评估「单一 runner + 参数列表」的替代方案（结论见 design-notes/_p3-b-gates.md）：
+//        既有测试结尾普遍 process.exit()，in-process 串联会提前终止，故本轮**不改造**。
 //   N-f  链中每个条目都真实存在（防链引用已删除文件，运行到该条才炸）
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -117,11 +121,15 @@ function isTestFile(name) {
 //   2026-09-17 CI 实测：windows-latest 报 "The command line is too long."，
 //   而 ubuntu-22.04 / macos-latest / macos-14 三个矩阵同时全绿。
 //   本判据把该平台差异固化为门禁，不再依赖 Windows CI 才发现。
-//   新增 docs-reference-gate-test.js 入链后长度仍 < 8000，故阈值不变。
+//   P3-B 入链三件（docs-reference / comment-pin / app-this-ratchet）后长度 7899，
+//   **余量仅 101 字符（约 2 个条目）** —— 增长空间基本用尽：
+//     · 纪律：新增判据**并入既有门禁文件**，不得新增链条目；
+//     · 若确需新文件，必须先合并/退役一个旧条目（并同步本判据与 package.json#scripts.test）。
 {
   const len = require(path.join(ROOT, 'package.json')).scripts.test.length;
-  const LIMIT = 8000; // 8191 上限留余量；任何入链新增都必须重新复核本判据
-  check('N-e scripts.test 长度 < 8000（Windows cmd 命令行 8191 上限）', len < LIMIT, len + ' 字符');
+  const LIMIT = 8000; // 8191 上限留余量；余量仅 101，任何入链新增都必须重新复核本判据
+  check('N-e scripts.test 长度 < 8000（Windows cmd 命令行 8191 上限）',
+    len < LIMIT, len + ' 字符（余量 ' + (LIMIT - len) + '）');
   // 反向：判据非空转（构造超长样本必须被检出）
   const longSample = 'x'.repeat(9000);
   check('N-e 反向：超长样本被检出', !(longSample.length < LIMIT), 'hit');

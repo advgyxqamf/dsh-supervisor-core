@@ -35,7 +35,11 @@ const check = (n, c, x) => {
 };
 
 // src/... 字面量。段字符不含 * ? # : ，故 glob（src/**/*.js）与行号后缀不会被吞进来。
-const SRC_REF = /src\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*/g;
+// ⚠ 边界（P3-B 修，主控发现）：src/ 只有在**是路径根**时才计入 —— 前面不得是 / 或标识符字符。
+//   否则 `ui/src/features/supervisor/InstancesPage.tsx`（前端路径的正常写法）会被**截出**
+//   `src/features/supervisor/InstancesPage.tsx`，再按 <仓根>/src/... 判不存在 => 误报违规。
+//   负向后顾 (?<![\w/]) 即为此；Node >=16 支持。`./src/` 是合法写法，由 refsOf 归一后再匹配。
+const SRC_REF = /(?<![\w/])src\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*/g;
 
 /** 归一化原文命中：剥掉 :行号 与行尾标点；无意义片段返回 null。 */
 function normalizeRef(hit) {
@@ -58,8 +62,10 @@ function resolves(rel) {
 
 /** 抽取一段文本里的 src/... 引用（去重、保序）。 */
 function refsOf(text) {
+  // `./src/` 归一到 `src/`：否则该合法写法会因负向后顾看到前一个字符 '.' 而失去覆盖。
+  const t0 = String(text || '').replace(/\.\/src\//g, 'src/');
   const out = new Set();
-  for (const hit of (text.match(SRC_REF) || [])) {
+  for (const hit of (t0.match(SRC_REF) || [])) {
     const t = normalizeRef(hit);
     if (t) out.add(t);
   }
@@ -91,6 +97,16 @@ function refsOf(text) {
     refsOf('任何 src/**/*.js 都不超过 300 行').length === 0, 'ok');
   check('DR-2 反向：历史文档被显式排除',
     HISTORICAL.has('CHANGELOG.md') && HISTORICAL.has('ARCHITECTURE-PLAN-session-lifecycle.md'), 'ok');
+  // 路径根边界（合成样本，不依赖真实数据）：
+  check('DR-2 反向：子段 ui/src/... 不得被当作根路径 src/...（防误报）',
+    refsOf('ui/src/features/supervisor/InstancesPage.tsx').length === 0, '0');
+  check('DR-2 反向：裸 ui/src/... 与其它非 src 根同样为 0',
+    refsOf('release/scripts/foo.sh 与 web/src/app.js').length === 0, '0');
+  check('DR-2 反向：./src/... 归一后仍被覆盖且可解析',
+    refsOf('见 ./src/platform/util/exec.js:22').length === 1 &&
+    refsOf('见 ./src/platform/util/exec.js:22').every((r) => resolves(r)), 'hit');
+  check('DR-2 反向：src/app/x.js 正常命中（与上一条成对，防我把 src 全滤掉）',
+    refsOf('src/platform/util/exec.js').length === 1, 'hit');
 }
 
 const failed = results.filter((r) => !r);
