@@ -189,10 +189,7 @@ function createShellWatchdog(deps) {
     };
   }
 
-  /** 仅供测试：重置内部状态。 */
-  function _reset() { missingSince = null; restarts = []; busy = false; lastSkipReason = null; everSawAlive = false; expectedSince = null; phaseStale = false; phaseStaleWarned = false; journalStale = false; journalStaleWarned = false; }
-
-  return { tick, status, _reset, intervalMs: config.shellWatchdogIntervalMs || DEFAULTS.intervalMs };
+  return { tick, status, intervalMs: config.shellWatchdogIntervalMs || DEFAULTS.intervalMs };
 }
 
 module.exports = { createShellWatchdog };

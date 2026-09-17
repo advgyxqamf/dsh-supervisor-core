@@ -153,7 +153,8 @@ function createUpgrade(deps) {
             rbOk = rbRes.ok;
           } catch { rbOk = false; }
         }
-        inst.state.version = readInstalledVersion(inst);
+        // 不写 inst.state.version：全仓无读取（版本经 readInstalledVersion/versionInfo 实时读盘）；
+        // state 形状由 model.createRecord 声明，额外字段只会污染 instances.json。
         if (!rbOk) { nj.error = (nj.error || why) + '；自动回滚失败（npm install 退出非 0），请手动处理'; return false; }
         const rbStart = await lifecycle.start(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
         if (!rbStart || !rbStart.ok) { nj.error = (nj.error || why) + '；回滚后重启也失败'; if (task) tasks.log(task.id, '回滚后重启失败：' + ((rbStart && rbStart.error) || '')); return false; }
@@ -163,9 +164,8 @@ function createUpgrade(deps) {
       if (nj.errors) { nj.state = 'failed'; await rollback(nj.error); }
       else {
         nj.step = 'restarting';
-        // 3) 读新版本，拉回实例并验证可启动（防止显示成功但实例起不来）。无论升级前是否在跑都验证：
+        // 3) 拉回实例并验证可启动（防止显示成功但实例起不来）。无论升级前是否在跑都验证：
         //    DSH 可能先监听端口后因插件兼容崩溃，只探测端口会误判成功，必须同时检查 systemd 单元仍 active。
-        inst.state.version = readInstalledVersion(inst);
         if (task) { const s = tasks.step(task.id, '重启实例并验证'); tasks.stepState(task.id, tasks.get(task.id).steps.indexOf(s), 'running'); }
         const sr = await lifecycle.start(id, { fromUpgrade: true }).catch(() => ({ ok: false }));
         if (!sr || !sr.ok) { nj.errors++; nj.error = '升级后重启失败: ' + ((sr && sr.error) || ''); nj.state = 'failed'; await rollback(nj.error); }

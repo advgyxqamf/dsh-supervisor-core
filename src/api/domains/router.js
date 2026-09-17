@@ -14,12 +14,14 @@ function handle(ctx) {
       return send(200, sup.routerDomainSummary());
     }
     if (req.method === 'GET' && pathname === '/router/ports') {
-      // 资源端口视图：router 段由 daemon 自供（ctl），守卫仅转发；降级走内嵌副本同方法
-      return Promise.resolve(sup.routerApi().portsView()).then((r) => send(200, r)).catch((e) => send(200, { records: [], error: e && e.message }));
+      // 资源端口视图：router 段由 daemon 自供（ctl），守卫仅转发；降级走内嵌副本同方法。
+      // 查询失败须如实报 500：原为 200 携带 error（客户端只改状态码，仍带原有字段，未删字段）。
+      return Promise.resolve(sup.routerApi().portsView()).then((r) => send(200, r)).catch((e) => send(500, { ok: false, records: [], error: (e && e.message) || String(e) }));
     }
     if (req.method === 'GET' && pathname === '/router/status') {
-      // daemon 监督模式：实时状态来自 daemon（异步）；否则本地视图（同步）
-      return Promise.resolve(sup.routerStatusView()).then((r) => send(200, r)).catch((e) => send(200, { running: false, error: e.message }));
+      // daemon 监督模式：实时状态来自 daemon（异步）；否则本地视图（同步）。失败同上报 500。
+      // e 为 null 时旧写法 e.message 会二次抛错，故统一 (e && e.message) || String(e)。
+      return Promise.resolve(sup.routerStatusView()).then((r) => send(200, r)).catch((e) => send(500, { ok: false, running: false, error: (e && e.message) || String(e) }));
     }
     if (req.method === 'POST' && pathname.startsWith('/router/')) {
       if (!originAllowed(req, sup.config.apiPort)) {
