@@ -153,6 +153,17 @@ WS1-a..d 各自**必须再派生 1-3 个下级**，把文件按数量切分（�
 删任何注释行前，把该行切成 ≥4 字的 CJK 短语与 ≥6 字符的 ASCII 串，逐 token 在 `test/` grep 一次；
 命中即保留该行并登记。**ASCII 短语同样要写（本次穷尽扫描只覆盖中文，ASCII 未系统枚举）。**
 
+### 7.3b 工具陷阱（WS1-a 实测，主控已复现）
+
+`grep -E '[一-龥]{4,}'` 在本机（GNU grep 3.11 / zh_CN.UTF-8）**静默返回空** —— 区间写法不按码点解释，
+会给出**假绿的 R1 结果**。必须用 `grep -oP '\p{Han}{4,}'`（Unicode 属性）复算。
+
+主控按正确方法复算的结果：删除的 444 行注释中抽出 508 个 ≥4 字 CJK token，
+其中 44 个在 test/ 有命中；逐条判定**全部是测试自身注释、check() 名称或映射标签**，
+无一是对源码文本的断言（对 4 个进入断言行的 token 逐行核对：`兜底释放`/`更新日志`/`生命周期`/`状态目录`
+的断言目标分别是代码形态、UI TSX、`_startShellWatchdog`、`supervisor['"]|state\.json`，token 只出现在 check 名称里）。
+故本批注释删除不构成 R1 违规。
+
 ### 7.4 三个易漏点
 
 - **块注释也参与匹配**：`round13-robustness-batch`、`round13-router-relay-gaps`、`heartbeat-selfheal`、
