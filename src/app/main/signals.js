@@ -2,6 +2,9 @@
 
 // app/main/signals.js —— 进程终止信号（_isManagedProcess/_signalChild/_killTree/_killSequence/_killAdopted）。
 // 导出形态 { methods }；装配：app/assembly/facets.js 装到 host 实例；方法内部以 this 协作。
+//
+// 阶段六 B-2 原地去 this：实现体不再经 this 的隐式方法调用取事实，改经按 host 缓存的**惰性 deps**。
+// 方法名/{ methods }/逐字体保留，装配路径不变；process-tree-kill-test 的两条形态钉子同批改为**按符号名**。
 const pidlook = require('../../platform/os/pidlookup');
 const platform = require('../../platform/os/index');
 
@@ -10,14 +13,38 @@ const platform = require('../../platform/os/index');
  *  仍在存活才判定「停止落空」并上报（D12）。 */
 const ADOPT_KILL_VERIFY_MS = 2000;
 
+const DEPS = new WeakMap();
+function depsOf(host) {
+  let d = DEPS.get(host);
+  if (!d) {
+    d = {
+      config() { return host.config; },
+      events() { return host.events; },
+      logger() { return host.logger; },
+      // 兄弟方法经 host 上的既有安装转发（等价于原经 this 的调用）。
+      signalChild(child, sig) { return host._signalChild(child, sig); },
+      killTree(child, sig) { return host._killTree(child, sig); },
+      readKillTimer() { return host._killTimer; },
+      writeKillTimer(v) { host._killTimer = v; },
+      readAdoptKillGen() { return host._adoptKillGen; },
+      writeAdoptKillGen(v) { host._adoptKillGen = v; },
+      readAdoptKillTimer() { return host._adoptKillTimer; },
+      writeAdoptKillTimer(v) { host._adoptKillTimer = v; },
+    };
+    DEPS.set(host, d);
+  }
+  return d;
+}
+
 module.exports = {
   methods: {
   /** 校验 pid 进程是否属于本守卫管理：cmdline 含配置的启动 bin，或符合 DSH 特征（兼容外部手动起的标准 DSH）。
    *  精确匹配避免"路径碰巧含 dsh 就误接管"与"安装路径不含 dsh 就漏接管"。 */
   _isManagedProcess(pid) {
+    const d = depsOf(this);
     const cmd = pidlook.readCmdline(pid);
     if (!cmd) return false;
-    const bin = this.config.command && this.config.command[1];
+    const bin = d.config().command && d.config().command[1];
     if (typeof bin === 'string' && bin && cmd.includes(bin)) return true;
     return pidlook.isDshCmdline(pid);
   },
@@ -39,27 +66,29 @@ module.exports = {
    *   POSIX 上 `killTree` 退化为组信号，与 `_signalChild` 等价（幂等，无害）。
    */
   _killTree(child, sig) {
+    const d = depsOf(this);
     const pc = platform.processControl;
     if (pc && typeof pc.killTree === 'function') {
       pc.killTree(child.pid, sig || 'SIGKILL', () => {});
       return;
     }
     // 兜底：平台层未提供时退回单进程信号（不因能力缺失而完全不杀）
-    this._signalChild(child, sig || 'SIGKILL');
+    d.signalChild(child, sig || 'SIGKILL');
   },
 
   _killSequence(child) {
-    this.events.append('sigterm_sent', { pid: child.pid });
+    const d = depsOf(this);
+    d.events().append('sigterm_sent', { pid: child.pid });
     // 优雅期先发 SIGTERM：Windows 上仍走单进程信号（给目标自行收尾的机会），
     // 超时后的 SIGKILL 才升级为整树（孤儿才是真问题，见上方 _killTree 说明）。
-    this._signalChild(child, 'SIGTERM');
-    this._killTimer = setTimeout(() => {
-      this._killTimer = null;
+    d.signalChild(child, 'SIGTERM');
+    d.writeKillTimer(setTimeout(() => {
+      d.writeKillTimer(null);
       if (child.exitCode === null && child.signalCode === null) {
-        this._killTree(child, 'SIGKILL');
-        this.events.append('sigkill_sent', { pid: child.pid, tree: platform.PLATFORM === 'win32' });
+        d.killTree(child, 'SIGKILL');
+        d.events().append('sigkill_sent', { pid: child.pid, tree: platform.PLATFORM === 'win32' });
       }
-    }, this.config.stopGraceMs);
+    }, d.config().stopGraceMs));
   },
 
   /** 杀无句柄的接管实例（仅知 pid）。
@@ -73,13 +102,15 @@ module.exports = {
    *  注意代际只保护共享槽位：每个 timer 仍按自己的 pid 完成升级与复核，
    *  不因换代而跳过，否则前一个 pid 的 SIGKILL 升级会被吞掉。 */
   _killAdopted(pid) {
-    const gen = (this._adoptKillGen = (this._adoptKillGen || 0) + 1);
-    const releaseSlot = () => { if (gen === this._adoptKillGen) this._adoptKillTimer = null; };
-    this.events.append('sigterm_sent', { pid, adopted: true });
+    const d = depsOf(this);
+    const gen = (d.readAdoptKillGen() || 0) + 1;
+    d.writeAdoptKillGen(gen);
+    const releaseSlot = () => { if (gen === d.readAdoptKillGen()) d.writeAdoptKillTimer(null); };
+    d.events().append('sigterm_sent', { pid, adopted: true });
     try {
       process.kill(pid, 'SIGTERM');
     } catch {}
-    this._adoptKillTimer = setTimeout(() => {
+    d.writeAdoptKillTimer(setTimeout(() => {
       releaseSlot();
       if (pidlook.isAlive(pid)) {
         // 接管实例同样可能有子进程：Windows 上升级为整树（taskkill /T），
@@ -90,21 +121,21 @@ module.exports = {
         } else {
           try { process.kill(pid, 'SIGKILL'); } catch {}
         }
-        this.events.append('sigkill_sent', { pid, adopted: true, tree: platform.PLATFORM === 'win32' });
+        d.events().append('sigkill_sent', { pid, adopted: true, tree: platform.PLATFORM === 'win32' });
         // 复核：SIGKILL 生效是异步的，须另起一拍才能断言成败。
         const verify = setTimeout(() => {
           releaseSlot();
           if (!pidlook.isAlive(pid)) return;
-          this.events.append('stop_failed', { pid, adopted: true, reason: 'SIGKILL 后仍存活' });
-          if (this.logger && this.logger.warn) {
-            this.logger.warn('[main] 接管实例停止落空：pid ' + pid + ' 在 SIGKILL 后仍存活');
+          d.events().append('stop_failed', { pid, adopted: true, reason: 'SIGKILL 后仍存活' });
+          if (d.logger() && d.logger().warn) {
+            d.logger().warn('[main] 接管实例停止落空：pid ' + pid + ' 在 SIGKILL 后仍存活');
           }
         }, ADOPT_KILL_VERIFY_MS);
         // unref：复核窗口纯观测，不应拖住进程退出（shutdown 亦会清 _adoptKillTimer）。
         if (verify && typeof verify.unref === 'function') verify.unref();
-        this._adoptKillTimer = verify;
+        d.writeAdoptKillTimer(verify);
       }
-    }, this.config.stopGraceMs);
+    }, d.config().stopGraceMs));
   }
   },
 };

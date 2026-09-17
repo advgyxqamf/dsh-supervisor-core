@@ -61,7 +61,7 @@ check('G-b main-process 定义 _killTree 并调用 platform killTree',
   /_killTree\(child/.test(mainProc) && /pc\.killTree\(/.test(mainProc),
   '已接入');
 check('G-b SIGKILL 升级路径改用 _killTree（不再是 signalProcess）',
-  /this\._killTree\(child, 'SIGKILL'\)/.test(mainProc), '已改');
+  /killTree\(child, 'SIGKILL'\)/.test(mainProc), '已改');
 
 // ── G-c：接管实例（无 child 句柄）──
 //   ⚠ 不能用 indexOf('_killAdopted') 切片：'stopProcess' 里**先**出现调用/提及，
@@ -84,15 +84,15 @@ check('G-d processTreeKill 的注释指向实现（防再次「声明无产物�
   const m = mainProc.match(/\n  _killSequence\(child\) \{[\s\S]*?\n  \}/);
   check('G-e 定位到 _killSequence 函数体', !!m, m ? m[0].length + ' 字符' : '（未找到）');
   const seq = m ? m[0] : '';
-  const iTerm = seq.indexOf("_signalChild(child, 'SIGTERM')");
-  const iTree = seq.indexOf('_killTree(child');
+  const iTerm = seq.indexOf("signalChild(child, 'SIGTERM')");
+  const iTree = seq.indexOf('killTree(child');
   check('G-e 先 SIGTERM 再（超时后）_killTree',
     iTerm >= 0 && iTree >= 0 && iTerm < iTree, 'term@' + iTerm + ' tree@' + iTree);
 }
 
 // ── 反向：不得把所有停止都改成整树（那会丢掉优雅期语义）──
 check('反向：优雅期仍用 signalProcess（非整树）',
-  /this\._signalChild\(child, 'SIGTERM'\)/.test(mainProc), '保留');
+  /signalChild\(child, 'SIGTERM'\)/.test(mainProc), '保留');
 
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');
