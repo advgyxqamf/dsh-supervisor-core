@@ -31,7 +31,7 @@
 2. **不碰** `/tmp/dsh-*`、`~/.local/state/dsh-supervisor/`、`~/.dsh`、已安装包；
 3. **不 git commit/push**；
 4. **只改你负责的文件**（见派工单）；越界即返工；
-5. **每个改动文件**：`node --check` + `require` 加载 + **实跑相关测试**；
+5. **每个改动文件**：`node --check` + `require` 加载；**测试一律由 CI 裁决，本机不得跑测试**（见 `ACCEPTANCE-STANDARD.md` §0）；
 6. **公共导出面（对外契约）不得变**：
    - router → `RouterService`（含 static `presets`、`.providers` getter、`switcher`）
    - relay → `LanManager`；instance → `InstanceManager`；plugin → `PluginManager`；
@@ -100,7 +100,7 @@ instances.effectiveCommand(inst)
 4. **行为变更步单独提交**（如 router 的 `inflight.end()` 统一）；
 5. **同步改测试**：本仓有 **10+ 处**「把断言钉在源码内容上」的门禁，
    方法一搬家园禁会**静默失效**（清单见 SSOT §8）→ **必须同步改指向**；
-6. **实跑**：改完必须跑该域全部相关测试 + `directory-structure-gate` + `layering-and-dependency-gate`。
+6. **测试裁决**：改完推送后，该域全部相关测试 + `directory-structure-gate` + `layering-and-dependency-gate` 一律由 CI 裁决（本机不得跑测试）。
 
 ## §5 子代理派生授权
 

@@ -104,8 +104,8 @@ src/
 │   └── security/     ← api/identity.js 的 HTTP 身份部分
 │
 ├── domains/                    【L1 业务域】
-│   ├── router/                 providers/ + instances/ + index/ops/forward/switch/store/daemon/proxy-apps
-│   ├── relay/                  index/gate/ops/frpmgr/daemon
+│   ├── router/                 providers/ + instances/ + index/ops/forward-core/switch/store/daemon/proxy-apps
+│   ├── relay/                  index/gate/ops/frp/daemon
 │   ├── instance/               index/core/ops
 │   ├── plugin/                 index/ops/store/market
 │   └── shell/                  index/journal/restart/watchdog

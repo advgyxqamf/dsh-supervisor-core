@@ -92,7 +92,7 @@ macOS 的**壳自启 / 壳自愈从项目奠基提交（`8867942`, 2026-09-01）
 | F3 | Windows watchdog 的**壳检查嵌套在 `if (-not $up)` 内** | 移出守卫块 —— 使「壳崩、守卫活」时可自愈 | A5 |
 | F4 | Linux `.desktop` 的 `Exec` **硬编码 `~/.local/bin`** | 按实际安装解析（deb/rpm 实为 `/usr/bin`）| A6 |
 | F5 | 能力字段**缺失**（无 `shellAutostart`/`shellSelfHeal`）| `capabilityProfile()` 补 4 个字段 | A1 |
-| F6 | 假声明注释 / 悬空路径（`src/infra/platform/…`）| 更正注释，标注真实能力来源 | A6 |
+| F6 | 假声明注释 / 悬空路径（如已被重构掉的 `infra/platform/…` 引用）| 更正注释，标注真实能力来源 | A6 |
 | F7 | `guard-update-test.js` S8 **依赖开发者 `$HOME`**（该测试文件已于 2026-09-15 `83228d1` 随内核更新单写入者改造删除）| 隔离 HOME（跑过真实壳后不再误报）| 该套测试 |
 
 ### F3 详解（用户直接指出的缺陷）

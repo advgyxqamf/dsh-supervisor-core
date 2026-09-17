@@ -314,7 +314,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
   启动门 2（`core_apply`）与面板请求（壳 `kernel_update_apply`，经面板→壳 postMessage 桥）**共用同一实现**。
 - 守卫只提供**只读**状态：`GET /self-update/status`；写端点 `POST /self-update/apply`、`POST /self-update/restart-guard`
   已下架（`410 KERNEL_UPDATE_SINGLE_WRITER`）。守卫重启（应用新内核）由壳经服务管理器完成（守卫从不重启自己）。
-- 旧 manifest 通道（`selfUpdateManifestUrl`/`selfUpdateDir` + `src/domains/dist/self-update.js`）**已删除**。
+- 旧 manifest 通道（`selfUpdateManifestUrl`/`selfUpdateDir` 与实现它的自更新模块）**已删除**。
 - 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）。发布由 tag 触发 CI：`build` 矩阵四平台各自执行 `ci-core.sh --publish`。
 - 环境状态：`GET /env/status`（node/npm/git 探针 + 壳写入的 runtime.json）、`GET /env/dsh`（DSH 本体安装/纳管判定）。
 

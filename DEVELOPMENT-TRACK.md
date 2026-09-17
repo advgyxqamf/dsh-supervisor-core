@@ -372,7 +372,7 @@ required 只设 `precheck` 与 `test` 两个**无条件** job；`build` 不设�
 | `DIRECTORY-STRUCTURE-DESIGN.md` DS-9 | 已取严为 **门面 ≤150 / 单文件 ≤300**（R3/R11），与 DF-1/DF-2 逐字一致 |
 | `DIRECTORY-STRUCTURE-DESIGN.md` DS-G3 | 除 `Object.defineProperties` 外，**同时禁 `Object.assign(X.prototype, ...)`**（R6；右值不限、须先剥注释） |
 | README 文档索引 | 根级 md **全部登记**（`standards-uniqueness-test` U-4）；`EXECUTION-CONTRACT.md` 已登记 |
-| `CROSS_LAYER`（`layering-and-dependency-gate-test.js`）| 域改造**只在同层内搬文件**，理论不新增跨层边；确因新边（如 `app/domain-actions/*` → 域）报 L-2 失败时**按实跑报错补登记**，**不得放宽判据**、不得凭猜测预登记 |
+| `CROSS_LAYER`（`layering-and-dependency-gate-test.js`）| 域改造**只在同层内搬文件**，理论不新增跨层边；确因新边（如 `app/domain-actions/*` → 域）报 L-2 失败时**按 CI 实跑报错补登记**（本机不得跑门禁，见 ACCEPTANCE-STANDARD），**不得放宽判据**、不得凭猜测预登记 |
 | 源内容钉死的门禁 | SSOT §8 列出的 10 处随方法与家园同步改指向（否则静默失效） |
 
 ### 8.5 本轮验证门禁
