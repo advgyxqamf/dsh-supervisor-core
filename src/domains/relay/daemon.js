@@ -70,6 +70,9 @@ function main() {
   const lanSource = {
     instances: [],
     save() { /* binding 只活在注册表，不回写守卫的 instances.json */ },
+    // 与 instance 域契约同形的查询接口：relay/managed.js 只经 all() 取受管清单（DG-11），
+    //   不直读内部数组。all() 返回的就是下面这个活数组，reload 的就地替换语义不变。
+    all() { return this.instances; },
   };
 
   const lan = new LanManager({
