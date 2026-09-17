@@ -40,7 +40,8 @@ module.exports = {
         // 开 LAN 必须已配置出回环访问密钥（apiAccessKey）：访问密钥层只对「已配置 key」的
         // 非回环请求生效，未配置时局域网内任意设备可零认证驱动写 API。故显式要求先设 key。
         if (on && !(this.config && this.config.apiAccessKey)) {
-          return { ok: false, error: '开启局域网访问前请先设置访问密钥（apiAccessKey），否则局域网内任意设备可无认证访问' };
+          // code 供 API 层区分「客户端可修正的前置条件失败」（400）与「持久化异常」（500）。
+          return { ok: false, code: 'ACCESS_KEY_REQUIRED', error: '开启局域网访问前请先设置访问密钥（apiAccessKey），否则局域网内任意设备可无认证访问' };
         }
         const host = on ? '0.0.0.0' : '127.0.0.1';
         const changed = this.config.apiHost !== host;

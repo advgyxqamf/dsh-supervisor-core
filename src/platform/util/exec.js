@@ -19,7 +19,9 @@ const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
 function options(opts) {
   const o = opts || {};
   return {
-    timeout: o.timeoutMs || DEFAULT_TIMEOUT_MS,
+    // timeout 是历史别名：service.js 曾传 { timeout } 而被静默忽略，所有超时回落默认值（N1）。
+    // 两种拼写都收，timeoutMs 优先；新调用一律用 timeoutMs。
+    timeout: o.timeoutMs || o.timeout || DEFAULT_TIMEOUT_MS,
     // 必须 SIGKILL：SIGTERM 对挂起或被停住的进程可能无效，否则有超时等于没超时。
     killSignal: o.killSignal || 'SIGKILL',
     maxBuffer: o.maxBuffer || DEFAULT_MAX_BUFFER,

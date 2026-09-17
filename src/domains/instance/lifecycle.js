@@ -38,8 +38,14 @@ function createLifecycle(deps) {
   }
   /** 清理残留同名 transient 单元（文件残留会让 systemd-run 报 already loaded）。 */
   function _cleanStaleUnit(unit) {
-    service.cleanTransient(unit);
-    logger.info && logger.info('cleaned stale transient unit: ' + unit);
+    const r = service.cleanTransient(unit);
+    // 清理失败不再无条件记「cleaned」：原实现四步静默，日志对失败撒谎（N5）。
+    if (r && r.ok === false) {
+      logger.warn && logger.warn('clean stale transient unit 未完全生效: ' + unit +
+        (r.errors && r.errors.length ? ' errors=' + r.errors.join(';') : ''));
+    } else {
+      logger.info && logger.info('cleaned stale transient unit: ' + unit);
+    }
   }
   /** 用 systemd 启动实例。**绝不抛**（否则打挂 tick 循环）；失败返回 {ok,error} 交调用方退避。 */
   function _systemdStart(inst) {

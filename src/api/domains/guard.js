@@ -90,7 +90,8 @@ function handle(ctx) {
         try { const j = body ? JSON.parse(body) : {}; if (typeof j.enabled === 'boolean') enabled = j.enabled; } catch {}
         if (enabled === null) return send(400, { ok: false, error: '需要 {"enabled":true|false}' });
         const r = sup.setLanPanel(enabled);
-        return send(r.ok ? 200 : 500, r);
+        // 未设访问密钥属客户端可修正的前置条件失败 → 400（原为 500，与 FIX-1 的暴露闸语义矛盾）；内部异常仍 500。
+        return send(r.ok === false ? (r.code === 'ACCESS_KEY_REQUIRED' ? 400 : 500) : 200, r);
       });
       return;
     }

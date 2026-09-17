@@ -28,13 +28,14 @@ const systemd = {
   kind: 'systemd',
   supportsUnits: true,
   supportsTransient: true,
-  daemonReload() { try { return run('systemctl', ['--user', 'daemon-reload'], { timeout: 15000 }) !== null; } catch { return false; } },
+  daemonReload() { try { return run('systemctl', ['--user', 'daemon-reload'], { timeoutMs: 15000 }) !== null; } catch { return false; } },
   stopUnit(unit, opts) {
     const o = opts || {};
-    try { return run('systemctl', ['--user', 'stop', unit], { timeout: o.timeoutMs || 15000 }) !== null; }
+    try { return run('systemctl', ['--user', 'stop', unit], { timeoutMs: o.timeoutMs || 15000 }) !== null; }
     catch { return false; } // 停止失败不抛（调用方多为 best-effort 清理）；可经 isUnitActive 复核
   },
-  resetFailed(unit) { try { run('systemctl', ['--user', 'reset-failed', unit], { timeout: 10000 }); return true; } catch { return false; } },
+  // run() 失败返回 null 而不抛，故原 try/catch 是死代码、恒返回 true（N5）。如实回传成败。
+  resetFailed(unit) { return run('systemctl', ['--user', 'reset-failed', unit], { timeoutMs: 10000 }) !== null; },
   isUnitActive(unit) {
     if (!unit) return true; // 无单元约束 -> 视为通过（调用方语义）
     try { return (run('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8', timeoutMs: 8000 }) || '').toString().trim() === 'active'; }
@@ -48,12 +49,18 @@ const systemd = {
     return path.join(rt, 'systemd', 'transient', unit + '.service');
   },
   /** 清理 stale transient 单元：stop/reset-failed/删单元文件/daemon-reload。
-   *  必须 reload：删除文件后 systemd 仍缓存该单元为 loaded，否则 systemd-run 拒绝重建同名单元。 */
+   *  必须 reload：删除文件后 systemd 仍缓存该单元为 loaded，否则 systemd-run 拒绝重建同名单元。
+   *  返回 {ok, errors}：原实现四步全由 try/catch 包裹，而 run() 失败只返回 null 不抛 —— 四步
+   *  全部静默，调用方无条件记「cleaned」日志（N5）。stop/reset-failed 对「从未加载的单元」非零
+   *  退出属正常，不计入 ok；真正的硬失败只有删单元文件与 daemon-reload。 */
   cleanTransient(unit) {
-    try { run('systemctl', ['--user', 'stop', unit + '.service'], { timeout: 10000 }); } catch {}
-    try { run('systemctl', ['--user', 'reset-failed', unit + '.service'], { timeout: 10000 }); } catch {}
-    try { const f = this.transientUnitFile(unit); if (f) fs.unlinkSync(f); } catch {}
-    try { run('systemctl', ['--user', 'daemon-reload'], { timeout: 15000 }); } catch {}
+    const errors = [];
+    exec.runDetail('systemctl', ['--user', 'stop', unit + '.service'], { timeoutMs: 10000 });
+    exec.runDetail('systemctl', ['--user', 'reset-failed', unit + '.service'], { timeoutMs: 10000 });
+    let unlinkOk = true;
+    try { const f = this.transientUnitFile(unit); if (f) fs.unlinkSync(f); } catch { unlinkOk = false; errors.push('unlink ' + unit + '.service'); }
+    if (!exec.runDetail('systemctl', ['--user', 'daemon-reload'], { timeoutMs: 15000 }).ok) errors.push('daemon-reload');
+    return { ok: unlinkOk && errors.length === 0, errors };
   },
   /** 以 transient 单元启动（独立 cgroup；每实例隔离）。
    *  @param {{unit:string, cmd:string[], env?:object, props?:string[], workingDir?:string, description?:string, timeoutMs?:number}} o
@@ -85,7 +92,8 @@ function makeUnsupported(kind, label) {
     resetFailed() { return false; },
     isUnitActive(unit) { return unit ? false : true; },
     transientUnitFile() { return null; },
-    cleanTransient() {},
+    // 无 transient 单元可清 = 成功；返回形态与 systemd 一致，调用方无需分支（N5）。
+    cleanTransient() { return { ok: true, errors: [] }; },
     startTransient() { throw new CapabilityError(label + '：不支持 transient 实例（沙箱需 Linux + systemd-run）'); },
   };
 }
