@@ -90,6 +90,62 @@ domains/<domain>/
 
 ## §5 各域目标结构（定版）
 
+### §5.0 目标 vs 实测（对照表；**目标是内部设计值，不是门禁**）
+
+> 口径（重要，防「为消红而放宽」的变体）：
+> - **目标列**取自下方 §5.1–§5.6 的定版目标（`≤N` 为硬设计目标，`~N` 为近似目标），**不得为了让表变绿而静默抬高**；
+> - **实测列**为写入时对当前树 `wc -l` 的实测值；判据是**行数**，硬门禁只 `≤300`（DG-2: `>300` 才红）——
+>   故下表**全部满足硬门禁**，超目标项只是**未达设计目标 = 已登记债务**；
+> - 标 **超目标** 的条目：**后续任何新增行都会继续加深该债**；标 **贴线** 的条目：再加 1 行即越界。
+> - 全表实测于本轮（P4-D），若树继续变动请以重新实测为准。
+
+| 文件 | 目标 | 实测 | 状态 |
+|---|---|---|---|
+| `router/index.js` | ≤150 | 150 | **贴线**（=150） |
+| `router/model.js` | ≤180 | 94 | 达 |
+| `router/store.js` | ≤170 | 160 | 达 |
+| `router/ops.js` | ≤260 | 162 | 达 |
+| `router/endpoint.js` | ≤140 | 143 | **超目标 +3** |
+| `router/views.js` | ≤200 | 146 | 达 |
+| `router/scheduler.js` | ≤290 | 216 | 达 |
+| `router/forward-core.js` | ≤120 | 34 | 达 |
+| `router/handlers/parse.js` | ≤140 | 108 | 达 |
+| `router/handlers/forward.js` | ≤330 | 300 | 达（**距 DG-2 硬线 300 为 0**，贴硬门禁） |
+| `router/store/usage.js` | ≤160 | 101 | 达 |
+| `router/model/inflight.js` | ≤90 | 52 | 达 |
+| `router/router-ops.js` | ≤100 | 34 | 达 |
+| `router/ops/browser.js` | ≤140 | 83 | 达 |
+| `router/ops/oauth.js` | ≤190 | 140 | 达 |
+| `router/ops/apps-registry.js` | ≤230 | 159 | 达 |
+| `router/ops/quotasync.js` | ≤140 | 89 | 达 |
+| `router/ops/admin.js` | ≤200 | 130 | 达 |
+| `router/policies/switch.js` | ≤90 | 50 | 达 |
+| `router/providers/policies/freeze.js` | ≤200 | 254 | **超目标 +54** |
+| `relay/index.js` | ≤60 | 12 | 达 |
+| `relay/daemon.js` | （不变）214 | 194 | 达（优于原值） |
+| `relay/port-segments.js` | （不变）22 | 18 | 达 |
+| `instance/index.js` | ≤95 | 95 | **贴线**（=95） |
+| `instance/model.js` | ≤140 | 99 | 达 |
+| `instance/sandbox.js` | ≤85 | 79 | 达 |
+| `instance/state-machine.js` | ≤85 | 74 | 达 |
+| `instance/store.js` | ≤100 | 119 | **超目标 +19** |
+| `instance/lifecycle.js` | ≤185 | 212 | **超目标 +27** |
+| `instance/ops.js` | ≤180 | 139 | 达 |
+| `instance/upgrade.js` | ≤330 | 231 | 达 |
+| `plugin/index.js` | ≤70 | 80 | **超目标 +10** |
+| `plugin/store.js` | ~180 | 193 | **超目标 +13** |
+| `plugin/layers.js` | ~170 | 223 | **超目标 +53** |
+| `plugin/market.js` | ~260 | 270 | **超目标 +10**（原报仅 +1，实测 +10；后续新增必再加深） |
+| `shell/index.js` | 35 | 24 | 达（优于原值） |
+| `shell/journal.js` | ~110 | 109 | 达 |
+| `shell/restart.js` | ~157 | 121 | 达 |
+| `shell/watchdog.js` | ~185 | 198 | **超目标 +13** |
+| `shell/core.js` | ~95 | 106 | **超目标 +11** |
+
+**汇总**：超目标 **10** 项（router 2 / instance 2 / plugin 4 / shell 2）、贴线 **3** 项
+（`router/index.js` 150、`instance/index.js` 95、`router/handlers/forward.js` 硬线 300）；
+其余全部达。**全部满足 `≤300` 硬门禁**。上述 10 项即设计目标债务，**未抬高任何目标值**。
+
 ### §5.1 router（13 文件 → 22 文件，最大 330 行）
 
 ```

@@ -35,9 +35,8 @@ git push origin HEAD --tags   # 触发 CI 四平台构建+发布
 bash release/scripts/bump.sh --core 0.1.5-BETA.1
 #    然后整理 CHANGELOG.md：[未发布] → [0.1.5-BETA.1]
 
-# 2) 本地：门禁 + dry-run（不产生发布产物）
-npm test
-bash release/scripts/ci-core.sh          # verify → 前端 verify → npm test → build:launcher → 子包 dry-run
+# 2) 本机不得执行 npm test；全量回归由 CI 的 test job 经 xvfb-run -a npm test 执行
+#    （ci-core.sh 内含 npm test 与构建，同样只在 CI 内运行）
 
 # 3) 推 tag：此后构建与发布全部在 CI 内
 git push origin HEAD --tags
@@ -95,7 +94,7 @@ dsh-supervisor-gui --service-plan --service-apply # 实际建立服务定义
 | 壳 | 四平台可构建；无 Node 环境引导闭环；服务定义能建立（P0） |
 | Node | 多镜像并行测速选最快，SHA256 校验，最低门槛 v22.12 生效 |
 | 自更新 | 壳自更新：检测 → 下载 → minisign 验签 → 安装 → 重启 |
-| 稳定性 | `npm test` 全绿；零端口泄漏；测试端口不落在 OS 动态范围 |
+| 稳定性 | CI 的 `npm test`（`test` job 经 `xvfb-run -a npm test`）全绿；零端口泄漏；测试端口不落在 OS 动态范围 |
 
 ## 状态追踪（2026-09-11）
 

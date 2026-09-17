@@ -16,11 +16,11 @@
 //   domains/   ← 业务域（router/relay/instance/plugin/shell）
 //   app/       ← 编排层（组装根与业务主体；原 guard/ 并入）
 //   api/       ← HTTP/WS 契约面
-//   root       ← src/supervisor.js 进程入口薄壳、src/core.cjs 打包入口
+//   root       ← src/supervisor.js 进程入口薄壳（发布构建产物 core.cjs 不在 src/ 下）
 //
 // ## 两条规则
 //
-//   L-1  `platform/` **不得依赖** domains / guard / api（它是所有人的地基）
+//   L-1  `platform/` **不得依赖** domains / app / api（它是所有人的地基）
 //   L-2  所有**跨层** import 必须在 `CROSS_LAYER` 清单中**显式登记**；
 //        未登记的新跨层依赖 → 失败（要求开发者显式声明意图）
 //
@@ -36,8 +36,11 @@
 //     把这些写成"禁止"，门禁会在第一次运行就红，然后被人加白名单绕过 —— 那就成了摆设。
 //     **登记 + 理由 + 变更可见**才是能长期活下去的形态。
 //
-//   L-3  `src/platform/contract/deploy.js` 对 `../core.cjs` 的引用是**有意的 best-effort**
-//        （打包产物存在时才启用，见该文件注释），单列白名单并注明。
+//   L-3  `src/platform/contract/deploy.js` 对 core.cjs 的判定是**结构探测**（existsSync），
+//        不是 require；原头注称其为「有意的 best-effort 打包引用」与现状不符。
+//        故当前 platform -> root 的**真实 import 边 = 0**；白名单条目保留为**前瞻守卫**：
+//        一旦有人在此加 `require('../core.cjs')`，L-3 会要求它显式登记。
+//        （core.cjs 是发布构建产物，不在 src/ 下。）
 //
 // ## 怎么加新的跨层依赖（**开发轨道**）
 //   1. 先问：能否经 `platform/` 或已登记的共享单元？
@@ -48,7 +51,7 @@
 //   L-1  platform 不依赖上层
 //   L-2  跨层 import 全部已登记（新增未登记 → 失败）
 //   L-2b 登记表无死条目（登记的单元确实还被引用）
-//   L-3  core.cjs 白名单（有意的 best-effort）
+//   L-3  core.cjs 白名单为**前瞻守卫**（当前 platform -> root 真实 import 边 = 0）
 //   L-4  反向：判据能识别未登记跨层 / 能识别 platform 越界（门禁非空转）
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -148,7 +151,7 @@ function layerOf(rel) {
   return null;
 }
 
-/** 跨层依赖的"单元"（platform/domains/guard/api 取前两段；root 取文件本身）。 */
+/** 跨层依赖的"单元"（platform/domains/app/api 取前两段；root 取文件本身）。 */
 function unitOf(abs, toLayer) {
   if (toLayer === 'root') return abs;
   return abs.split('/').slice(0, 3).join('/');
@@ -192,22 +195,38 @@ const edges = collect();
 
 // ── L-1：platform 不得依赖上层 ──
 {
-  // platform -> root 只在有登记时允许（core.cjs 的有意 best-effort）
+  // platform -> root 的 core.cjs 白名单只在有登记时允许（当前真实边 = 0，见头注 L-3）
   // ⚠ 2026-09-16 步骤 2：L-1 原文写于 shared/ 层出现之前，判据 `to !== 'root'` 把
   //   **platform -> shared** 也误判为越界。而 §2.2 依赖矩阵明示 platform→shared = ✓
   //   （shared 是与 platform 并列的 L0 纯函数层，出度恒 0，不构成"依赖上层"）。
-  //   故此处只禁止**向上**依赖 domains/guard/api；platform→shared 由 L-2 登记约束。
+  //   故此处只禁止**向上**依赖 domains/app/api；platform→shared 由 L-2 登记约束。
   const bad = edges.filter((e) => e.from === 'platform' && e.to !== 'root' && e.to !== 'shared');
-  check('L-1 platform/ 不依赖 domains/guard/api（它是地基；platform->shared 为合法 L0 依赖）',
+  check('L-1 platform/ 不依赖 domains/app/api（它是地基；platform->shared 为合法 L0 依赖）',
     bad.length === 0,
     bad.length ? bad.map((e) => e.file + ':' + e.line + ' -> ' + e.to).join(', ') : '未发现');
   const platRoot = edges.filter((e) => e.from === 'platform' && e.to === 'root');
   const allowedRoot = CROSS_LAYER['platform -> root'] || {};
   const undeclared = platRoot.filter((e) => !allowedRoot[e.unit]);
-  check('L-3 platform -> root 仅限已登记的白名单（core.cjs 有意 best-effort）',
+  // ⚠ 诚实计数：platRoot **当前恒为空**（真实 platform->root import 边 = 0）——deploy.js 的
+  //   core.cjs 只是 existsSync 结构探测，不是 require。故本判据对当前树**不证明任何事**，
+  //   真正的分辨力在下方合成自检（证明一旦出现未登记边就会命中）。
+  check('L-3 platform -> root 仅限已登记的白名单（前瞻守卫；当前真实边 = 0）',
     undeclared.length === 0,
     undeclared.length ? undeclared.map((e) => e.file + ':' + e.line).join(', ')
-      : (platRoot.length + ' 处，全部为 ' + Object.keys(allowedRoot).join(',')));
+      : ('当前真实 platform->root 边 = ' + platRoot.length + '（恒空即无待证；白名单 ' +
+        (Object.keys(allowedRoot).join(',') || '空') + ' 为前瞻守卫）'));
+  // 反向自检（合成样本，不依赖真实数据）：用**同一过滤判据**验证未登记边被检出、
+  //   已登记边被放行。白名单用合成表，避免因当前真实白名单为空而自锁。
+  {
+    const synthAllowed = { 'src/platform/contract/synth.js': '合成白名单' };
+    const synthEdges = [
+      { from: 'platform', to: 'root', unit: 'src/platform/contract/synth.js', file: 'src/platform/contract/synth.js', line: 1 },
+      { from: 'platform', to: 'root', unit: 'src/platform/other.js', file: 'src/platform/other.js', line: 2 },
+    ];
+    const synthUndeclared = synthEdges.filter((e) => !synthAllowed[e.unit]);
+    check('L-3 反向：合成样本中未登记的 platform->root 边被检出、已登记的放行',
+      synthUndeclared.length === 1 && synthUndeclared[0].unit === 'src/platform/other.js', 'hit');
+  }
 }
 
 // ── L-2：跨层依赖全部已登记 ──
@@ -268,9 +287,34 @@ const edges = collect();
     //   本用例验证"跨层依赖登记到**单元**粒度，而非逐文件"。
     unitOf('src/platform/service/ports/index.js', 'platform') === 'src/platform/service'
     && unitOf('src/domains/router/index.js', 'domains') === 'src/domains/router'
-    && unitOf('src/core.cjs', 'root') === 'src/core.cjs', 'ok');
+    && unitOf('src/supervisor.js', 'root') === 'src/supervisor.js', 'ok');
   check('L-4 反向：扫描确实发现了跨层边（非空集，否则门禁空转）',
     edges.length >= 30, edges.length + ' 条跨层边');
+}
+
+// ── L-5：规范↔实现一致（真读 DEVELOPMENT-TRACK.md §1）──
+// 本门禁被 standards-uniqueness 的 STANDARDS 登记为「改代码规则」（DEVELOPMENT-TRACK.md）
+// 的机器校验门禁。为使该登记**名副其实**（U-1b 要求 reads:true 的门禁真读规范），此处
+// 真读规范正文并断言其 §1 记载的分层名与门禁 layerOf() 的取值域一致 —— 不是只引用文件名。
+{
+  const devTrackPath = path.join(ROOT, 'DEVELOPMENT-TRACK.md');
+  const devTrackText = fs.readFileSync(devTrackPath, 'utf8');
+  const LAYERS = ['root', 'api', 'app', 'domains', 'platform', 'shared'];
+  // 规范 §1 的 fenced 代码块内，每行首个 token 即层名（root/api/app/domains/platform/shared）。
+  const sec1 = (/##\s*1\.\s*分层[\s\S]*?```([\s\S]*?)```/.exec(devTrackText) || [])[1] || '';
+  const layerNamesIn = (block) => new Set(block.split(String.fromCharCode(10))
+    .map((l) => (/^\s*([a-z][a-z0-9_-]*)\b/.exec(l) || [])[1])
+    .filter((x) => x && LAYERS.includes(x)));
+  const specLayers = layerNamesIn(sec1);
+  const missingInSpec = LAYERS.filter((l) => !specLayers.has(l));
+  check('L-5 规范 DEVELOPMENT-TRACK §1 的分层名与门禁 layerOf 归类一致（真读规范正文）',
+    specLayers.size >= 5 && missingInSpec.length === 0,
+    missingInSpec.length ? ('规范 §1 缺层: ' + missingInSpec.join(','))
+      : ('规范 §1 层: ' + LAYERS.filter((l) => specLayers.has(l)).join(',')));
+  // 反向自检（合成样本，不依赖真实数据）：缺一层的 §1 必须被同一抽取判据检出。
+  const synthSec1 = ['root', 'api', 'app', 'domains', 'platform'].join(String.fromCharCode(10));
+  check('L-5 反向：合成 §1（缺 shared）被检出（判据非空转）',
+    LAYERS.filter((l) => !layerNamesIn(synthSec1).has(l)).length === 1, 'hit');
 }
 
 const failed = results.filter((r) => !r);

@@ -50,7 +50,10 @@
 - facade methods：`listLan/frpStatus/dshMainView/exposurePeers/listPorts/routerDaemonActive/routerStatusView/routerProviders/routerStatus/routerDomainSummary/routerApi/statusSummary` —— 均被 `src/api/*`、`app/assembly/collaborators.js`（THIN_SPEC）、`ctl/facades`、`daemons/*` 或 test 引用。
 - domain-actions methods：`setLanFrp/lanFrpc/syncFrpc/patchDshMain/setRouterRunning` —— 均被 `src/api/domains/*`、`control/adapters.js` 或 test 引用。
 - main methods：`_dshConverge/_mainStateSnapshot/_decideMainAction/_decideCrashRestart/_bumpCrashWindow/_applyHealthCheck/_findManagedDshPort/_applyMainPort/spawnCommand/_startProcess/_enterRunning/_adoptObserved/_adopt/_beginRestart/stopProcess/_actNote/_mainActualAction/_shadowExcluded/_shadowTickNote/_shadowHeartbeatBeat/_isManagedProcess/_signalChild/_killTree/_killSequence/_killAdopted` —— 全部由 `app/assembly/facets.js` 装配，且至少被本文件内部 `this.X()` 或 `collaborators.js` THIN_SPEC 引用。
-- state 导出：`createStateStore/createMainRecord/createMainStore/createFields/createStore/createDesired/createUpgradeHold/IntentLedger/INTENTS/legacyToEntryPhase/entryToLegacyPhase/ENTRY_FIELDS/PROC_FIELDS` —— 均被 `state/collaborator.js`、`assembly/collaborators.js`、`assembly/compose/core.js` 引用。
+- state 导出：`createStateStore/createMainRecord/createMainStore/createFields/createStore/createDesired/createUpgradeHold/IntentLedger/legacyToEntryPhase/entryToLegacyPhase/ENTRY_FIELDS/PROC_FIELDS` —— 均被 `state/collaborator.js`、`assembly/collaborators.js`、`assembly/compose/core.js` 引用。
+   **订正（P4-C 复核）**：本行原把 `INTENTS` 也列入「均被引用」，**实测不成立** —— `INTENTS` 全仓**零外部消费者**
+  （只在 `intents.js` 内部被 register 校验用）；被 `compose/core.js:18/73` 消费的是 `IntentLedger`。
+  该导出按「意图词表唯一出口（register 对未知 intent 抛错）」保留，但它**不是**上述三处的引用对象。
 
 未删的误判项（保留并说明）：
 - `spawnCommand`：全仓唯一文件 main/process.js，但文件内 `this.spawnCommand()` 有 3 处调用（方法内部使用），不属未用导出。

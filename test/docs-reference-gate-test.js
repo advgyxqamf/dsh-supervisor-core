@@ -13,6 +13,8 @@
 //        允许省略 .js 后缀，允许带 :行号）。故意举例"不存在路径"的写法必须先改述，
 //        不得把悬空路径留在正文里。
 //   DR-2 反向：判据能识别不存在的路径，且不误报存在的文件/目录/带行号形态/glob 形态。
+//   DR-3 （report-only）src/ 目录树的「裸名」（无 src/ 前缀）在 src/ 下必须可寻；只报告、
+//        不致命 —— 裸名上下文相对，基准目录不可静态确定（见 DR-3 块的诚实边界）。
 //
 // 范围与排除：只扫根级 *.md（design-notes/ 是过程记录，不是 SSOT，不扫）。
 //   下列文档记录的是当时（已废弃）的方案与目录，改写反而伪造历史，整份跳过；
@@ -107,6 +109,110 @@ function refsOf(text) {
     refsOf('见 ./src/platform/util/exec.js:22').every((r) => resolves(r)), 'hit');
   check('DR-2 反向：src/app/x.js 正常命中（与上一条成对，防我把 src 全滤掉）',
     refsOf('src/platform/util/exec.js').length === 1, 'hit');
+}
+
+// ── DR-3 地基：切代码块 / 取树 token / 裸名解析 ──
+const FENCE = String.fromCharCode(96).repeat(3);
+/** 切出 fenced 代码块（三反引号围栏）的逐行内容。 */
+function fencedBlocks(md) {
+  const out = [];
+  let cur = null;
+  for (const line of String(md).split(String.fromCharCode(10))) {
+    if (line.trim().startsWith(FENCE)) { if (cur === null) cur = []; else { out.push(cur); cur = null; } continue; }
+    if (cur !== null) cur.push(line);
+  }
+  return out;
+}
+/** 缩进代码块（>=4 空格）；跳过 fenced 区域以免重复计数。 */
+function indentedBlocks(md) {
+  const out = [];
+  let cur = null;
+  let inf = false;
+  for (const line of String(md).split(String.fromCharCode(10))) {
+    if (line.trim().startsWith(FENCE)) { if (cur) { out.push(cur); cur = null; } inf = !inf; continue; }
+    if (inf) continue;
+    if (/^\s{4,}\S/.test(line)) { if (cur === null) cur = []; cur.push(line); }
+    else if (cur) { out.push(cur); cur = null; }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+/** 只保留**具体 src 目录树**块：块内存在一行恰为 'src/'。 */
+function srcRootedBlocks(md) {
+  const all = fencedBlocks(md).concat(indentedBlocks(md));
+  return all.filter((b) => b.some((l) => l.trim() === 'src/'));
+}
+/** 从树块行取路径 token：连接符（├──/└──）后的首个名字，且须形如目录（/ 结尾）或带扩展名文件。 */
+function treeTokensOf(blockLines) {
+  const out = [];
+  for (const line of blockLines) {
+    const m = /^[\s│]*[├└]──\s+([A-Za-z0-9_.@-]+(?:\/[A-Za-z0-9_.@-]+)*\/?)/.exec(line);
+    if (!m) continue;
+    const t = m[1];
+    if (!/\/$/.test(t) && !/\.[A-Za-z0-9]+$/.test(t)) continue;
+    out.push(t);
+  }
+  return out;
+}
+/** src/ 下全部 basename（文件与目录），供裸名宽松检索。 */
+const SRC_BASENAMES = (() => {
+  const set = new Set();
+  (function walk(d) {
+    let ents;
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) { set.add(e.name); if (e.isDirectory()) walk(path.join(d, e.name)); }
+  })(path.join(ROOT, 'src'));
+  return set;
+})();
+/** 裸名/相对名是否在 src/ 下可寻（宽松，见 DR-3 头注）。 */
+function treeTokenResolves(token) {
+  let t = String(token);
+  if (t.startsWith('src/')) t = t.slice(4);
+  const isDir = t.endsWith('/');
+  if (isDir) t = t.slice(0, -1);
+  if (!t) return true;
+  if (t.includes('/')) {
+    const abs = path.join(ROOT, 'src', t);
+    return fs.existsSync(abs) || (!isDir && fs.existsSync(abs + '.js'));
+  }
+  return SRC_BASENAMES.has(t);
+}
+
+// ── DR-3（report-only）：src/ 目录树的「裸名」漂移 ──
+// §3 目录树用裸名（无 src/ 前缀），DR-1 的 src/... 字面量覆盖不到 → 已两轮人工漂移。
+// 口径：只扫描**含独立 src/ 根行**的代码块（即具体 src 目录树）；模板树（如 domains/<domain>/）
+//   与非 src 树（release 产物、API 端点列表）不参与，否则必然误报。连接符（├──/└──）后的首个
+//   路径 token：裸名按 basename 在 src/ 下检索（宽松，同名多目录不误报）；dir/name 要求该相对路径存在。
+// 诚实边界：裸名是**上下文相对**的（同名可能属于多个目录，基准目录不可静态确定，P3-B 已登记）。
+//   故本判据只报告、不计入退出码；转硬需先实测 0 误报（当前 tree 实测 0，但依托「只扫 src 根块」的收窄口径）。
+{
+  const docs = fs.readdirSync(ROOT).filter((f) => f.endsWith('.md') && !HISTORICAL.has(f));
+  const misses = [];
+  let blocks = 0;
+  let tokens = 0;
+  for (const d of docs) {
+    const rooted = srcRootedBlocks(fs.readFileSync(path.join(ROOT, d), 'utf8'));
+    blocks += rooted.length;
+    for (const b of rooted) for (const t of treeTokensOf(b)) {
+      tokens += 1;
+      if (!treeTokenResolves(t)) misses.push(d + ' -> ' + t);
+    }
+  }
+  // report-only：只打印，不改退出码（新增可见性，非放宽既有判据）。
+  console.log('DR-3（report-only）src/ 目录树裸名：扫描 ' + docs.length + ' 份 .md / ' +
+    blocks + ' 个 src 树块 / ' + tokens + ' 个 token，未命中 ' + misses.length + ' 个');
+  for (const m of misses.slice(0, 20)) console.log('  - ' + m);
+  // 反向自检（硬失败，合成样本，不依赖真实数据）
+  check('DR-3 反向：合成树块中的不存在裸名被检出（basename 层）',
+    treeTokensOf(['src/', '├── no-such-module.js', '└── no-such-dir/']).some((t) => !treeTokenResolves(t)), 'hit');
+  check('DR-3 反向：合成树块中存在的名不误报',
+    treeTokensOf(['src/', '├── supervisor.js', '└── platform/']).every((t) => treeTokenResolves(t)), 'miss');
+  check('DR-3 反向：非 src 根的树块（模板树）被排除，不参与判定',
+    srcRootedBlocks(['domains/<domain>/', '└── README.md']).length === 0, 'ok');
+  check('DR-3 反向：带父目录形态 dir/name 不存在时被检出',
+    !treeTokenResolves('no-such-dir/no-such-file.js'), 'hit');
+  check('DR-3 反向：带父目录形态 dir/name 存在时不误报',
+    treeTokenResolves('src/platform/contract/deploy.js'), 'miss');
 }
 
 const failed = results.filter((r) => !r);

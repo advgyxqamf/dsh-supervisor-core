@@ -98,29 +98,29 @@ src/
 │   │   ├── log/                ← log.js / events.js / logcore.js / loghub.js
 │   │   ├── ports/              ← platform/ports/index.js
 │   │   └── token/              ← platform/token/**
-│   ├── os/                     （12 文件不动）
+│   ├── os/                     （11 个 .js + autostart/ + pidlookup/）
 │   ├── ctl/          ← domains/router/ctl.js（通用 dispatcher，白名单按域注入）
 │   ├── distribution/ ← domains/dist/index.js（DistributionManager）
 │   └── security/     ← api/identity.js 的 HTTP 身份部分
 │
 ├── domains/                    【L1 业务域】
-│   ├── router/                 providers/ + instances/ + index/ops/forward-core/switch/store/daemon/proxy-apps
-│   ├── relay/                  index/gate/ops/frp/daemon
-│   ├── instance/               index/core/ops
+│   ├── router/                 providers/ handlers/ model/ ops/ store/ policies/ + index/daemon/endpoint/forward-core/switch/views/router-ops/scheduler/proxy-apps/port-segments/ports-bootstrap/config/contract
+│   ├── relay/                  ops/ + index/core/daemon/frp/frp-install/managed/ops/proxy/session/tunnel/ports/port-segments/contract
+│   ├── instance/               ops/ + index/lifecycle/ops/model/sandbox/state-machine/store/upgrade/contract
 │   ├── plugin/                 index/ops/store/market
 │   └── shell/                  index/journal/restart/watchdog
 │   （dist 域【解体】：semver→shared、DistributionManager→platform/distribution）
 │
 ├── app/                        【L2 编排层】原 guard/** 平移
-│   ├── assembly/     compose / bootstrap / fixed-ports / lifecycle-registration
+│   ├── assembly/     api-rebind / bootstrap / collaborators / compose / facets / log-sources
 │   ├── session/      machine / shutdown
-│   ├── state/        store / fields / main-store / desired / config-patch / upgrade-hold / migrate / intents
+│   ├── state/        store / fields / field-tables / main-store / main-record / desired / phase / upgrade-hold / intents / collaborator
 │   ├── self/         lifecycle / health / notify
 │   ├── control/      registry / entry / manager / adapters / scheduler / specs / instance-adapter / projection
 │   ├── main/         decide / process / signals / controller / health-gate / shadow
 │   ├── daemons/      process / supervise / runtime / identity / probe / scripts
 │   ├── ctl/          client / facades
-│   ├── native/       command / installer / binding
+│   ├── native/       command / installer / manifest / npm / ops / policies / probe / upgrade
 │   ├── settings/     env / node-lts / versions / autostart / access / lan-panel
 │   └── facade/       status / main / router / lan / ports
 │

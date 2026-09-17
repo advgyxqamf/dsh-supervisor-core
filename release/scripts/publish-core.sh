@@ -108,7 +108,7 @@ SRC_DIR="dist/launcher/dsh-supervisor-$VER-$PLAT-$ARCH"
 }
 [ -f "$SRC_DIR/bin/dsh-supervisor" ] || { echo "产物缺 bin/dsh-supervisor: $SRC_DIR"; exit 1; }
 [ -f "$SRC_DIR/core.cjs" ] || { echo "产物缺 core.cjs: $SRC_DIR"; exit 1; }
-BIN_NAME="dsh-supervisor"   # launcher 形态：node 启动脚本（win 亦无 .exe——由 npm bin shim 生成）
+# launcher 形态：node 启动脚本（win 亦无 .exe——由 npm bin shim 生成）
 
 # ---- 冒烟 + 版本核对（防产物错配） ----
 GV="$(node "$SRC_DIR/bin/dsh-supervisor" self-check | sed -n 's/^guardVersion=//p' | tr -d '\r')"

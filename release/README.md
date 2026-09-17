@@ -142,7 +142,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 ### 为什么这能「防止业务开发破坏跨平台构建」
 
 1. **知识单源** → 平台事实不存在「改一处忘了另一处」的漂移空间。
-2. **边界由门禁强制** → 业务域一旦越界，`npm test`（**在 Linux 上**）立刻失败，
+2. **边界由门禁强制** → 业务域一旦越界，CI 的 `npm test`（`test` job，ubuntu-latest）立刻失败，
    不必等到 mac/win runner 才发现。
 3. **新增测试自动有归属** → 不会出现「写了门禁但没接进 CI」。
 4. **新增平台是清单化流程** → 四步各有门禁，跳步即失败。
@@ -176,7 +176,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 - **发布**：tag `v*` + 有 `NPM_TOKEN` + `need_build=true` 时，各平台 runner 执行
   `ci-core.sh --publish`。`need_build`（`precheck` 探测「四平台是否已全部发布」）**只作用于发布**，
   用于防同版本重发（npm 409）；它**不再跳过构建**。
-- **本地**：只允许门禁（S0–S4）与 `--dry-run`；任何真发布都要求 `GITHUB_ACTIONS=true`（见「内核构建模式」）。
+- **本地**：只允许 S0–S3（凭据 / 版本 / 前端产物前置）与 `--dry-run`；**S4 全量回归起一律由 CI 执行**（本机不得执行 `npm test`）；任何真发布都要求 `GITHUB_ACTIONS=true`（见「内核构建模式」）。
 
 > 产线结论看 GitHub Actions 的 run 列表即可 —— 文档不再固化 run 号（必然漂移）。
 
@@ -212,7 +212,7 @@ release/
     │                             `--all-platforms` 仅 CI 内放行（本地 exit 2）
     ├── _platforms.sh          ← 平台矩阵**单一事实源**（读取 package.json#npmPublish.packages）
     ├── _npm-auth.sh           ← npm 认证解析共享库（**单源**；publish-core/configure-credentials 共用）
-    ├── ci-core.sh             ← 发布产线核心逻辑（**单源**：CI 的 test job 与四平台 build 矩阵都跑它）
+    ├── ci-core.sh             ← 发布产线核心逻辑（**单源**：四平台 build 矩阵调用；test job 自跑等价步骤）
     ├── publish-core.sh        ← 内核 npm 平台子包发布（本地 dry-run；`--publish` 仅 CI 内）
     ├── release.sh             ← 源码打包出口（tar.gz，非发布通道）
     ├── （release-core.sh 已于 2026-09-13 删除 —— 硬标准：构建/发布均经 GitHub CI）
@@ -248,7 +248,7 @@ release/
 |---|---|
 | 构建发生地 | **仅 GitHub CI**（`build` job 的 4 runner 矩阵）|
 | 发布发生地 | **仅 GitHub CI**（tag 触发，各平台 runner 执行 `ci-core.sh --publish`）|
-| 本地允许做什么 | 门禁（S0-S4）`npm test` / `verify:versions` / `build-ui.sh` |
+| 本地允许做什么 | S0–S3 与 `--dry-run`（如 `verify:versions` / `build-ui.sh`）；**本机不得执行 `npm test`**（全量回归由 CI 的 test job 经 `xvfb-run -a npm test` 执行） |
 | 本地禁止做什么 | 任何平台构建/发布产物（`--all-platforms` 本地一律 exit 2；`release-core.sh` 已删除）|
 | 四平台同源如何保证 | launcher 为架构无关纯 JS，CI 四平台产物 `core.cjs` 逐字节一致（由 CI 断言）|
 
@@ -273,7 +273,7 @@ release/
 # 2) 提升版本
 bash release/scripts/bump.sh --core 0.1.2-BETA.7
 # 3) 一键编排 dry-run（干净树+CHANGELOG 预检 → 委托 ci-core.sh 全部门禁 → 打印发布计划）
-见 `RELEASE-STANDARD.md`（本地只做 S2–S4，S5 起在 CI）
+见 `RELEASE-STANDARD.md`（本地只做 S0–S3，S4 起在 CI）
 # 4) 真发（commit + tag v<ver> + push --tags 触发 CI；四个平台全部由 CI 产出并各自 ci-core.sh --publish）
 CI（tag 触发）
 ```
@@ -323,7 +323,7 @@ git add -A && git commit && git tag v<ver> && git push origin main && git push o
 
 ### C. 验收
 
-- 全量回归：`npm test`（mock 目标，不触碰真实 DSH/npm）。
+- 全量回归：由 CI 的 `test` job 经 `xvfb-run -a npm test` 执行（mock 目标，不触碰真实 DSH/npm）；**本机不得执行 `npm test`**。
 - 发布状态追踪：`release/runbooks/publish-and-verify.md`。
 
 ## 推送通道（固定标准，2026-09-10 定案）

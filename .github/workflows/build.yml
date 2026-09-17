@@ -93,8 +93,8 @@ jobs:
   # ── precheck：该 tag 版本是否已在 npm 全部发布？ ──
   # ⚠ 2026-09-13 定位变更：内核仓已公开（Actions 免额度），故**不再是为省额度**。
   #   保留目的是**防重复发布**（npm 同版本不可重发），并让「四平台齐备」成为可验证的收敛条件。
-  #   副作用即「已知边界」：四平台齐备后构建矩阵不再运行 —— 想在 CI 重跑完整构建，
-  #   必须存在一个**未发布的新版本**。见 release/README.md §1.2。
+  #   ⚠ 2026-09-14 更正：`need_build` 只作用于 `release` job 与 build 步骤里的 `--publish` 判定
+  #   （防同版本重发）；`build` 矩阵**每次 push / PR 都跑**，不得条件跳过。见 release/README.md §1.1。
   # 判据：package.json#npmPublish.packages 声明的**每个**平台子包，在该版本下是否都已存在于 npm。
   precheck:
     runs-on: ubuntu-latest
@@ -126,7 +126,7 @@ jobs:
           done
           if [ -z "$MISSING" ]; then
             echo "need_build=false" >> "$GITHUB_OUTPUT"
-            echo "  → 四平台已齐备，**跳过构建矩阵**（省额度）"
+            echo "  → 四平台已齐备：need_build=false（仅影响 release job 与 --publish 判定；precheck 设立初衷为省额度）"
           else
             echo "need_build=true" >> "$GITHUB_OUTPUT"
             echo "missing=$MISSING" >> "$GITHUB_OUTPUT"
@@ -170,8 +170,8 @@ jobs:
             #   本仓仍用 macos-14(arm64) + DSH_ARCH_OVERRIDE=x64 出 darwin-x64：
             #   launcher 是架构无关纯 JS，仅 npm os/cpu 元数据区分，产物等价；
             #   且该组合自 0.1.5-BETA.1 起连续多轮 tag 构建成功（已实证）。
-            #   切 macos-15-intel 属**矩阵行为变更**，当前不可验证（build 受 need_build 门控，
-            #   版本全发布时不运行）→ 留待下一次发版评估，由真实构建裁决。
+            #   切 macos-15-intel 属**矩阵行为变更**，需真实构建验证，本批不改动矩阵
+            #   → 留待下一次发版评估，由真实构建裁决。
           - os: macos-14
             artifact: darwin-x64
             arch_override: x64

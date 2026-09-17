@@ -128,7 +128,9 @@
 | `advgyxqamf/dsh-supervisor-core` | `master` | `precheck`、`test`（strict + enforce_admins）|
 | `wasi7mglns/dsh-supervisor-launcher` | `main` | `version` + 4 条 `build (...)`（strict + enforce_admins）|
 
-> required 只能设**每次都会跑**的 job。把条件 job（`build`/`release`）设为 required 会让 PR **永久阻塞**。
+> required 只能设**每次都会跑**的 job。`build` 矩阵如今**每次 push / PR 都跑**（不再是条件 job），
+> 故它可作为 required；**唯一仍受 `need_build` 影响的是 `release` job**（见 §4 上文），
+> 把它设为 required 会让 PR **永久阻塞**。
 
 ## 5. 发布后验证（S8）
 
