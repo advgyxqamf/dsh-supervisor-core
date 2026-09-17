@@ -1,13 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/state/upgrade-hold.js —— 升级 hold 工厂（真 ctor 注入）。
-//
-// 级 2：createUpgradeHold(deps) 自己持有 enter/enterAsync/exit 实现。
-//   const uh = createUpgradeHold({ fields, store, getConfig, ... });
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
+// createUpgradeHold(deps) 自己持有 enter/enterAsync/exit 实现，可独立直测。
 // hold 标志位仍落宿主瞬态字段（controller/facade 直读 _upgradeHold），经 getHold/setHold 注入。
-// ═══════════════════════════════════════════════════════════════════════════
 
 const pidlook = require('../../platform/os/pidlookup');
 
@@ -40,7 +35,7 @@ function createUpgradeHold(deps) {
   }
 
   async function enterAsync() {
-    // 先捕获目标引用：enter() 内部 stopProcess 会清空 child/adoptedPid。
+    // 先捕获目标引用：enter() 内部 stopProcess 会清空 child/adoptedPid，故在调用前取出。
     const refs = { child: fields.child(), adoptedPid: fields.adoptPid() };
     enter();
     if (refs.child && refs.child.exitCode === null && refs.child.signalCode === null) {

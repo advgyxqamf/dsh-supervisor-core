@@ -1,12 +1,12 @@
 'use strict';
 
-// 域：桌面壳更新安全网 API（/shell/*）—— 2026-09-11
+// 域：桌面壳更新安全网 API（/shell/*）。
 //
 // 端点设计原则：
-//   · **只回环**（壳在本机）——与既有 API 信任模型一致（identity.js socket 层判定）。
-//   · 不含「更新源」职责（壳直连 npm CDN），故**没有** /shell/update/check。
-//   · 写操作（health/update-pending/check-update/restart）走 originAllowed 同源校验（与 dist/relay 同规）。
-//   · 壳更新强制且不可回退：**没有** /shell/rollback。
+//  - 只回环（壳在本机），与既有 API 信任模型一致（identity.js socket 层判定）。
+//  - 不含「更新源」职责（壳直连 npm CDN），故没有 /shell/update/check。
+//  - 写操作（health/update-pending/check-update/restart）走 originAllowed 同源校验（与 dist/relay 同规）。
+//  - 壳更新强制且不可回退：没有 /shell/rollback。
 function owns(pathname) {
   return pathname === '/shell/status' || pathname.startsWith('/shell/');
 }
@@ -48,8 +48,8 @@ function handle(ctx) {
   }
 
   // 壳版本检测（与内核自更新同源：npm registry + 镜像回退）。
-  // 产品语义：面板「检查更新」需对**内核与桌面壳一起检测**，本端点提供壳那一半。
-  // 定位重申：内核不是壳的更新源；此处只**查版本**，安装仍由壳的门 0 完成。
+  // 面板「检查更新」对内核与桌面壳一起检测，本端点提供壳那一半。
+  // 内核不是壳的更新源；此处只查版本，安装仍由壳的门 0 完成。
   if (req.method === 'POST' && pathname === '/shell/check-update') {
     if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
     req.resume();
@@ -63,8 +63,8 @@ function handle(ctx) {
       .catch((e) => send(500, { ok: false, error: e.message }));
   }
 
-  // 重启桌面壳（用于**应用壳更新**）：壳的自更新发生在壳启动时（门 0），
-  // 因此「让壳用上新版本」= 让壳重新启动一次，门 0 会在新进程里完成检测/下载/验签/安装。
+  // 重启桌面壳（用于应用壳更新）：壳的自更新发生在壳启动时（门 0），
+  // 让壳用上新版本即让壳重新启动一次，门 0 在新进程里完成检测/下载/验签/安装。
   if (req.method === 'POST' && pathname === '/shell/restart') {
     if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
     req.resume();

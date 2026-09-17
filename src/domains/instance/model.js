@@ -1,20 +1,16 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 多实例管理器 —— 领域模型（域：instance / model）
-//
-// 纯函数：实例记录的形状与迁移、视图行组装、任务状态词表。零 IO、零隐式 this。
-// 视图行的 IO 结果（已安装版本 / 最新版本 / 作业视图 / 探测结果）由调用方解析后传入。
-// ═══════════════════════════════════════════════════════════════════════════
+// 领域模型：实例记录形状与迁移、视图行组装、任务状态词表。纯函数，零 IO、零隐式 this。
+// 视图行的 IO 结果（已安装版本/最新版本/作业视图/探测结果）由调用方解析后传入。
 
 const { semverCompare } = require('../../shared/version');
 
-/** 任务状态 → 前端契约（前端轮询判定 done/failed；TaskRegistry 状态为 succeeded/skipped/canceled）。 */
+/** 任务状态映射到前端契约（前端轮询判定 done/failed；TaskRegistry 状态为 succeeded/skipped/canceled）。 */
 function taskStateToView(s) {
   return (s === 'succeeded' || s === 'skipped') ? 'done' : (s === 'failed' || s === 'canceled') ? 'failed' : 'running';
 }
 
-/** 磁盘文档实例记录 → 运行时记录（**纯**迁移，不落盘）。
+/** 磁盘文档实例记录映射到运行时记录（纯迁移，不落盘）。
  *  - 令牌收敛：历史遗留的 dshToken 列一律剔除（内存即刻断行，下次 save 落盘即清）；
  *  - guardian 缺省为关；
  *  - 重启后 FAILED 一律重置为「停止」（失败是一次性状态）。
@@ -30,7 +26,7 @@ function normalizeInstance(inst) {
   return inst;
 }
 
-/** 新增实例记录（payload → 规范化记录）。端口合法性/占用探测等编排在 ops.js。 */
+/** 新增实例记录（payload 规范化）。端口合法性/占用探测等编排在 ops.js。 */
 function createRecord(payload, id) {
   const port = parseInt(payload.port, 10);
   return {
@@ -59,7 +55,7 @@ function createRecord(payload, id) {
   };
 }
 
-/** 单实例 → 前端契约行（**纯**）。resolved = { version, latest, updateJob, probe } 均为调用方解析好的 IO 结果。 */
+/** 单实例映射到前端契约行（纯）。resolved = { version, latest, updateJob, probe } 均为调用方解析好的 IO 结果。 */
 function viewRow(inst, resolved) {
   const version = resolved.version;
   const latest = resolved.latest;
@@ -73,7 +69,7 @@ function viewRow(inst, resolved) {
     remoteEnabled: inst.remoteEnabled,
     unitName: inst.unitName,
     sandbox: inst.sandbox,
-    // 沙箱实例版本与更新（每实例独立 DSH 安装；native 无独立安装 → null，不显示）
+    // 沙箱实例版本与更新（每实例独立 DSH 安装；native 无独立安装，返回 null 不显示）
     version,
     latest,
     updateAvailable: !!(latest && version && semverCompare(latest, version) > 0),

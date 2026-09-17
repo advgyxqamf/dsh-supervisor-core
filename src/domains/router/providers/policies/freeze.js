@@ -1,9 +1,9 @@
 'use strict';
 
-// 冻结/恢复策略（B4）+ 检测应用（B7）—— 近乎纯：状态迁移纯计算，事件/持久化经 provider 注入。
-// 从 base.js 抽出：_freezeLimited/markCreditsExhausted/markQuotaExhausted/markBanned/
-// _setStatus/_ensureLimit/_setLimit/applyDetection/_normalizeConsistency/_reconcileLock。
-// 文件不 require 任何 IO；对 provider 的调用一律显式经入参（保留 provider 的方法覆写语义）。
+// 冻结/恢复策略（B4）+ 检测应用（B7）：近乎纯，状态迁移纯计算，事件/持久化经 provider 注入。
+// 覆盖 freezeLimited/markCreditsExhausted/markQuotaExhausted/markBanned/setStatus/ensureLimit/
+// setLimit/applyDetection/normalizeConsistency/reconcileLock。文件不 require 任何 IO；对 provider
+// 的调用一律显式经入参（保留 provider 的方法覆写语义）。
 
 const quota = require('./quota');
 
@@ -20,7 +20,7 @@ function setStatus(acc, status, nextResetAt, error, autoRecover, provider) {
   if ((status === 'frozen' || status === 'banned') && provider.activeAccount && provider.activeAccount.keyId === acc.keyId) {
     provider.markNotInUse(acc.keyId);
   }
-  // 锁收敛：离开可用池 → 锁失效
+  // 锁收敛：离开可用池 -> 锁失效
   if ((status === 'frozen' || status === 'banned' || status === 'discarded') && provider.selectedAccountKeyId === acc.keyId) {
     provider.selectedAccountKeyId = null;
   }
@@ -62,7 +62,7 @@ function setLimit(acc, kind, reason, recovery, provider) {
   return acc.limit;
 }
 
-/** 统一受限冻结（credits/window 同一套状态机——置 frozen + 记恢复点 + 设 limit + 事件）。
+/** 统一受限冻结（credits/window 同一套状态机：置 frozen + 记恢复点 + 设 limit + 事件）。
  *  @param recovery {type:'at'|'poll', at?|periodMs?} at 优先作为 nextResetAt，poll 用 now+periodMs */
 function freezeLimited(acc, cause, reason, recovery, provider) {
   if (!acc || acc.status === 'banned' || acc.status === 'discarded') return false;
@@ -84,7 +84,7 @@ function freezeLimited(acc, cause, reason, recovery, provider) {
   return true;
 }
 
-/** credits 额度用尽标记（上游 400/402/429/403 报错驱动）：无自然到点恢复 → recovery.at 或周期重探。 */
+/** credits 额度用尽标记（上游 400/402/429/403 报错驱动）：无自然到点恢复 -> recovery.at 或周期重探。 */
 function markCreditsExhausted(acc, provider) {
   if (!acc || acc.status === 'banned' || acc.status === 'discarded') return;
   const monthlyAt = quota.monthlyResetAtOf(acc);
@@ -131,7 +131,7 @@ function applyDetection(acc, det, provider) {
       setStatus(acc, 'banned', null, det.error || '账号被禁用', false, provider);
     } else {
       acc.lastProbeError = (det && det.error) || '状态检测失败';
-      // P1-1 修复：探测失败也必须给一个重探时刻，否则 frozen+探测失败 → 每 5min 启停风暴。
+      // 探测失败也必须给一个重探时刻，否则 frozen+探测失败会每 5min 启停风暴。
       if (acc.status === 'frozen' && !acc.nextResetAt) {
         acc.nextResetAt = Date.now() + CREDITS_RECHECK_MS;
       }
@@ -182,7 +182,7 @@ function applyDetection(acc, det, provider) {
         provider._persist();
         return; // 维持冻结：不是恢复，只是快照未到阈值
       }
-      // 有正向证据 → 落到下方通用解冻
+      // 有正向证据 -> 落到下方通用解冻
     }
     // 已恢复：自动解冻/解封
     acc.nextResetAt = null;
@@ -197,7 +197,7 @@ function applyDetection(acc, det, provider) {
   }
 }
 
-/** 一致性守卫（serialize 前置）：ready 账号已知额度已满 → 写盘前归位 frozen + limit（纯字段修正，不递归写盘）。 */
+/** 一致性守卫（serialize 前置）：ready 账号已知额度已满时写盘前归位 frozen + limit（纯字段修正，不递归写盘）。 */
 function normalizeConsistency(acc, provider) {
   if (!acc) return;
   const st = acc.status;
@@ -233,4 +233,4 @@ function reconcileLock(provider) {
   }
 }
 
-module.exports = { CREDITS_RECHECK_MS, setStatus, ensureLimit, setLimit, freezeLimited, markCreditsExhausted, markQuotaExhausted, markBanned, applyDetection, normalizeConsistency, reconcileLock };
+module.exports = { setStatus, ensureLimit, setLimit, freezeLimited, markCreditsExhausted, markQuotaExhausted, markBanned, applyDetection, normalizeConsistency, reconcileLock };

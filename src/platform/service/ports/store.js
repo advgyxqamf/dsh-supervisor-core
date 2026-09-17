@@ -1,12 +1,11 @@
 'use strict';
 
-// 端口注册表持久化（纯 IO）：read/atomic write/只读聚合。
-// 记录结构：{ port, role, owner, createdAt }。
+// 端口注册表持久化（纯 IO）：read / atomic write / 只读聚合。记录结构：{ port, role, owner, createdAt }。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-/** 归一化条记录；不合法返回 null。 */
+/** 归一化一条记录；不合法返回 null。 */
 function normRecord(r) {
   if (!r || !Number.isInteger(r.port) || !r.role) return null;
   return {
@@ -55,4 +54,4 @@ function extraRecords(file, extraFiles) {
   return out;
 }
 
-module.exports = { normRecord, loadRecords, saveRecords, extraRecords };
+module.exports = { loadRecords, saveRecords, extraRecords };

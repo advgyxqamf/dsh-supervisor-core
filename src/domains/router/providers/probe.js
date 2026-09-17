@@ -1,8 +1,7 @@
 'use strict';
 
-// 实例运行时探活与进程治理（B10/B11）—— IO 模块。
-// 从 proxy.js 抽出：spawn（原 _doStart）、健康探活、生命周期监控、npm 包缓存、实例配额探测。
-// 一律经 provider 显式入参；不持有实例/域状态。
+// 实例运行时探活与进程治理（B10/B11）：IO 模块，覆盖 spawn、健康探活、生命周期监控、npm 包
+// 缓存、实例配额探测。一律经 provider 显式入参，不持有实例/域状态。
 
 const spawnOS = require('../../../platform/os/spawn');
 const path = require('node:path');
@@ -15,7 +14,7 @@ const { quotaOverallStatus } = require('./policies/quota');
 const { cachedPkgBin, ensurePkgCached } = require('./pkg-cache');
 const stateRoot = require('../../../platform/service/state-root');
 
-/** 启动实例（底层治理）：认领/弃用幸存者 → 端口分配/等待 → 命令 → env → spawn → 日志。 */
+/** 启动实例（底层治理）：认领/弃用幸存者 -> 端口分配/等待 -> 命令 -> env -> spawn -> 日志。 */
 async function spawnInstance(provider, inst) {
   const app = provider.app;
   if (!app) return { ok: false, error: '未知反代应用' };
@@ -46,7 +45,7 @@ async function spawnInstance(provider, inst) {
       }
     }
   }
-  // 端口分配唯一入口 = claimSlot：byOwner 复用 → preferred → 段内最小空闲
+  // 端口分配唯一入口 = claimSlot：byOwner 复用 -> preferred -> 段内最小空闲
   const owner = 'proxy:' + (inst.keyId || 'unknown');
   const slot = await ports.claimSlot('proxyInstance', owner, { preferred: inst.port || undefined });
   if (!slot || slot.conflict) return { ok: false, error: '反代端口段已满/冲突' };
@@ -105,17 +104,23 @@ async function spawnInstance(provider, inst) {
   inst.port = port;
   inst.status = INSTANCE_STATES.WARM;
   inst.healthy = false;
-  // 关停竞态：stop() 先于 spawn 完成 → 一次也不漏，立即自清
+  // 关停竞态：stop() 先于 spawn 完成时一次也不漏，立即自清
   if (provider._stopping) {
     try { provider.stopInstance(inst); } catch {}
     return { ok: true, port, pid: child.pid, stoppedDuringShutdown: true };
   }
+  // 只认领当前代：重启时旧进程晚退（close/error 在新 pid 写入之后才触发）不得清掉新实例的登记。
   child.on('close', (code) => {
-    inst.pid = null; inst.healthy = false;
-    inst.status = INSTANCE_STATES.COLD; // 端口与实例绑死：不清 port、不释放 registry 登记
+    if (inst.pid === child.pid) {
+      inst.pid = null; inst.healthy = false;
+      inst.status = INSTANCE_STATES.COLD; // 端口与实例绑死：不清 port、不释放 registry 登记
+    }
     if (provider.events) provider.events.append('proxy_instance_stopped', { app: provider.proxyAppId, port, code });
   });
-  child.on('error', (err) => { inst.pid = null; inst.status = INSTANCE_STATES.DEAD; if (provider.events) provider.events.append('proxy_instance_failed', { app: provider.proxyAppId, port, error: err.message }); });
+  child.on('error', (err) => {
+    if (inst.pid === child.pid) { inst.pid = null; inst.status = INSTANCE_STATES.DEAD; }
+    if (provider.events) provider.events.append('proxy_instance_failed', { app: provider.proxyAppId, port, error: err.message });
+  });
   provider._persist();
   if (provider.events) provider.events.append('proxy_instance_started', { app: provider.proxyAppId, port, pid: child.pid });
   return { ok: true, port, pid: child.pid };
@@ -146,7 +151,8 @@ async function monitorLifecycle(provider) {
   if (provider._stopping || provider.activated !== true) return;
   for (const inst of (provider.instances || [])) {
     if (!inst || !inst.pid || !inst.port) continue;
-    if (inst.status === INSTANCE_STATES.DEAD) continue;
+    // DEAD 只是「进程在但不健康」：不得在此跳过，否则 HTTP 探活与 _monitorFails 无法跨轮累积，
+    // 连续 3 次 kill 重拉的分支恒不可达。继续探活，直至命中重拉或进程消亡。
     let alive = false;
     try { alive = pidlook.isAlive ? pidlook.isAlive(inst.pid) : true; } catch {}
     if (!alive) {
@@ -204,7 +210,7 @@ async function detectInstanceQuota(provider, inst) {
   } catch (e) { inst.quota = null; return { ok: false, error: e.message }; }
 }
 
-/** 响应驱动冻结后的异步补探测：真实超限 → quota 刷新；误判 → 自动解冻。 */
+/** 响应驱动冻结后的异步补探测：真实超限 -> quota 刷新；误判 -> 自动解冻。 */
 function probeAfterResponseFreeze(provider, acc) {
   if (!acc || acc.status === 'banned' || acc.status === 'discarded') return;
   const app = provider.app;
@@ -232,7 +238,7 @@ function probeAfterResponseFreeze(provider, acc) {
 /** 等待全部 SIGTERM 在途子进程真正退出（优雅退出专用，根治停服孤儿化）。 */
 async function waitAllStopped(provider, timeoutMs) {
   const dl = Date.now() + (timeoutMs || 3000);
-  // zombie 判定：SIGKILL 已投递但父进程尚未回收的进程 kill(0) 仍为 true——端口/stdio 已释放
+  // zombie 判定：SIGKILL 已投递但父进程尚未回收的进程 kill(0) 仍为 true，但端口/stdio 已释放
   const isZombie = (pid) => {
     try {
       const st = fs.readFileSync('/proc/' + pid + '/stat', 'utf8');

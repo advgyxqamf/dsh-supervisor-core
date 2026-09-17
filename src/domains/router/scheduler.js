@@ -8,8 +8,8 @@
 //   refreshProxyUpdateInfo, refreshOfficialUsageAll, refreshOfficialPricingAll, now }。
 // 另具名导出两个纯判据（最易测）：hasImminentReset / hasOverdueReset。
 
-/** 是否存在 frozen 账号临近解冻（nextResetAt ≤ now+5min）→ 需提前精确触发检测。
- *  含 2026-09 修复：frozen 且无恢复点 → 视为 imminent（立即确认真实额度，避免永久错冻）。 */
+/** 是否存在 frozen 账号临近解冻（nextResetAt 不晚于 now+5min）需提前精确触发检测。
+ *  修复：frozen 且无恢复点也视为 imminent（立即确认真实额度，避免永久错冻）。 */
 function hasImminentReset(providers, now) {
   const horizon = (now || Date.now()) + 5 * 60 * 1000;
   for (const p of providers || []) {
@@ -22,7 +22,7 @@ function hasImminentReset(providers, now) {
 }
 
 /** 是否存在 nextResetAt 已过但未恢复的 frozen 账号（1h 低频兜底触发）。
- *  含 2026-09 修复：frozen 但恢复点缺失 → 视为需立即确认真实额度。 */
+ *  修复：frozen 但恢复点缺失也视为需立即确认真实额度。 */
 function hasOverdueReset(providers, now) {
   const t = now || Date.now();
   for (const p of providers || []) {
@@ -50,7 +50,7 @@ function createScheduler(deps) {
     refreshProxyUpdateInfo().catch(() => {});
     refreshOfficialUsageAll().catch(() => {});
     refreshOfficialPricingAll().catch(() => {});
-    // 进程态不落盘 → 重启后由 reconcile 按期望集拉起（每供应商常驻 1，必要时 1 备胎）
+    // 进程态不落盘，重启后由 reconcile 按期望集拉起（每供应商常驻 1，必要时 1 备胎）
     ensureProxyInstances().catch(() => {});
     if (state.maintTimer) clearInterval(state.maintTimer);
     state.maintTimer = setInterval(() => {
@@ -121,7 +121,7 @@ function createScheduler(deps) {
             // 是否期望运行账号（常驻/备胎，由 reconcile 期望集同源判定）
             const isDesired = (typeof p.isDesiredAccount === 'function') ? p.isDesiredAccount(acc) : false;
             // 探测最小化（倒计时机制，防风控）：非活跃账号不临时激活。
-            // missingReset：frozen 且无 nextResetAt → 也需立即探测（确认真实额度）。
+            // missingReset：frozen 且无 nextResetAt，也需立即探测（确认真实额度）。
             const nearReset = acc.nextResetAt && acc.nextResetAt <= now() + 5 * 60 * 1000;
             const missingReset = acc.status === 'frozen' && !acc.nextResetAt;
             const needProbe = acc.status === 'frozen' && (nearReset || missingReset);
@@ -149,7 +149,7 @@ function createScheduler(deps) {
   }
 
   /** 维护周期入口（每 5min 触发）。
-   *  - 精确触发：任一 frozen 账号 nextResetAt ≤ now+5min → 探测该批账号；
+   *  - 精确触发：任一 frozen 账号 nextResetAt 不晚于 now+5min 时探测该批账号；
    *  - 低频兜底：1h 一次，仅探测 nextResetAt 已过但未恢复的账号。 */
   function probeIfDue() {
     const t = now();

@@ -1,18 +1,8 @@
 'use strict';
 
-// ⚠ 步骤7 收尾：statusSummary 用 installId()（安装标识，面板外显 + 灰度匹配依据）——
-//   该依赖原在 supervisor.js 顶部，机械下沉时未随之携带，现补。
+// app/facade/status.js —— 对外只读状态视图 statusSummary。
+// 用 installId()（安装标识，面板外显 + 灰度匹配依据），取不到时为 null，前端优雅降级。
 const { installId } = require('../../platform/service/install-id');
-
-// ═══════════════════════════════════════════════════════════════════════════
-// app/facade/status.js —— 状态视图
-//
-// 职责：statusSummary（对外只读状态视图）。
-//
-// 步骤 7（2026-09-16）：从 src/supervisor.js（组装根）下沉 —— 使 root 只剩组装与启动，
-//   满足 DIRECTORY-STRUCTURE-DESIGN §5.2 DS-G7（supervisor.js ≤200 行）。
-// ═══════════════════════════════════════════════════════════════════════════
-
 
 function statusSummary(host) {
     // 原生 DSH 端口自检测：端口是「实际运行态」属性，而非静态配置值——
@@ -24,7 +14,7 @@ function statusSummary(host) {
       // 会话生命周期（契约 §3，INV-S4）：与 phase 正交——phase 是 main 状态机相位，
       // sessionState 是整个服务链的运行相位（前端/壳据此表达「退出中/已退出」）。
       sessionState: host._sessionState,
-      // P1 跨平台审计：数据目录保护状态（Windows 无 icacls 时可观测降级）。
+      // 数据目录保护状态（Windows 无 icacls 时可观测降级）。
       dataDirProtected: Array.isArray(host._fileProtectStatus)
         ? (host._fileProtectStatus.length > 0 && host._fileProtectStatus.every((r) => r.ok))
         : null,

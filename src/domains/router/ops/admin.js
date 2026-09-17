@@ -1,7 +1,6 @@
 'use strict';
 
-// 账号/供应商管理辅助。从 router-ops.js:514-665 抽出。
-// deps 注入：{findProvider, save, ports, maskKey, logger}。
+// 账号/供应商管理辅助。deps 注入：{findProvider, save, ports, maskKey, logger}。
 
 function createAdminOps(deps) {
   const d = deps || {};
@@ -11,18 +10,18 @@ function createAdminOps(deps) {
   const maskKey = d.maskKey || ((k) => k);
   const logger = d.logger || null;
 
-  /** P2-5：async —— added 需 await 每个 addAccount 的真实结果。 */
+  /** async：added 需 await 每个 addAccount 的真实结果。 */
   async function setProviderKeys(id, opts) {
     const p = findProvider(id);
     if (!p) return { ok: false, error: '供应商不存在' };
     const rm = new Set((opts && opts.removeMasked) || []);
     const before = (p.accounts || []).length;
-    // P2-4：删反代账号必须做与 removeProxyKey 同等的收尾（stopInstance/ports/instances）。
+    // 删反代账号必须做与 removeProxyKey 同等的收尾（stopInstance/ports/instances）。
     const doomed = (p.accounts || []).filter((a) => rm.has(a.maskedKey));
     if (p.kind === 'proxy') {
       for (const a of doomed) {
         if (a.instance) {
-          // P1：删除路径必须 force（账号即将摘除，延迟停标记会变不可达 → 进程泄漏）。
+          // 删除路径必须 force（账号即将摘除，延迟停标记会变不可达，进程泄漏）。
           try { p.stopInstance(a.instance, true); } catch {}
           try { ports.unregister('proxy:' + a.keyId); } catch {}
           a.instance.port = null;
@@ -75,7 +74,7 @@ function createAdminOps(deps) {
     const prevSelected = p.selectedAccountKeyId || null;
     p.selectedAccountKeyId = keyId;
     save();
-    // 切换即确保目标实例拉起；失败回滚 selected（防坏账号粘滞 → 429 循环）
+    // 切换即确保目标实例拉起；失败回滚 selected（防坏账号粘滞导致 429 循环）
     if (p.kind === 'proxy' && acc.instance && !acc.instance.pid) {
       const sr = await p.startInstance(acc.instance).catch((e) => ({ ok: false, error: e && e.message }));
       const ok = sr && sr.ok;
@@ -102,7 +101,7 @@ function createAdminOps(deps) {
     const idx = (p.accounts || []).findIndex((a) => a.keyId === keyId);
     if (idx < 0) return { ok: false, error: '账号不存在' };
     if (p.kind === 'proxy' && p.accounts[idx].instance) {
-      // P1：删除路径必须 force。
+      // 删除路径必须 force。
       try { p.stopInstance(p.accounts[idx].instance, true); } catch {}
       try { ports.unregister('proxy:' + keyId); } catch {}
       p.accounts[idx].instance.port = null;

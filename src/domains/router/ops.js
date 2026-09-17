@@ -100,12 +100,9 @@ function createOps(deps) {
     if (idx < 0) return { ok: false, error: '供应商不存在' };
     const removed = state.providers.splice(idx, 1)[0];
     endpoint.stopProviderServer(id); // 删除即停用：关闭其独立端点
-    //  P1 修复（2026-09-13，失效模式 g）：**删除路径必须 force 停实例**。
-    //   stopInstance(inst) 不带 force 时，若账号 ready+可用且被 selected/activeAccount 指向，
-    //   proxy.js 只置 _stopPendingUntilIdle 就 return，**不 kill**；而本函数紧接着把 provider
-    //   从 state.providers 摘除 —— 延迟标记所在对象随即不可达，reconcile/monitor 再看不到该实例，
-    //   补刀路径也无从触发 → 正在服务、持用户 API Key 的反代实例进程**永不被回收**。
-    //   删除语义统一 force=true —— 与「删除即回收」的契约一致。
+    // 删除路径必须 force 停实例：不带 force 时，若账号被 selected/activeAccount 指向，proxy.js
+    // 只置 _stopPendingUntilIdle 就返回、不 kill；紧接着 provider 被摘除后该标记不可达，补刀无从
+    // 触发，持用户 API Key 的反代进程永不被回收。故删除语义统一 force=true（与「删除即回收」一致）。
     if (removed.kind === 'proxy') { for (const i of removed.instances || []) { try { removed.stopInstance(i, true); } catch {} } }
     // 端口登记级联释放（「删除对象即释放端口」契约）：否则 owner 永久累积、池最终耗尽。
     try { releaseProviderPorts(removed, ports); } catch (e) { if (logger && logger.warn) logger.warn('release provider ports ' + id + ': ' + (e && e.message)); }
@@ -159,7 +156,7 @@ function createOps(deps) {
     }
   }
 
-  return { addDirectProvider, addProxyProvider, removeProvider, releaseProviderPorts: (p) => releaseProviderPorts(p, ports), start, stop, stopAndWait, stopAllInstances };
+  return { addDirectProvider, addProxyProvider, removeProvider, start, stop, stopAndWait, stopAllInstances };
 }
 
 module.exports = { createState, createOps, findProvider, releaseProviderPorts };

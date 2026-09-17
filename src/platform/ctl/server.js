@@ -1,18 +1,18 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// 
 // ctl dispatcher —— daemon 的 127.0.0.1 回环控制通道（通用基础设施，L0 平台事实）。
 //
 // ## 为什么在 platform/ 而不是某个域
 //   本模块是**通用**的：内容只有 HTTP 协议、白名单闸、序列化与超时参数，
 //   不含任何域知识（没有 router/lan/relay 字样，也没有任何具体方法名）。
 //   它此前寄居 `domains/router/ctl.js`，却被 router 与 lan **两个 daemon 共用**，
-//   于是 relay/daemon 必须反向 require router 域 → 凭空造出一条跨域边（DS-2 违规，
+//   于是 relay/daemon 必须反向 require router 域 -> 凭空造出一条跨域边（DS-2 违规，
 //   步骤4 实证）。通用基础设施放 L0，两个域各自**向下**消费，跨域边随之归零。
 //
 // ## 谁在用（均为 daemon 侧进程入口，各自注入本域白名单）
-//   · src/domains/router/daemon.js —— ROUTER_CTL_METHODS
-//   · src/domains/relay/daemon.js  —— LAN_CTL_METHODS
+//   - src/domains/router/daemon.js —— ROUTER_CTL_METHODS
+//   - src/domains/relay/daemon.js  —— LAN_CTL_METHODS
 //
 // ## 不变量（安全面，禁止削弱）
 //   1. **白名单必填且 fail-closed**：未注入 allowMethods 直接抛错，绝不回退到
@@ -27,7 +27,7 @@
 //   const { createCtlServer } = require('../../platform/ctl/server');
 //   const ctl = createCtlServer({ target: svc, allowMethods: MY_METHODS, logger, events });
 //   ctl.listen(port, '127.0.0.1');
-// ═══════════════════════════════════════════════════════════════════════════
+// 
 
 const http = require('node:http');
 
@@ -39,7 +39,7 @@ const isMethodAllowed = (allowMethods, method) =>
 /**
  * 创建 ctl HTTP server。
  * @param {object} o
- *   - target:       被控制的实例（RouterService / LanManager …）。方法经 `target[method]` 调用。
+ *   - target:       被控制的实例（RouterService / LanManager ...）。方法经 `target[method]` 调用。
  *   - allowMethods: **必填**域白名单（数组）。缺省/非法直接抛错（fail-closed）。
  *   - logger:       可选，{debug,warn,error}
  *   - events:       可选；存在且 `eventsTail` **在白名单内**时，暴露内置
@@ -47,7 +47,7 @@ const isMethodAllowed = (allowMethods, method) =>
  * @returns {http.Server}
  */
 function createCtlServer({ target, allowMethods, logger, events } = {}) {
-  // ★ fail-closed：白名单是安全面的根，缺了就拒绝启动，而不是给个"宽容缺省"。
+  // 重点 fail-closed：白名单是安全面的根，缺了就拒绝启动，而不是给个"宽容缺省"。
   if (!Array.isArray(allowMethods) || allowMethods.length === 0) {
     throw new Error('createCtlServer: allowMethods（域方法白名单）必填且不能为空——白名单不可缺省（安全面 PG-5）');
   }
@@ -84,7 +84,7 @@ function createCtlServer({ target, allowMethods, logger, events } = {}) {
       const method = m && typeof m.method === 'string' ? m.method : null;
       const args = Array.isArray(m && m.args) ? m.args : [];
       // 系统日志框架（P1b）：内置 eventsTail(afterSeq) 供守卫 EventHub 增量拉取事件。
-      // ⚠ 内置特例**不等于**无条件放行：它同样要过白名单（调用方白名单里写了才可达）。
+      // 注意 内置特例**不等于**无条件放行：它同样要过白名单（调用方白名单里写了才可达）。
       if (method === 'eventsTail' && isMethodAllowed(allowMethods, method)
           && events && typeof events.tailSince === 'function') {
         const afterSeq = Number(args[0]) || 0;
@@ -92,7 +92,7 @@ function createCtlServer({ target, allowMethods, logger, events } = {}) {
         try { list = events.tailSince(afterSeq); } catch (e2) { return send(200, { ok: false, error: (e2 && e2.message) || String(e2) }); }
         return send(200, { ok: true, value: { seq: events.seq, events: list } });
       }
-      // ★ 白名单闸（PG-5）：未登记的方法一律拒绝——不对调用方透露"存在与否"。
+      // 重点 白名单闸（PG-5）：未登记的方法一律拒绝——不对调用方透露"存在与否"。
       //   内部方法（_ 前缀）不在各域表内，故永不可达。
       if (!isMethodAllowed(allowMethods, method) || !target || typeof target[method] !== 'function') {
         if (logger && logger.warn && method) logger.warn('[ctl] 拒绝未登记方法: ' + method);
@@ -114,8 +114,8 @@ function createCtlServer({ target, allowMethods, logger, events } = {}) {
   });
   server.on('error', (e) => { if (logger) logger.error('[ctl] server error: ' + e.message); });
   // 2026-09 复检根治：守卫(Node≥19 globalAgent keepAlive=true 连接池化)复用长连调用 ctl；
-  // Node http server 默认 keepAliveTimeout=5s 会回收空闲池化连接 → 守卫下次复用已关 socket →
-  // 间歇 'socket hang up' → routerProviders 回退守卫陈旧本地视图 → 前端账号状态与 daemon 分裂闪烁
+  // Node http server 默认 keepAliveTimeout=5s 会回收空闲池化连接 -> 守卫下次复用已关 socket ->
+  // 间歇 'socket hang up' -> routerProviders 回退守卫陈旧本地视图 -> 前端账号状态与 daemon 分裂闪烁
   //（实测 3100 /router/providers 在 daemon 真值 与 陈旧副本 间交替，Kbobt7/MxULq9 旧态复现）。
   // 与 router 供应商端点对齐（index.js server.keepAliveTimeout=65000），长连不因空闲被服务端回收。
   server.keepAliveTimeout = 65000;

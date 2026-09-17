@@ -1,7 +1,7 @@
 'use strict';
 
-// 读路径共享实现（契约 §3.6）：所有「窗口派生读」只实现一次，EventHub 与 EventReader 共用，
-// 杜绝两处逻辑漂移。纯函数 + 空对象适配器，无 IO。
+// 共享读路径契约：窗口派生读只实现一次，EventHub 与 EventReader 共用，避免逻辑漂移。
+// 纯函数 + 空对象适配器，无 IO。
 
 const { isInternalEvent } = require('./sources');
 
@@ -61,7 +61,7 @@ function metricsFrom(win, seq) {
   return { gseq: seq, events: total, bySource, topTypes, lastEventAt: lastTs, sinceLastMs: lastAt ? Math.max(0, now - lastAt) : null, ts: new Date().toISOString() };
 }
 
-/** 降级读路径（空对象模式，契约 §3.6）：hub 不可用时把本地事件流适配成与 EventHub 相同的读接口。 */
+// 降级读路径（空对象模式）：hub 不可用时把本地事件流适配成与 EventHub 相同的读接口。
 class EventReader {
   constructor(events) { this.events = events; }
   get seq() { return this.events.seq; }

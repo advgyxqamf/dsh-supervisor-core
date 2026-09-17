@@ -1,7 +1,7 @@
 'use strict';
 
 // 端口注册表门面：组合纯核心（core）+ 注册表（pool），只做导出。
-// 注册接口签名（registerPools/registerSegment/readAll…）是域侧注入点，保持不变。
+// 注册接口签名（registerPools/registerSegment/readAll...）是域侧注入点，保持不变。
 
 const core = require('./core');
 const { PortRegistry } = require('./pool');

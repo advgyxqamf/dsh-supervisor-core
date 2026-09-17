@@ -60,7 +60,7 @@
 | 原生 native | `~/.dsh` | 检测到的真实 `dsh` | 管家 | ✅ | ✅（启停/卸载/升级） |
 | 沙箱 sandbox | `<dataDir>/.dsh` | `<installDir>/.../lib/bin.js` | 管家 | ✅ | ✅ |
 
-两者**共享**实现（`domains/dist` 安装执行、`exec-path` 解析、插件 CLI 的 `runtime` 承载、生命周期监督），
+两者**共享**实现（`platform/distribution` 安装执行、`exec-path` 解析、插件 CLI 的 `runtime` 承载、生命周期监督），
 差异只在**target 描述符**（bin、home、profileDir、env 四项）。
 
 ## 5. 门禁（可执行断言）

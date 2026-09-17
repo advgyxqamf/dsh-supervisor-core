@@ -1,15 +1,12 @@
 'use strict';
 
-// 通用文件系统工具（infra 层：与业务无关，供各域复用）。
+// 通用文件系统工具（与业务无关，供各域复用）。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 
-/**
- * 同步统计目录体积（字节）。有界：最大遍历 200k 条目防失控；符号链接跳过（防循环/双计）。
- * 用于"某目录占多大"的展示统计（如已装插件体积）。
- */
+/** 同步统计目录体积（字节）。有界：最多遍历 200k 条目；符号链接跳过（防循环与双计）。 */
 function dirSizeBytes(root) {
   let total = 0;
   let seen = 0;

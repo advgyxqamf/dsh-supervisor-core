@@ -1,12 +1,10 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/assembly/compose/core.js —— 组装第一步：宿主初始化 + 基础设施服务。
 //
-// 从 app/assembly/compose.js 拆出（R3 严值 DF-2：单文件 ≤300）。按「切面组」分离：
-//   core（宿主字段/日志/令牌/分发/任务/端口）→ domains（各域构造）→ observers（事件接线/注册）。
-// 三段均为具名函数、以 host 显式入参，零 this（DF-4）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 按「切面组」分离：core（宿主字段/日志/令牌/分发/任务/端口）
+//   -> domains（各域构造）-> observers（事件接线/注册）。
+// 三段均为具名函数、以 host 显式入参，零 this。
 
 const path = require('node:path');
 const platform = require('../../../platform/os/index');
@@ -18,7 +16,7 @@ const { DistributionManager } = require('../../../platform/distribution/index');
 const shellDomain = require('../../../domains/shell/index');
 const { TaskRegistry } = require('../../../platform/service/tasks');
 const { IntentLedger } = require('../../../app/state/intents');
-// DS-G4（§4.2 反转法）：日志汇聚业务源名单 / 令牌分类的**唯一声明处**——require 即注入 platform。
+// DS-G4（§4.2 反转法）：日志汇聚业务源名单 / 令牌分类的唯一声明处，require 即注入 platform。
 // 必须在 LogCore.init（构造 EventHub）与 new DshTokenService 之前（行为序与拆分前逐字一致）。
 require('../log-sources');
 require('../../../app/settings/token-kinds');
@@ -26,13 +24,13 @@ require('../../../app/settings/token-kinds');
 function composeCore(host, rawConfig, configPath) {
     host.config = normalize(rawConfig, domainConfigExtension());
     host.configPath = typeof configPath === 'string' ? configPath : null;
-    // P1 跨平台审计修复：数据目录访问保护（目录级一次，覆盖全部新建/既有子文件）。
-    //   Unix    ：chmod 0700（他人无法穿越目录 → 内部文件即使 0644 也不可达）。
-    //   Windows ：icacls 移除继承 (/inheritance:r) + 仅当前用户 (OI)(CI) ——
-    //             POSIX mode 在 Windows **被忽略**，而本目录含 config.json(apiAccessKey)、
+    // 数据目录访问保护（目录级一次，覆盖全部新建/既有子文件）。
+    //   Unix    ：chmod 0700（他人无法穿越目录，内部文件即使 0644 也不可达）。
+    //   Windows ：icacls 移除继承 (/inheritance:r) + 仅当前用户 (OI)(CI)；POSIX mode 在
+    //             Windows 被忽略，而本目录含 config.json(apiAccessKey)、
     //             dsh-main.json(remoteToken)、dsh-main-token.log(DSH 会话令牌)、frpc.toml(auth.token) 等敏感文件。
     //   NTFS 继承是动态的：对父目录设置继承 ACE 会同时作用于既有子项与后续新建子项，
-    //   故**无需**对每个热写文件（state.json 每拍）做 icacls——那会造成显著写放大。
+    //   故无需对每个热写文件（state.json 每拍）做 icacls，那会造成显著写放大。
     host._fileProtectStatus = null;
     try {
       const fp = platform.fileProtect;
@@ -70,17 +68,17 @@ function composeCore(host, rawConfig, configPath) {
     host._mSetMissingNotified(false);
     host.manualRestart = false; // POST /lifecycle/dsh/restart 待消费
     host._ticking = false;
-    // 显式意图登记簿（RC2）：用户/系统动作发生处 register，收敛循环 consume——
-    // 取代旧 _explicitAction 时间窗布尔（漏消费竞态已根治）。词表见 guard/intent.js。
+    // 显式意图登记簿：用户/系统动作发生处 register，收敛循环 consume，
+    // 取代旧 _explicitAction 时间窗布尔（漏消费竞态已根治）。
     host.intents = new IntentLedger();
     host._stopping = false;
-    // ── 会话生命周期（契约 ARCHITECTURE-CONTRACT-phase0 §3）：
-    //   starting → running → stopping → stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
+    // 会话生命周期（契约 ARCHITECTURE-CONTRACT-phase0 §3）：
+    //   starting -> running -> stopping -> stopped；stopping/stopped 期间抑制一切自动拉起（INV-S1）。
     //   唯一入口 /session/stop；唯一读取口 /session/status（INV-S2/S4）。
     host._sessionState = 'starting';
-    // 未守护崩溃停靠标记（阶段 2 意图单源，瞬态不持久）：guardian=false 时进程崩溃 → 置 true，
+    // 未守护崩溃停靠标记（意图单源，瞬态不持久）：guardian=false 时进程崩溃则置 true，
     // 使「desired=running 无条件拉起」不违背守护语义（崩溃不自救）；任何显式启动/重启/进入运行清除。
-    // 不持久化 → 守卫重启后按 desired 恢复运行（desired 是持久用户意图，契约 §5）。
+    // 不持久化：守卫重启后按 desired 恢复运行（desired 是持久用户意图，契约 §5）。
     host._crashHalted = false;
     host._upgradeHold = false;      // 升级"先停后装"期间暂停自动拉起
     host._upgradeHoldSince = null;  // 兜底自愈：hold 卡死超时自动释放
@@ -92,10 +90,9 @@ function composeCore(host, rawConfig, configPath) {
     host._upgradeTimer = null;
     host._shellWatchdogTimer = null;   // 桌面壳看护定时器
     host._lastOccupiedWarn = 0;
-    // ── 瞬态字段统一构造初始化（RC2.2 契约）：任何实例字段的首次赋值必须发生在此处。
-    // 注：曾有的 `_tokenReclaimAt`/`_tokenReclaimTried`（adopt 令牌观察窗）随
-    //   「令牌不可达 → 受控重建」路径一并删除（2026-09-16，DSH-TOKEN-CONTRACT TK-1/TK-2：
-    //   令牌恒存在、"拿不到"是我方捕捉链路 bug；令牌状态不得驱动进程生命周期）。──
+    // 瞬态字段统一构造初始化：任何实例字段的首次赋值必须发生在此处。
+    // 令牌状态不得驱动进程生命周期（DSH-TOKEN-CONTRACT TK-1/TK-2）：
+    //   令牌恒存在，「拿不到」是捕捉链路 bug，故不保留令牌观察窗字段。
     host._lastMainPortRederive = 0;  // 端口再推导节流
     host._lastOrphanAuditAt = 0;     // 游离对象自检节流
     host._lastOrphanKey = null;
@@ -109,16 +106,15 @@ function composeCore(host, rawConfig, configPath) {
     host._dshMainLive = null;        // dsh-main.json live 缓存
     host._fallbackEntry = null;      // 目录 fallback 项
     host._lastStateBody = null;
-    // ── C3-3b G1：main(dsh) 影子对比框架（并行不驱动）──
-    // 旧 tick 仍为唯一驱动；影子只「纯计算应然下一步」并对比实际迁移，零行为变化。
-    // 连续零 diff 拍数/累计 diff 拍数供 G3 切换判定（日志/事件观测，不进任何决策）。
+    // main(dsh) 影子对比框架（并行不驱动）：影子只纯计算应然下一步并对比实际迁移，零行为变化；
+    // 连续零 diff 拍数/累计 diff 拍数仅供日志/事件观测，不进任何决策。
     host._shadowSeq = 0;
     host._shadowConsistentBeats = 0;
     host._shadowDiffBeats = 0;
     host._shadowLast = null;   // 最近一拍影子记录 {seq,phase,shadow,actual,diff}
     host._shadowLoggedSeq = 0; // 已记账的事件拍号（心跳聚合去重）
-    // 系统日志框架（历史设计文档）：守卫经每进程唯一 LogCore 取
-    // logger/events/dshWriter/EventHub（单例 init；消灭散落 new Events/createLogger/Rotator/EventHub）。
+    // 系统日志框架：守卫经每进程唯一 LogCore 取 logger/events/dshWriter/EventHub
+    // （单例 init；消灭散落 new Events/createLogger/Rotator/EventHub）。
     const logCore = logcore.init({
       process: 'guard',
       logFile: host.config.supervisorLogFile,
@@ -140,21 +136,21 @@ function composeCore(host, rawConfig, configPath) {
     host.events = logCore.events;
     host.logger = logCore.logger;
     host.dshWriter = logCore.dshWriter;
-    // 守卫侧聚合读路径（契约 §3.6 统一读路径）：真实 hub 或 EventReader 降级适配器——**永不为 null**，
-    // 消费方（api/lifecycle.js）无需再写 if(hub)…else… 双语义分支。
+    // 守卫侧聚合读路径（契约 §3.6）：真实 hub 或 EventReader 降级适配器，永不为 null，
+    // 消费方（api/lifecycle.js）无需再写 if(hub)...else... 双语义分支。
     host.eventHub = logCore.reader || logCore.hub;
-    // ── 唯一令牌节点：全系统 DSH 访问令牌的统一获取/存储/分发（原生与沙箱共用同一服务，
-    //    区别只在“源”：spawn=stdout 推送 / systemd=journald 拉取）。任何目标的令牌变化统一
-    //    经 onChange 下发消费方（远程控制 relay 热换 cookie），不再分散接线。──
+    // 唯一令牌节点：全系统 DSH 访问令牌的统一获取/存储/分发（原生与沙箱共用同一服务，
+    // 区别只在“源”：spawn=stdout 推送 / systemd=journald 拉取）。任何目标的令牌变化统一
+    // 经 onChange 下发消费方（远程控制 relay 热换 cookie），不再分散接线。
     host.tokenService = new DshTokenService({ logger: host.logger, events: host.events });
-    // main 统一守卫 spawn（2026-09-06 废弃 systemd 托管）；纯 stdout 源 + 本地原文恢复文件
-    // （0600；守卫重启后 token.js 从文件尾恢复令牌→免重建 main 的会话中断，2026-09 修复）
+    // main 统一守卫 spawn（已废弃 systemd 托管）；纯 stdout 源 + 本地原文恢复文件（0600）：
+    // 守卫重启后从文件尾恢复令牌，免重建 main 的会话中断。
     host.tokenService.attach('main', { file: path.join(path.dirname(host.config.stateFile), 'dsh-main-token.log') });
     host.tokenService.onChange((id, token) => {
       if (host.lanDaemonEnabled()) { try { host._syncLanState(); } catch {} return; }
       if (host.lan) { try { host.lan.applyToken(id, token); } catch (e) { host.logger.warn && host.logger.warn('lan applyToken(' + id + '): ' + e.message); } }
     });
-    // OpenCode 中转：多账号 Key 轮换代理（原生实现，替代退役的 opencode-switcher）
+    // OpenCode 中转：多账号 Key 轮换代理（原生实现）。
     const swDir = path.dirname(host.config.stateFile);
     // 统一「包发布/安装/更新」领域逻辑：全局镜像源配置 + 版本检查 + 安装执行。
     // DSH 自升级与反代子应用共用同一实例，镜像源配置全局一份（registry.json）。
@@ -170,7 +166,7 @@ function composeCore(host, rawConfig, configPath) {
     // **不持有 dist、不调用任何安装执行器** —— 与内核更新机制完全隔离（D6）。
     host.shellDomain = shellDomain;
     // 统一安装/更新任务注册表：收敛 native/instance/plugin/router 的全部
-    // 安装·升级·卸载·更新操作到同一个有状态任务模型（持久化历史 + 统一 API）。
+    // 安装-升级-卸载-更新操作到同一个有状态任务模型（持久化历史 + 统一 API）。
     host.tasks = new TaskRegistry({
       stateDir: swDir,
       logger: host.logger,

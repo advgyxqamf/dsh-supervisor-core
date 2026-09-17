@@ -1,14 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/state/main-store.js —— main 元数据存储工厂（真 ctor 注入）。
-//
-// 级 2：createMainStore(deps) 自己持有 live 缓存与读写实现。
-//   const ms = createMainStore({ getConfig, getLogger });
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
-//
-// deps：getConfig() → { stateFile }；getLogger() → logger。
-// ═══════════════════════════════════════════════════════════════════════════
+// app/state/main-store.js —— main 元数据（dsh-main.json）存储工厂（真 ctor 注入）。
+// createMainStore(deps) 自己持有 live 缓存与读写实现。
+// deps：getConfig() -> { stateFile }；getLogger() -> logger。
 
 const fs = require('node:fs');
 const path = require('node:path');

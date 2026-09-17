@@ -50,7 +50,7 @@ function handleRelayListenFail(host, inst) {
   if (now - last < 60000) return; // 60s 节流：不每 tick 迁移
   host._relayFailThrottle[inst.id] = now;
   portsvc.releaseOwner('relay:' + inst.id);
-  // 清缓存条目与实例的 wanPort 绑定 → syncProxy 重新分配新端口。
+  // 清缓存条目与实例的 wanPort 绑定，交由 syncProxy 重新分配新端口。
   const proxy = host.lanInstances.find((p) => p.id === inst.id);
   if (proxy) proxy.wanPort = null;
   inst.wanPort = null;
@@ -63,7 +63,7 @@ function stopLanServer(host, id) {
   const server = host._lanServers && host._lanServers[id];
   if (!server) return;
   try { server.close(() => {}); } catch {}
-  // 关闭监听后主动断开既有连接：否则长 WS 隧道会让端口滞留 → 重建 EADDRINUSE。
+  // 关闭监听后主动断开既有连接：否则长 WS 隧道会让端口滞留，重建时 EADDRINUSE。
   try { if (typeof server.closeAllConnections === 'function') server.closeAllConnections(); } catch {}
   delete host._lanServers[id];
   if (host.events) host.events.append('lan_instance_stopped', { id });
@@ -91,4 +91,4 @@ function applyToken(host, instId) {
   return !!server;
 }
 
-module.exports = { startLanServer, handleRelayListenFail, stopLanServer, shutdown, applyToken };
+module.exports = { startLanServer, stopLanServer, shutdown, applyToken };

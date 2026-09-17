@@ -2,13 +2,9 @@
 
 const platform = require('../../platform/os/index');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 多实例管理器 —— 沙箱布局（域：instance / sandbox）
-//
-// 纯函数：沙箱根/数据/依赖目录推导、启动命令、systemd 属性与 env 装配、平台能力判决。
-// rootDir 由组装根绑定后显式传入（本模块无状态、无隐式 this）。
-// 能力判决只查 platform/os 的缓存能力矩阵（负结果 60s TTL），不直接 spawn。
-// ═══════════════════════════════════════════════════════════════════════════
+// 沙箱布局：沙箱根/数据/依赖目录推导、启动命令、systemd 属性与 env 装配、平台能力判决。
+// 纯函数，rootDir 由组装根绑定后显式传入（无状态、无隐式 this）；能力判决只查 platform/os
+// 的缓存能力矩阵（负结果 60s TTL），不直接 spawn。
 
 const path = require('node:path');
 
@@ -70,7 +66,7 @@ function sandboxEnv(rootDir, inst) {
 }
 
 /** 平台能力判决（**实时**求值，P2-2 修复）：本平台是否支持沙箱实例（Linux + systemd-run）。
- *  override 非空 → 显式覆写（仅供测试/嵌入方）；否则实时问 platform/os/index.capabilities()，
+ *  override 非空则显式覆写（仅供测试/嵌入方）；否则实时问 platform/os/index.capabilities()，
  *  后者对工具负结果有 60s TTL，不会每次都 spawn 探测进程。 */
 function supported(override) {
   if (override !== undefined && override !== null) return override === true;
@@ -80,4 +76,4 @@ function supported(override) {
   } catch { return false; }
 }
 
-module.exports = { root, dataDir, installDir, sandboxCommand, defaultCommand, effectiveCommand, unitProps, sandboxEnv, supported };
+module.exports = { root, dataDir, installDir, effectiveCommand, unitProps, sandboxEnv, supported };

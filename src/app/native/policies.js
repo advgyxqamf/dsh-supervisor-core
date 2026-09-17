@@ -37,7 +37,7 @@ function versionInfo(host, installedFallback) {
   };
 }
 
-/** 裸名判定：未配置 / 'dsh' / 'dsh.cmd' / 非路径且非 ~ 开头 → 需跨平台解析。 */
+/** 裸名判定：未配置 / 'dsh' / 'dsh.cmd' / 非路径且非 ~ 开头则需跨平台解析。 */
 function isBareCommand(configured) {
   return !configured
     || configured === 'dsh'
@@ -60,6 +60,6 @@ function needsRollback(config, oldVersion, current) {
 }
 
 module.exports = {
-  TERMINAL_STATES, busy, upgradeBrief, versionInfo, isBareCommand,
+  busy, upgradeBrief, versionInfo, isBareCommand,
   isValidVersion, isNewer, isUpToDate, needsRollback,
 };

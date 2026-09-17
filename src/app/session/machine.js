@@ -1,22 +1,15 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/session/machine.js —— 会话状态机（**真 ctor 注入工厂**）
-//
-// 级 2：不再经 host._sessionState 转发；本模块**自己持有**会话态。
-//   const session = createSession({ events, desired, crashHalted });
-// 可只 require 本模块 + 假 deps 直接断言（DF-6），无需构造 Supervisor。
-//
-// deps（均为惰性取值函数——装配期 host.config/logger 尚未就绪）：
-//   events():      EventHub 适配器（有 append 即用；可返回 null）
-//   desired():     'running' | 'stopped'（state 协作方）
-//   crashHalted(): boolean（宿主瞬态字段 _crashHalted）
-// ═══════════════════════════════════════════════════════════════════════════
+// app/session/machine.js —— 会话状态机（真 ctor 注入工厂）。
+// 自己持有会话态：createSession({ events, desired, crashHalted })，可只 require 本模块 + 假 deps 断言。
+// deps 均为惰性取值函数（装配期 host.config/logger 尚未就绪）：
+//   events() EventHub 适配器（有 append 即用，可返回 null）；desired() 'running'|'stopped'；
+//   crashHalted() 宿主瞬态字段 _crashHalted。
 
 function createSession(deps) {
   const g = deps || {};
   const ev = () => (typeof g.events === 'function' ? g.events() : null);
-  let state = 'starting'; // 契约 §3：starting → running → stopping → stopped
+  let state = 'starting'; // 契约 §3：starting -> running -> stopping -> stopped
 
   /** 会话态迁移（同值短路；迁移发事件）。 */
   function setState(s) {

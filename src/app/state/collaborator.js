@@ -1,16 +1,11 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/state/collaborator.js —— **State 协作方工厂（级 2 真 ctor 注入）**。
-//
-// createStateStore(deps) 组合存储原语/字段口/IO 工厂，**自己持有实现**；
-// 不再是 host 既有方法的薄委托。可只 require 本模块 + 假 deps 直接断言（DF-6）。
-//
-// deps（全部惰性取值函数——装配期 host.config/logger/… 尚未就绪）：
+// app/state/collaborator.js —— State 协作方工厂（真 ctor 注入）：组合存储原语/字段口/IO 工厂，
+// 自己持有实现，可只 require 本模块 + 假 deps 直接断言。
+// deps 全部为惰性取值函数（装配期 host 尚未就绪）：
 //   getConfig/getConfigPath/getLogger/getEvents/getManagedObjects/getInstances/getViews/getIntents
 //   getHold/setHold/getSince/setSince, getCrashHalted/setCrashHalted,
 //   getManualRestart/setManualRestart, stopProcess, tick
-// ═══════════════════════════════════════════════════════════════════════════
 
 const { createMainRecord } = require('./main-record');
 const { createMainStore } = require('./main-store');
@@ -46,7 +41,7 @@ function createStateStore(deps) {
     tick: g.tick, stopProcess: g.stopProcess,
   });
 
-  // ── 协作方公共接口（SPEC：state.*）+ 宿主兼容所需的其余真实现 ──
+  // 协作方公共接口（SPEC：state.*）+ 宿主兼容所需的其余真实现
   return {
     // 公共接口
     phase: fields.phase, setPhase: fields.setPhase, guardian: fields.guardian,

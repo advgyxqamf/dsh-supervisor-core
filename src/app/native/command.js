@@ -10,17 +10,16 @@ const fs = require('node:fs');
  *  DSH CLI（@deepseek-ai/dsh lib/bin.js）的 web 子命令带 rejectParentOptions 守卫：
  *  --patch 置于子命令之前会被判为“父级选项”直接报错退出
  *  （error: web takes none of parent --profile, --patch, ...），必须放在子命令之后：
- *    dsh web --patch <overlay> --port <targetPort>   ✔
- *    dsh --patch <overlay> web --port <targetPort>   ✘ exit:1
- *  统一端口注入：确保命令携带 --port <targetPort>（端口由统一配置/动态注册决定）——
- *  若命令已含 --port/-p 则更新为其 targetPort 值；否则在子命令后追加。 */
+ *    dsh web --patch <overlay> --port <targetPort>   （正确）
+ *    dsh --patch <overlay> web --port <targetPort>   （错误，exit:1）
+ *  统一端口注入：确保命令携带 --port <targetPort>；若已含 --port/-p 则更新为其 targetPort 值，否则追加。 */
 function nativeCommand(config, pluginManager) {
   const command = config.command || [];
   const [runtime, bin, ...rest] = command;
   let parts = command;
   if (pluginManager && pluginManager.overlayFile && fs.existsSync(pluginManager.overlayFile)) {
-    // 子命令形态（dsh web …）：--patch 紧跟子命令词之后（web 子命令自声明 --patch）；
-    // 根选项形态（dsh --profile web …，rest[0] 以 '-' 开头）：--patch 保持根级（根程序自声明）。
+    // 子命令形态（dsh web ...）：--patch 紧跟子命令词之后（web 子命令自声明 --patch）；
+    // 根选项形态（dsh --profile web ...，rest[0] 以 '-' 开头）：--patch 保持根级（根程序自声明）。
     const sub = rest.length > 0 ? String(rest[0]) : '';
     if (sub && !sub.startsWith('-')) {
       parts = [runtime, bin, sub, '--patch', pluginManager.overlayFile, ...rest.slice(1)];

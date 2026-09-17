@@ -1,10 +1,8 @@
 'use strict';
 
-// §7（步骤 7）拆分：app/main/shadow.js —— G1 影子记账（_actNote/_mainActualAction/_shadowExcluded/_shadowTickNote/_shadowHeartbeatBeat）。
-// 逐字搬迁自 src/app/main/converge-view.js（原型 mixin），仅做两件事：
-//   1) 导出形态规范化：Object.getOwnPropertyDescriptors(X.prototype) → { methods: { ... } }（契约 §2）；
-//   2) 方法体与注释逐字未改（含缩进）；方法内部继续以 this 协作（契约 §2：本步不做 ctor 注入）。
-// 装配：app/assembly/compose.js 以 Object.assign(host, mod.methods) 注入（DS-G3）。
+// app/main/shadow.js —— 影子记账（_actNote/_mainActualAction/_shadowExcluded/_shadowTickNote/_shadowHeartbeatBeat）。
+// 影子对照真实收敛动作，连续零 diff 是收敛切换门槛的观测依据。
+// 导出形态 { methods }；装配：app/assembly/facets.js 装到 host 实例；方法内部以 this 协作。
 
 module.exports = {
   methods: {
@@ -16,7 +14,7 @@ module.exports = {
     this._mainTickActs.push({ action, reason });
   },
 
-  /** 本拍实际执行的迁移动作：优先拍内执行器记录（最精确含 reason），否则按相位对分类。 */
+  /** 本拍实际执行的迁移动作：优先拍内执行器记录（最精确且含 reason），否则按相位对分类。 */
   _mainActualAction(t0) {
     const acts = this._mainTickActs || [];
     if (acts.length > 0) return acts[acts.length - 1];
@@ -47,8 +45,7 @@ module.exports = {
 
   /** 影子 diff 排除集：异步事件/守卫业务钩子触发（非主循环收敛决策可比范畴），
    *  不计入 diff 与零 diff 门槛。升级钩子 / child exit / spawn error / 假死。
-   *  （原令牌回收 reason 已随 TK-1/TK-2 删除该错误路径而移除——排除项的意义是豁免
-   *  异步事件触发的迁移，而不是给令牌驱动的重启开后门。） */
+   *  排除项的意义是豁免异步事件触发的迁移，而不是给凭据驱动的重启开后门。 */
   _shadowExcluded(reason) {
     if (!reason) return false;
     const r = String(reason);
@@ -82,7 +79,7 @@ module.exports = {
   },
 
   /** 心跳拍聚合（dsh adapter supervise 调用）：有新 tick 记录才记账/发事件；无则不刷。
-   *  连续 5 拍零 diff 记 info（G3 切换门槛观测）。 */
+   *  连续 5 拍零 diff 记 info（收敛切换门槛观测）。 */
   _shadowHeartbeatBeat() {
     try {
       const rec = this._shadowLast;

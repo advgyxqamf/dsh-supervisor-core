@@ -1,12 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 多实例管理器 —— 持久化（域：instance / store）
-//
-// IO：instances.json 原子读写（内容未变不写盘）+ 端口登记全量对账 + 沙箱目录创建。
-// **唯一持有** instances 活数组：外部经 index 的 getter 取同一引用，替换须经 replace()
-// （原地改写，绝不换数组对象——app/state/store.js 等 20+ 处持引用直读/splice）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 持久化：instances.json 原子读写（内容未变不写盘）+ 端口登记全量对账 + 沙箱目录创建。
+// 唯一持有 instances 活数组：外部经 index 的 getter 取同一引用，替换须经 replace() 原地改写，
+// 绝不换数组对象（app/state/store.js 等 20+ 处持引用直读/splice）。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -52,9 +48,9 @@ class InstanceStore {
   replace(list) { this._replace(list); }
 
   save() {
-    // 落盘失败（磁盘满/权限/只读）必须降级而非抛出：本方法从 5s tick 循环调用，
-    // 一旦抛错会经 setInterval → uncaughtException → 触发守卫 3 次退出重启（2026-09 审计修复）。
-    // 实例状态以内存为权威，落盘失败只记日志，下次内容变化时重试。
+    // 落盘失败（磁盘满/权限/只读）必须降级而非抛出：本方法从 5s tick 循环调用，一旦抛错会经
+    // setInterval 到 uncaughtException 触发守卫 3 次退出重启。内存是权威，失败只记日志，
+    // 下次内容变化时重试。
     try {
       const body = JSON.stringify({ instances: this.instances }, null, 2);
       if (body === this._lastBody) return; // 内容未变不写盘（tick 每 5s 全量调用，稳态零写放大）
@@ -68,10 +64,9 @@ class InstanceStore {
     }
   }
 
-  /** 实例端口注册表派生同步（2026-09 架构收敛——取代散落的 4 处手动 registerUser）：
-   *  实例端口真源 = instances.json（内存 instances 数组，用户配置值）；registry 的 inst:* 记录是
-   *  「派生投影」——把配置端口纳入全局冲突视图（防动态分配段撞实例端口），非记忆绑定。
-   *  全量对账：内存实例缺登记 → registerUser；registry 有 inst:* 但内存无对应实例 → unregister。 */
+  /** 实例端口注册表派生同步：端口真源是 instances.json（内存数组，用户配置值）；registry 的 inst:*
+   *  记录是派生投影，把配置端口纳入全局冲突视图（防动态分配段撞实例端口），非记忆绑定。
+   *  全量对账：内存有而 registry 缺则 registerUser；registry 有 inst:* 而内存无对应实例则 unregister。 */
   syncPorts() {
     for (const inst of this.instances) {
       const id = String(inst.id || '');

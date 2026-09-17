@@ -42,7 +42,7 @@
 | 模型 | `desired`（持久意图）× `guardian`（崩溃是否自愈）**两个正交轴** |
 | 开关 | **必须有用户可见入口**（面板） |
 | 崩溃 | `guardian=false` → 停就停（`crashHalted`，等显式启动） |
-| 计数 | **有意义**（回答"用户开的守护触发了几次"），但**不经** `guardian_action`——该事件已删除（见下）。真实实现各走独立链路：**dsh** → `main-process.js` 崩塌收敛发 `restart_triggered` 事件 + `_mSetRestartCount` 写 `restartCount`（`_beginRestart` 内，仅 `countCrash:true` 计数）；**沙箱实例** → `domains/instance/index.js` 自身 `state.restartCount`（`_restartInstance` 递增 + 稳定窗归零）。 |
+| 计数 | **有意义**（回答"用户开的守护触发了几次"），但**不经** `guardian_action`——该事件已删除（见下）。真实实现各走独立链路：**dsh** → `src/app/main/process.js` 崩塌收敛发 `restart_triggered` 事件 + `_mSetRestartCount` 写 `restartCount`（`_beginRestart` 内，仅 `countCrash:true` 计数）；**沙箱实例** → `domains/instance/index.js` 自身 `state.restartCount`（`_restartInstance` 递增 + 稳定窗归零）。 |
 | 停止条件 | 用户关开关 / 退出管家 |
 
 ### 域 B：**基础设施**（能力自愈域）
@@ -98,7 +98,7 @@ ManagedRegistry（心跳驱动 —— 共用）
 | 门禁 | 断言 |
 |---|---|
 | GD-1 | 基础设施 kind（router-daemon/lan-daemon）的 entry **不含** `guardian` 字段 |
-| GD-2 | 基础设施保活路径**不调用** `_guardianEvent`；且该函数已从 control-view.js **删除**（GD-2b：代码全域无定义/调用，注释不计），`guardian_action` 全域无生产者（GD-2c） |
+| GD-2 | 基础设施保活路径**不调用** `_guardianEvent`；且该函数已从 `src/app/daemons/runtime.js` **删除**（GD-2b：代码全域无定义/调用，注释不计），`guardian_action` 全域无生产者（GD-2c） |
 | GD-3 | 两平面 id **显式映射**，保活路径不跨平面混用 id（G-5）；域 A 计数不经 `guardian_action` |
 | GD-4 | 反向：判据能识别"基础设施带 guardian 字段"的旧形态（门禁非空转） |
 | GD-5 | 不再存在对恒 true 值的 `guardian !== true` 补丁判断（基础设施无此概念）|

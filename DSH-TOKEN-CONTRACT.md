@@ -1,14 +1,14 @@
 # DSH 令牌契约（DSH-TOKEN-CONTRACT）
 
 > **本文件是「令牌」的唯一事实源（SSOT）**，2026-09-16 立。
-> 令牌是内核的**基础组件**（`src/platform/token/`），**不是业务域**。
+> 令牌是内核的**基础组件**（`src/platform/service/token/`），**不是业务域**。
 
 ---
 
 ## §1 令牌分类（7 类 + 1 个幽灵键）
 
 ```js
-// src/platform/token/kinds.js —— 分类注册表（新增令牌必须在此登记，否则门禁失败）
+// src/platform/service/token/kinds.js —— 分类注册表（新增令牌必须在此登记，否则门禁失败）
 KINDS = {
   'dsh-main':      { side: 'dsh',        strategy: 'capture+persist', ... },
   'dsh-instance':  { side: 'dsh',        strategy: 'capture+persist', ... },
@@ -60,18 +60,21 @@ KINDS = {
 ## §3 目标结构
 
 ```
-src/platform/token/            ← 基础组件（分层门禁单元名保持不变：src/platform/token）
+src/platform/service/token/  ← 基础组件（分层门禁单元名：src/platform/service）
 ├── index.js       门面：唯一实例；对外 API（§4 冻结）
 ├── kinds.js       ★ 分类注册表（§1）
 ├── pool.js        ★ 令牌池：id → { value, gen, source, at }（含"代"标识）
 ├── capture.js     ★ 捕捉层（事件驱动）：DSH stdout / DSH journal；
 │                    用户配置类**只登记、不捕捉**
 ├── persist.js     ★ 统一持久化：原子写 + 轮转 + 0600 + 脱敏
-└── follow.js      ★ 跟随变动：变更/失效广播
+├── follow.js      ★ 跟随变动：变更/失效广播
+├── exchange.js     dsh-auth 派生令牌换取（§1 exchange 策略）
+├── infer.js        源形态 → kind 推断（纯函数；规则由 app 装配期注入）
+└── snapshot.js     令牌池快照持久化（纯 IO）
 ```
 
-**路径不变式**：对外入口仍为 `require('<...>/platform/token')`，解析到 `token/index.js`。
-（分层门禁 `unitOf` 取前 3 段 → 目录化后单元名仍为 `src/platform/token`，门禁透明。）
+**路径不变式**：对外入口为 `require('<...>/platform/service/token')`，解析到 `token/index.js`。
+（分层门禁 `unitOf` 取前 3 段 → 单元名为 `src/platform/service`；令牌随 platform/service 一并登记。）
 
 ---
 
@@ -113,7 +116,7 @@ pool.onChange(fn)                        // fn(id, value|null, record) —— va
 | TK-1 | `src/` 中不存在把「令牌缺失」当故障并触发重启的代码路径 |
 | TK-2 | 令牌池读写**不出现**在 phase 迁移决策（`_decideMainAction`/`_dshConverge` 的 switch）中 |
 | TK-3 | `kinds.js` 登记全部令牌类型；新增未登记 → 门禁失败 |
-| TK-4 | 除 `src/platform/token/**` 外，无模块持有令牌成员字段（`dshToken` 等） |
+| TK-4 | 除 `src/platform/service/token/**` 外，无模块持有令牌成员字段（`dshToken` 等） |
 | TK-5 | 令牌持久化仅经 `persist.js`；落盘权限一律 0600 |
 | TK-6 | 持久化无 `rmSync` 清空语义（必须轮转） |
 | TK-7 | 用户配置类（remote-token/api-access-key/frp-auth）**不出现**在 `lan-state.json` 中 |
@@ -126,9 +129,9 @@ pool.onChange(fn)                        // fn(id, value|null, record) —— va
 | 门禁 | 断言 |
 |---|---|
 | TK-G1 | `kinds.js` 存在且登记 §1 全部 kind |
-| TK-G2 | **令牌不得驱动生命周期**：`supervise-view.js`/`converge-view.js` 中无 `_maybeReclaimAdoptToken`，且 phase switch 内不读令牌池 |
+| TK-G2 | **令牌不得驱动生命周期**：`src/app/daemons/probe.js`/`src/app/main/controller.js` 中无 `_maybeReclaimAdoptToken`，且 phase switch 内不读令牌池 |
 | TK-G3 | **无静默销毁**：`persist.js` 不含清空式 `rmSync` |
-| TK-G4 | **用户配置类不进 `lan-state.json`**：`control-view.js` 写出的 `tokens` 段只含 `dsh-*` |
+| TK-G4 | **用户配置类不进 `lan-state.json`**：`src/app/daemons/runtime.js#_syncLanState` 写出的 `tokens` 段只含 `dsh-*` |
 | TK-G5 | **单实例令牌获取**：除 token 组件外无 `this.dshToken` 式缓存（relay 改为按需读） |
 | TK-G6 | **令牌不进 argv/URL**：`browser.js` 调用点不得拼 `?token=` |
 | TK-G7 | 幽灵键 `lanToken` 在 `src/` 中零引用 |

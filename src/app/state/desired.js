@@ -1,12 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/state/desired.js —— 用户意图写入工厂（真 ctor 注入）。
-//
-// 级 2：createDesired(deps) 自己持有 setDesired/requestRestart/persistConfigPatch 实现。
-//   const desired = createDesired({ fields, store, getIntents, ... });
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
-// ═══════════════════════════════════════════════════════════════════════════
+// createDesired(deps) 自己持有 setDesired/requestRestart/persistConfigPatch 实现，
+// 可只 require 本模块 + 假 deps 直测。
 
 const fs = require('node:fs');
 

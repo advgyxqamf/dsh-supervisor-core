@@ -1,12 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/state/store.js —— state.json 原子读写 + main 记录迁移工厂（真 ctor 注入）。
 //
-// 级 2：createStore(deps) 自己持有 _lastStateBody 与读写实现。
-//   const store = createStore({ record, fields, mainStore, upgradeHold, getConfig, ... });
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
-// ═══════════════════════════════════════════════════════════════════════════
+// createStore(deps) 自己持有 lastStateBody 缓存与读写实现，可独立直测。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -48,7 +44,7 @@ function createStore(deps) {
   function loadState() {
     try {
       const raw = JSON.parse(fs.readFileSync(config().stateFile, 'utf8'));
-      // 阶段 2 状态单源：desired 权威是受管目录；仅目录文件不存在时用 state.json 作迁移种子。
+      // 状态单源：desired 权威是受管目录；仅目录文件不存在时用 state.json 作迁移种子。
       if (raw.desired === 'stopped' || raw.desired === 'running') {
         const m = reg();
         const registryHasSource = !!(m && m._loadedFromDisk);
@@ -60,13 +56,10 @@ function createStore(deps) {
       if (typeof raw.crashWindowRestarts === 'number') record.fieldOf('crashWindowRestarts', raw.crashWindowRestarts, true);
       if (typeof raw.lastFailure === 'string' || raw.lastFailure === null) record.procFieldOf('lastFailure', raw.lastFailure, true);
       if (typeof raw.lastRestartAt === 'string' || raw.lastRestartAt === null) record.procFieldOf('lastRestartAt', raw.lastRestartAt, true);
-      // 升级 hold 跨守卫重启保持
-      if (raw.upgradeHold === true) {
-        upgradeHold.set(true);
-        if (!upgradeHold.since()) upgradeHold.setSince(Date.now());
-      }
+      // 升级 hold 跨守卫重启保持：使用 upgrade-hold 的真实导出恢复（enter 置 hold 并按需停目标）。
+      if (raw.upgradeHold === true) upgradeHold.enter();
     } catch {}
-    // C3-3b G4：boot 相位不继承——复位 STOPPED，让首拍按真实探测收敛。
+    // boot 相位不继承：复位 STOPPED，让首拍按真实探测收敛。
     try { fields.setPhase('STOPPED'); } catch {}
   }
 

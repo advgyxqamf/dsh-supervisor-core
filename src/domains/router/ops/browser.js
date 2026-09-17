@@ -2,8 +2,8 @@
 
 const platform = require('../../../platform/os/index');
 
-// 图形环境 + 打开浏览器（IO：进程/文件系统/平台层）。从 router-ops.js:50-133 抽出。
-// 防晒/防关联策略与已知边界见原注释；调用方只给策略参数，平台差异封装在 platform.browser。
+// 图形环境 + 打开浏览器（IO：进程/文件系统/平台层）。防风控/防关联策略与已知边界见原注释；
+// 调用方只给策略参数，平台差异封装在 platform.browser。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -45,7 +45,7 @@ function graphicalEnv() {
 }
 
 /** 防风控调起浏览器（OAuth 一键登录）：无痕 + 随机 profile + 屏幕/语言/时区指纹随机化。
- *  @param {function} [onExit] 浏览器进程退出回调（用户关闭 → 取消登录）。
+ *  @param {function} [onExit] 浏览器进程退出回调（用户关闭 -> 取消登录）。
  *  @returns {string|null} 临时 profile 路径（供登录后清理）；失败 null。 */
 function openInBrowser(url, onExit) {
   try {

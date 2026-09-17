@@ -1,16 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/state/main-record.js —— 状态基座的**存储原语工厂**（真 ctor 注入）。
-//
-// 级 2：createMainRecord(deps) 自己持有 fallback 存储与读写实现。
-//   const record = createMainRecord({ getManagedObjects, getLogger });
-//   record.storeOf() / record.fieldOf(...) / record.procFieldOf(...)
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
-//
-// deps：getManagedObjects() → 受管目录（有 get/persistCrashState 即用）
-//       getLogger()        → logger（可 null）
-// ═══════════════════════════════════════════════════════════════════════════
+// app/state/main-record.js —— 状态基座的存储原语工厂（真 ctor 注入）。
+// createMainRecord(deps) 自己持有 fallback 存储与读写实现（storeOf/fieldOf/procFieldOf）。
+// deps：getManagedObjects() -> 受管目录（有 get/persistCrashState 即用）；getLogger() -> logger（可 null）。
 
 function createMainRecord(deps) {
   const g = deps || {};
@@ -18,7 +10,7 @@ function createMainRecord(deps) {
   const logger = () => (typeof g.getLogger === 'function' ? g.getLogger() : null);
   let fallback = null;
 
-  /** 目录 main 项（未初始化/异常 → null）。 */
+  /** 目录 main 项（未初始化/异常返回 null）。 */
   function entryOf() {
     const m = reg();
     if (!m || typeof m.get !== 'function') return null;
@@ -42,7 +34,7 @@ function createMainRecord(deps) {
     return fallback;
   }
 
-  /** B2 归一：崩溃/退避字段变化后落盘目录。 */
+  /** 崩溃/退避字段变化后落盘目录。 */
   function persistCrashField() {
     const m = reg();
     try {

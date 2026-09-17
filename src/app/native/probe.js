@@ -9,7 +9,7 @@ const os = require('node:os');
 const execPath = require('../../platform/os/exec-path');
 const policies = require('./policies');
 
-/** 真实安装检测（唯一入口）：已绑定/显式且非裸名 → 尊重之；否则跨平台解析。 */
+/** 真实安装检测（唯一入口）：已绑定/显式且非裸名则尊重之；否则跨平台解析。 */
 function detected(host) {
   const cmd = Array.isArray(host.config.command) ? host.config.command : [];
   const configured = cmd[1];
@@ -71,7 +71,7 @@ function targetPort(config) {
   try { return Number(new URL(config.healthUrl).port) || null; } catch { return null; }
 }
 
-/** 托管单元名（D3-A 定案后恒为 null）：健康验证只按端口 + 稳定期。 */
+/** 托管单元名（恒为 null）：健康验证只按端口 + 稳定期。 */
 function mainUnit() { return null; }
 
 /** 升级后健康验证：端口在线 + 稳定期（unit 恒 null）。返回 { ok, reason }。 */

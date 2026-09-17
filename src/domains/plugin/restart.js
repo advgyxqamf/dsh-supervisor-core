@@ -1,13 +1,9 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 变更生效（域：plugin / restart，IO）
-//
-// F8：对已变更且运行中的目标触发重启：沙箱走 instances 停起重试，原生走 onNativeRestart。
-//   能力（instances / onNativeRestart / events）经 ctx 显式传入，**不读 this**。
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域变更生效（IO）：对已变更且运行中的目标触发重启，沙箱走 instances 停起重试，
+// 原生走 onNativeRestart。能力经 ctx 显式传入，不读 this。
 
-/** 目标是否运行中（native → main 探针；其它 → 自身 id）。 */
+/** 目标是否运行中（native -> main 探针；其它 -> 自身 id）。 */
 function targetRunning(ctx, target) {
   if (!ctx.instances || !target) return false;
   try {

@@ -1,7 +1,6 @@
 'use strict';
 
-// 官方配额与单价同步（网络 IO）。从 router-ops.js:436-513 抽出。
-// deps 注入：{getProviders, findProvider, save, events, setPriceIndex}。
+// 官方配额与单价同步（网络 IO）。deps 注入：{getProviders, findProvider, save, events, setPriceIndex}。
 
 function createQuotaSyncOps(deps) {
   const d = deps || {};

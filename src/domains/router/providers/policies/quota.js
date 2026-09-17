@@ -1,8 +1,7 @@
 'use strict';
 
-// 额度判定（B3）+ 响应分类（B6）—— 纯函数，零 IO / 零 require。
-// 从 base.js 抽出：窗口/credits 谓词、重置时间归一、上游限制词表分类、配额总览。
-// 供应商可覆写 provider.classifyResponse 使用专属错误码；本文件只提供默认实现。
+// 额度判定（B3）+ 响应分类（B6）：纯函数，零 IO / 零 require，覆盖窗口/credits 谓词、重置
+// 时间归一、上游限制词表分类与配额总览。供应商可覆写 provider.classifyResponse 使用专属错误码，本文件只提供默认实现。
 
 /** 上游「限额/封禁」默认词表：只表达「这类词属于时间窗额度 / 属于预付余额」。
  *  识别不了 = 宁可不切，也不误判（供应商可覆写 classifyResponse 用专属语义）。 */
@@ -22,7 +21,7 @@ function classifyUpstreamLimited(status, text) {
   return 'none';
 }
 
-/** Retry-After / x-ratelimit-reset-ms 头 → 冻结时长（ms）。 */
+/** Retry-After / x-ratelimit-reset-ms 头 -> 冻结时长（ms）。 */
 function headerRetryMs(headers) {
   const h = headers || {};
   const epMs = h['x-ratelimit-reset-ms'];
@@ -39,7 +38,7 @@ function headerRetryMs(headers) {
   return Number.isFinite(at) && at > Date.now() ? at - Date.now() : 0;
 }
 
-/** 响应体中的 “resets in N min/sec” / “resets at <ISO>” → 冻结时长（ms）。 */
+/** 响应体中的 “resets in N min/sec” / “resets at <ISO>” 转为冻结时长（ms）。 */
 function bodyResetMs(text) {
   const t = String(text || '');
   const lower = t.toLowerCase();
@@ -62,8 +61,8 @@ function bodyResetMs(text) {
   return 0;
 }
 
-/** 归一化窗口重置时间 → epoch 毫秒（或 null）：
- *  兼容 ISO 字符串、epoch 毫秒/秒数字、数字字符串。历史缺陷：Number(ISO)=NaN→30d 兜底。 */
+/** 归一化窗口重置时间为 epoch 毫秒（或 null）：兼容 ISO 字符串、epoch 毫秒/秒数字、数字字符串。
+ *  历史缺陷：Number(ISO)=NaN 导致 30d 兜底。 */
 function normalizeResetTs(v) {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v === 'number' || /^\d{1,13}$/.test(String(v).trim())) {
@@ -99,7 +98,7 @@ function isQuotaCreditsLow(q) {
   return typeof rem === 'number' && Number.isFinite(rem) && rem <= 0;
 }
 
-/** 统一配额总览标签（展示/视图单源）：credits 受限优先；月窗口满 或 5h+周同时满 → 用尽。 */
+/** 统一配额总览标签（展示/视图单源）：credits 受限优先；月窗口满，或 5h 与周同时满即用尽。 */
 function quotaOverallStatus(q) {
   if (!q) return '正常';
   if (isQuotaCreditsLow(q)) return '额度用尽';
@@ -178,7 +177,7 @@ function creditsRefilled(acc) {
   return Number.isFinite(now) && now > base;
 }
 
-/** 账号额度使用百分比（各窗口最大百分比）——「将耗尽」信号。 */
+/** 账号额度使用百分比（各窗口最大百分比），「将耗尽」信号。 */
 function quotaPercent(acc) {
   const q = (acc && acc.quota) || {};
   let max = 0;
@@ -188,4 +187,4 @@ function quotaPercent(acc) {
   return max;
 }
 
-module.exports = { classifyUpstreamLimited, headerRetryMs, bodyResetMs, normalizeResetTs, fmtClock, isQuotaCreditsLow, quotaOverallStatus, monthlyResetAtOf, accountQuotaSummary, windowFull, windowExhausted, nextResetAt, creditsResetDue, creditsRefilled, quotaPercent, QUOTA_KEYWORDS, CREDIT_KEYWORDS };
+module.exports = { classifyUpstreamLimited, headerRetryMs, bodyResetMs, normalizeResetTs, fmtClock, isQuotaCreditsLow, quotaOverallStatus, monthlyResetAtOf, accountQuotaSummary, windowExhausted, nextResetAt, creditsResetDue, creditsRefilled, quotaPercent };

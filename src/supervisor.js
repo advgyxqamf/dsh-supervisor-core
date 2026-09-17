@@ -2,21 +2,10 @@
 
 const path = require('node:path');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// src/supervisor.js —— **进程入口 + 组装根（真薄壳）**
-//
-// 职责（仅此三件）：
-//   ① 归一化配置；
-//   ② 调 app/assembly/compose.js 组装全部子系统（唯一 DI 点；切面经
-//      app/assembly/facets.js 显式装到实例，**不再挂任何 prototype**）；
-//   ③ 暴露兼容门面（api/*.js 与测试消费的成员，装配后位于实例上）。
-//
-// ## 为什么是薄壳（步骤 7，2026-09-16；AP1 批 8/10 收口，2026-09-17）
-//   此前本文件 1319 行，方法体被拆成 *-view.js 属性描述符**注入原型**；步骤 7 下沉
-//   业务体后仍以 [mod.methods] 循环批量并到原型（DG-8 / DS-G3b 硬失败项）。
-//   AP1 把批量挂载改为 app/assembly/facets.js 的具名切面装配到 host 实例，
-//   本文件只保留组装入口与公共启动面，满足 DS-G7（≤200）与 DF-1（≤150）。
-// ═══════════════════════════════════════════════════════════════════════════
+// src/supervisor.js —— 进程入口 + 组装根，有意保持薄壳。
+// 职责：归一化配置；调 app/assembly/compose.js 组装全部子系统（唯一 DI 点，切面经
+//   app/assembly/facets.js 显式装到实例，不挂 prototype）；暴露 api/*.js 与测试消费的兼容门面。
+// 契约：业务体不得上提至此（DS-G7 ≤200 行 / DF-1 ≤150 行）；批量挂 prototype 属硬失败（DG-8）。
 
 const platformConfig = require('./platform/service/config');
 // DS-G4（§4.2 反转法）：业务域配置键声明的唯一处是 app/settings；root 仅作兼容门面。
@@ -32,8 +21,7 @@ class Supervisor {
     composeSystem(this, rawConfig, configPath, { createServer });
   }
 
-  /** LanManager 惰性获取（**结构性排除 daemon 模式**）。
-   *  仅当 config.lanDaemon !== true（守卫内嵌承载 relay）时才创建本地实例；
+  /** LanManager 惰性获取：仅 config.lanDaemon !== true（守卫内嵌承载 relay）时创建本地实例。
    *  daemon 模式守卫内始终无 relay 能力，杜绝漏网写入 relay 端口（漂移族 ghost 根因）。
    *  必须留在 root：创建需 configPath/instances/dsh-main 等组装期上下文。 */
   get lan() {

@@ -1,8 +1,7 @@
 'use strict';
 
-// 反代应用注册表与更新（IO）。从 router-ops.js:271-435 抽出。
-// deps 注入：{getProviders, proxyUpdateCache, dist, events, tasks, save, logger}。
-// 更新 job 状态收敛于本工厂闭包（_proxyUpdateJobs → jobs）。
+// 反代应用注册表与更新（IO）。deps 注入：{getProviders, proxyUpdateCache, dist, events, tasks, save, logger}。
+// 更新 job 状态收敛于本工厂闭包（jobs）。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -55,7 +54,7 @@ function createAppsRegistryOps(deps) {
     return results;
   }
 
-  /** 反代更新（job 模型）：立即返回 jobId，异步 stop→start 各实例，前端经 proxyUpdateStatus 轮询。 */
+  /** 反代更新（job 模型）：立即返回 jobId，异步 stop->start 各实例，前端经 proxyUpdateStatus 轮询。 */
   async function applyProxyUpdate(appId) {
     const a = PROXY_APPS[appId];
     if (!a) return { ok: false, error: 'unknown app ' + appId };
@@ -73,7 +72,7 @@ function createAppsRegistryOps(deps) {
       task = tasks.begin('proxy-app', 'update', { id: appId, name: a.name }, { to: a.registry, createdBy: 'user' });
       tasks.start(task.id);
       tasks.log(task.id, '更新 ' + a.name + '（' + a.registry + '）');
-      // P2-1：逐实例步骤登记进统一 task（前端进度事实源）；job.steps 与 task.steps 同源更新。
+      // 逐实例步骤登记进统一 task（前端进度事实源）；job.steps 与 task.steps 同源更新。
       for (const { inst } of insts) tasks.step(task.id, inst.maskedKey);
       job.taskId = task.id;
     }
@@ -98,7 +97,9 @@ function createAppsRegistryOps(deps) {
       for (let i = 0; i < insts.length; i++) {
         const { provider, inst } = insts[i];
         setStep(i, 'stopping');
-        try { provider.stopInstance(inst); } catch (e) { job.errors++; setStep(i, 'failed'); }
+        // force=true：在用/常驻实例不带 force 只会挂待停标记，进程未死则随后的 startInstance
+        // 因 pid 仍在返回 already:true，job 报 done 而旧进程从未重启（假成功）。
+        try { provider.stopInstance(inst, true); } catch (e) { job.errors++; setStep(i, 'failed'); }
       }
       await new Promise((r) => setTimeout(r, 600));
       for (let i = 0; i < insts.length; i++) {

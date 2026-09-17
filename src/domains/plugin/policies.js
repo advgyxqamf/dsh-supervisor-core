@@ -1,14 +1,10 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 纯策略/判定（域：plugin / policies，零 IO）
-//
-// F2：参数安全校验、spec 类型判定、版本判定、补丁行归属判定、包名归属推断、
-//     目标补丁路径推导、CLI argv 组装。全部为**具名纯函数**。
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域纯策略/判定（零 IO）：参数安全校验、spec/版本/补丁行归属判定、
+// 包名归属推断、目标补丁路径推导、CLI argv 组装，全部为具名纯函数。
 
 const { semverCompare } = require('../../shared/version');
-// 纯谓词已下沉 model.js（rank 3）：policies.js（rank 2）只在此处再导出，保持既有导入面不变。
+// 纯谓词已下沉 model.js：此处仅再导出，保持既有导入面不变。
 const { isProtectedName, isOwnRow, isOwnDisabled, ownerPackage, targetHomePatchPath } = require('./model');
 
 /** 禁止以 - 开头的非法插件参数（top-40 截断用于文案）。 */

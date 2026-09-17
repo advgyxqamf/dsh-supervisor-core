@@ -101,9 +101,15 @@ async function main() {
     sup.tokenService.feedLine('inst-z', 'dsh web: http://127.0.0.1:3081/?token=AbC123');
     check('feedLine 捕获成功', sup.tokenService.get('inst-z') === 'AbC123');
     check('onChange 广播', pushed && pushed.id === 'inst-z' && pushed.tok === 'AbC123', pushed);
-    check('重复相同令牌不重复广播（轮换收敛）', pushed.tok === 'AbC123');
+    // 轮换收敛=同值不广播：置空后重喂同值，回调不得再触发
+    pushed = null;
+    sup.tokenService.feedLine('inst-z', 'dsh web: http://127.0.0.1:3081/?token=AbC123');
+    check('重复相同令牌不重复广播（轮换收敛）', pushed === null, '未再广播');
+    // 取消订阅生效：退订后任何新值广播都不得回调
     unsub();
-    check('取消订阅生效', true); // 订阅集合移除（内部无查询接口，语义性断言）
+    pushed = null;
+    sup.tokenService.feedLine('inst-z', 'dsh web: http://127.0.0.1:3081/?token=ZzZ999');
+    check('取消订阅生效（后续广播不再回调）', pushed === null, '未回调');
   }
 
   console.log('\n==============================');

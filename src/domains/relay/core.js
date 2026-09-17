@@ -1,21 +1,18 @@
 'use strict';
 
 // relay 域纯层（DL-G8：不 require node:fs/http/https/net/child_process）。
-// 只放**判定与构造**：来源信任、常数时间比较、令牌门卫决策、Cookie 取值、
-// HTML polyfill 常量、frpc.toml 文本生成、frp 设置归一、公网暴露安全闸。
-// 副作用（写响应/网络/进程）一律留在 proxy/session/tunnel/frp 等 IO 层。
+// 只放判定与构造：来源信任、常数时间比较、令牌门卫决策、Cookie 取值、HTML polyfill 常量、
+// frpc.toml 文本生成、frp 设置归一、公网暴露安全闸；副作用一律留在 proxy/session/tunnel/frp 等 IO 层。
 
 const crypto = require('node:crypto');
-// 来源必须落在**回环或 RFC1918 私有网段**。复用 shared/ip 的同一份判定，
-// 绝不在本域重写第二份（那正是本仓反复出问题的形态）。
+// 来源必须落在回环或 RFC1918 私有网段；复用 shared/ip 的同一份判定，绝不在本域重写第二份。
 const { isLoopbackAddress, isPrivateIpv4 } = require('../../shared/ip');
 
 /** 来源地址是否可信（回环 ∪ RFC1918）。
  *
- *  relay 监听 0.0.0.0 且会把 Origin/Referer 改写成回环权威（「回环呈现」），
- *  因此「谁连得上」等于「谁拿到 DSH 特权面」。加上本闸后，"连得上"被收窄到
- *  回环与私有网段（公网源要到 relay 必须先进内网）。
- *  ⚠ 这不等于鉴权：私网内仍是共享信任域，但堵住了「暴露到公网」这一档。
+ *  relay 监听 0.0.0.0 且把 Origin/Referer 改写成回环权威（「回环呈现」），故「谁连得上」等于
+ *  「谁拿到 DSH 特权面」；本闸把可达来源收窄到回环与私有网段。注意这不等于鉴权：私网内仍是
+ *  共享信任域，只是堵住了暴露到公网这一档。
  *  @param req  HTTP 请求（取 req.socket.remoteAddress）
  *  @param sock 可选的原始 socket（Upgrade 路径的 socket）
  */
@@ -67,10 +64,10 @@ function hasValidToken(req, token) {
   return false;
 }
 
-/** 令牌门卫**决策**（HTTP 响应路径）。纯函数，应答由调用方落笔。
+/** 令牌门卫决策（HTTP 响应路径）。纯函数，应答由调用方落笔。
  *  @returns {ok:true} 放行；
- *           {ok:false, redirect, cookie} 首次凭 URL 令牌进入 → 302 种 HttpOnly Cookie；
- *           {ok:false, unauthorized:true} → 401。
+ *           {ok:false, redirect, cookie} 首次凭 URL 令牌进入，302 种 HttpOnly Cookie；
+ *           {ok:false, unauthorized:true} 401。
  */
 function tokenGateDecision(req, token) {
   if (!token) return { ok: true };
@@ -109,9 +106,9 @@ if (typeof crypto.randomUUID !== 'function') {
 }
 </script>`;
 
-/** settings × instances → frpc.toml **文本**（纯，无 IO）。
- *  健壮性：frpc 默认 loginFailExit=true —— 首次连不上 frps 即退出且不重试，隧道永久失效；
- *  置 false 让 frpc 自身持续重连（frp 原生自愈）。wanPort 未分配时不得写出无效 [[proxies]]。
+/** settings 与 instances 生成 frpc.toml 文本（纯，无 IO）。
+ *  loginFailExit 必须为 false：frpc 默认 true 时首次连不上 frps 即退出且不重试，隧道永久失效；
+ *  置 false 让 frpc 自身持续重连。wanPort 未分配时不得写出无效 [[proxies]]。
  *  @returns {{ text:string, count:number }}
  */
 function buildFrpcToml(settings, instances) {
@@ -138,7 +135,7 @@ function buildFrpcToml(settings, instances) {
   return { text: lines.join('\n'), count };
 }
 
-/** frp 设置归并（patch × 现值，纯）。 */
+/** frp 设置归并（patch 覆盖现值，纯）。 */
 function normalizeFrpSettings(patch, current) {
   const j = patch || {};
   const cur = current || {};
@@ -151,9 +148,9 @@ function normalizeFrpSettings(patch, current) {
   };
 }
 
-/** 公网暴露（frp）安全闸（纯）：relay 空 token 恒放行 + 回环呈现 ⇒ 公网零认证触达特权 API。
- *  开启公网暴露前强制要求已设访问令牌；并做端口合法性 + 实例间端口占用校验。
- *  ⚠ 单一事实源：app 侧 patchDshMain 与 relay 侧 setFrp 必须调用本函数，不得各写一份。
+/** 公网暴露（frp）安全闸（纯）：relay 空 token 恒放行 + 回环呈现，公网可零认证触达特权 API。
+ *  开启前强制要求已设访问令牌，并做端口合法性与实例间占用校验。
+ *  单一事实源：app 侧 patchDshMain 与 relay 侧 setFrp 必须调用本函数，不得各写一份。
  *  @param {boolean} enabled
  *  @param {string} remoteToken
  *  @param {number|string} frpRemotePort
@@ -175,7 +172,6 @@ function validateFrpExposure({ enabled, remoteToken, frpRemotePort, peers, selfI
 
 module.exports = {
   isTrustedSource,
-  safeEqual,
   cookieByName,
   hasValidToken,
   tokenGateDecision,

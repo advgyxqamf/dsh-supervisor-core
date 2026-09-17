@@ -1,7 +1,6 @@
 'use strict';
 
-// 插件市场索引磁盘缓存（IO 叶子）。
-// 从 market.js 抽出：读盘（带真实 indexedAt TTL 语义）与原子写盘。
+// 插件市场索引磁盘缓存（IO 叶子）：读盘（真实 indexedAt TTL）与原子写盘。
 
 const fs = require('node:fs');
 const path = require('node:path');

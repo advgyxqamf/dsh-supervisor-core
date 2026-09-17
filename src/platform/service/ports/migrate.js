@@ -1,8 +1,7 @@
 'use strict';
 
 // 通用端口记录迁移（纯 IO）：把 owner 命中任一前缀的记录从 oldFile 迁出到 newFile，并从旧文件清除。
-// 平台只按 owner 前缀字符串工作，前缀由调用方（域侧）提供（DS-G4）。
-// 语义：目标合并去重（按 port）、幂等（无命中返回 0）、原子写（0600 + .tmp + rename）。
+// 平台只按 owner 前缀字符串工作，前缀由域侧提供（DS-G4）；目标合并去重（按 port）、幂等、原子写。
 
 const fs = require('node:fs');
 const path = require('node:path');

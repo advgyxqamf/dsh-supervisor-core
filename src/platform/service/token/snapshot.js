@@ -1,10 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════
-// 令牌池快照持久化（**纯 IO**；TK-5/TK-7）。
-//  · saveTokens：把「可持久化」记录原子写为 { schema:1, tokens }（0600）；
-//  · loadTokens：读回池快照，仅加载 captured 分类（用户配置/派生/自签绝不回流）。
-// ═══════════════════════════════════════════════════════════════
+// 令牌池快照持久化（纯 IO，TK-5/TK-7）。
+// saveTokens 把可持久化记录原子写为 { schema:1, tokens }（0600）。
+// loadTokens 读回池快照，仅加载 captured 分类，用户配置/派生/自签绝不回流。
 
 const fs = require('node:fs');
 const persist = require('./persist');

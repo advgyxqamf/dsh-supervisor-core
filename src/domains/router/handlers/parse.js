@@ -1,8 +1,7 @@
 'use strict';
 
-// 纯解析层（无 IO、无 this，可独立单测）：URL/请求映射 + 用量解析 + 费用估算 +
-// 目标解析 + 请求体读取。从 forward-core.js:31-146 与 index.js:535 抽出。
-// 不 require 任何 node:fs/net/child_process。
+// 纯解析层（无 IO、无 this，可独立单测）：URL/请求映射 + 用量解析 + 费用估算 + 目标解析 +
+// 请求体读取。不 require 任何 node:fs/net/child_process。
 
 /** 上游 URL 拼接：base + 请求路径（去重 /v1）+ 原始 query。 */
 function joinUpstream(base, reqPath, rawQuery) {
@@ -46,8 +45,8 @@ function extractUsage(text) {
   return best;
 }
 
-/** 按 models.dev 单价估算一次调用费用（$）。单价缺失/未知模型 → 0（不虚报）。
- *  模型名归一化：带供应商前缀（deepseek/deepseek-v4-flash）→ 去前缀查索引。 */
+/** 按 models.dev 单价估算一次调用费用（$）。单价缺失/未知模型则为 0（不虚报）。
+ *  模型名归一化：带供应商前缀（deepseek/deepseek-v4-flash）时去前缀查索引。 */
 function estimateCost(entry) {
   const pricing = entry && entry.pricing;
   if (!pricing || typeof pricing !== 'object') return 0;
@@ -96,7 +95,7 @@ function parseRequest(req, apiPort, bodyBuf) {
   return { pathname: u.pathname, search: u.search, model, streamRequested, bodyJson };
 }
 
-/** 有界读取请求体（100MB 上限）。从 index.js:535 抽出——无 this。 */
+/** 有界读取请求体（100MB 上限），无 this。 */
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = []; let size = 0;

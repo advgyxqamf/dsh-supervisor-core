@@ -18,13 +18,13 @@ class SwitchEngine {
   }
 
   /** 在指定供应商的账号池内选择（供应商独立端点语义）：绝不跨供应商 failover，本池无可用返回 null。
-   *  opts.excludeKeys=Set → 本请求内瞬时故障（5xx/net-error）账号直接排除，强制轮换不粘滞。 */
+   *  opts.excludeKeys=Set 时把本请求内瞬时故障（5xx/net-error）账号直接排除，强制轮换不粘滞。 */
   pickFor(provider, opts) {
     if (!provider) return null;
     return this._pickIn(provider, opts);
   }
 
-  /** S3 选号编排：预算是 usable/running → 调 S1 纯策略 → 应用决策（清锁/写 cursor/标记在用/事件）。 */
+  /** 选号编排：预算 usable/running，调 S1 纯策略，再应用决策（清锁/写 cursor/标记在用/事件）。 */
   _pickIn(p, opts) {
     const isProxy = p.kind === 'proxy';
     const accounts = p.accounts || [];
@@ -54,12 +54,11 @@ class SwitchEngine {
     return picked;
   }
 
-  /** M3：上游失败反应（唯一编排点）。
-   *  ctx = { status, headers, body, attempt, attempts, error? }
+  /** 上游失败反应（唯一编排点）。ctx = { status, headers, body, attempt, attempts, error? }：
    *  1) provider.classifyResponse 给出 signal；
-   *  2) provider.effect 执行账号副作用（credits/window→冻结（proxy 会停实例+预热）、banned→封号；none/transient 无）；
-   *  3) 返回 action：'retry'（credits/window/transient；带 transient 标记供调用方定退避）或
-   *     'passthrough'（banned/none/unknown → 原样回状态/头/体，绝不误切）。 */
+   *  2) provider.effect 执行账号副作用（credits/window 冻结，proxy 会停实例并预热；banned 封号）；
+   *  3) 返回 action：'retry'（credits/window/transient，带 transient 标记供调用方定退避）或
+   *     'passthrough'（banned/none/unknown 原样回状态/头/体，绝不误切）。 */
   reactToFailure(provider, acc, ctx) {
     const c = ctx || {};
     const status = c.status;
@@ -69,8 +68,8 @@ class SwitchEngine {
       : 'none';
     const key = (acc && acc.maskedKey) || '?';
     const d = decideFailure(sig, { status, headers: c.headers, body: text, key });
-    // ⚠ 行为不变量：window 信号必须在 provider.effect 之前把 retryMs 写入 ctx，
-    //   否则 markQuotaExhausted(acc, cooldownMs) 拿到 undefined。
+    // 行为不变量：window 信号必须在 provider.effect 之前把 retryMs 写入 ctx，
+    // 否则 markQuotaExhausted(acc, cooldownMs) 拿到 undefined。
     if (sig === 'window') c.retryMs = d.retryMs;
     if (d.needEffect && provider && provider.effect) provider.effect(sig, acc, c);
     if (d.info && this.logger && this.logger.info) this.logger.info(d.info);
@@ -85,7 +84,7 @@ class SwitchEngine {
     return res;
   }
 
-  // ⚠ 2026-09-16 Phase 5（决策 A5）：已删除 _capture() 取证旁路（无消费方的子系统，见 RouterService 构造期说明）。
+  // 已删除 _capture() 取证旁路（无消费方的子系统）。
 }
 
 module.exports = { SwitchEngine };

@@ -1,13 +1,10 @@
 'use strict';
 
 // 插件市场索引服务：实时聚合 npm + GitHub 的 DeepSeek Harness 插件。
-// 权威判定：包/仓库声明 dsh.bundle 才视为 DSH 插件。
-// 分类基于 keywords + 描述启发；来源标注 npm / github / community。
-// 缓存到磁盘，TTL 刷新，保证"一直最新"。
-//
-// 域内拆分（design-notes/plugin.md）：HTTP 原语在 market-net.js，源叶子在
-//   market-sources.js；**批次循环体保留在本文件**（M-d 门禁按本文件源码断言）。
-//   本类与管理器（PluginManager）零共享状态、零互相调用（并置子域）。
+// 权威判定：包/仓库声明 dsh.bundle 才视为 DSH 插件；分类基于 keywords + 描述启发；
+// 来源标注 npm/github/community；磁盘缓存 + TTL 刷新。
+// HTTP 原语在 market-net.js，源叶子在 market-sources.js；批次循环体必须留在本文件
+// （test/market-budget-test.js M-d 以源码正则锁定「预算检查在 slice 之前」）。
 
 const path = require('node:path');
 const { getJson } = require('./market-net');
@@ -51,14 +48,11 @@ class PluginMarket {
     this._cache = null;
     this._ts = 0;
     this._inFlight = null;
-    // P2-8 修复（2026-09-12）：**整体构建预算**（防一次刷新挂住请求数十分钟）。
-    //   背景：社区源候选约 2468 个，按 8 并发分批、每批各带超时 —— 最坏情况可达数十分钟，
-    //     而 GET /plugins/market 会**阻塞到构建完成**（前端 15s 就放弃了，服务端却还在跑）。
-    //   现给整次构建一个上限：到点则**停止发起新批次**，用已采集的部分构建索引；
-    //     与既有的「坏构建保护」天然配合（部分结果不会冲掉旧缓存）。
-    this.buildBudgetMs = opts.buildBudgetMs || 240000; // 默认 4 分钟
+    // 整体构建预算（默认 4 分钟）：社区源候选约 2468 个，8 并发分批最坏可达数十分钟，
+    // 而 GET /plugins/market 会阻塞到构建完成。到点即停止发起新批次，用已采集部分构建索引。
+    this.buildBudgetMs = opts.buildBudgetMs || 240000;
     this._deadline = 0;
-    // P2-8 配套：本次构建被**预算截断**的源（部分结果不得替换完整缓存，见 _buildIndexInner）。
+    // 记录本次构建被预算截断的源：部分结果不得替换完整缓存（见 _buildIndexInner）。
     this._truncatedSources = new Set();
     this.loadFromDisk();
   }
@@ -77,7 +71,7 @@ class PluginMarket {
   async getIndex(force = false) {
     // 有缓存（含磁盘加载）直接返回；后台刷新
     if (this._cache && !force) {
-      this._refreshIfStale(force);
+      this._refreshIfStale();
       return this._cache;
     }
     if (this._inFlight) return this._inFlight;
@@ -93,7 +87,7 @@ class PluginMarket {
 
   async buildIndex() {
     const start = Date.now();
-    // P2-8：整次构建的总预算（到点停止发起新批次，返回已采集的部分）。
+    // 构建期间置 deadline（各源可观察），finally 清零。
     this._deadline = Date.now() + this.buildBudgetMs;
     this._truncatedSources = new Set();
     try { return await this._buildIndexInner(start); }
@@ -130,15 +124,9 @@ class PluginMarket {
 
     const prev = this._cache;
 
-    // ── 保护 A：**预算截断的源**必须与旧缓存取并集（P2-8 配套修复，2026-09-12）──
-    //
-    //   为什么必须单独处理：下面的保护 B 判据是 !freshSources.has(source)
-    //   ——「本次**整个源失败**」。而被预算截断的源**仍然出现在结果里**（只是不完整），
-    //   于是保护 B **不会**保留它的旧条目：只跑到 200/2400 的 community 源
-    //   会**替换掉**缓存的完整 community 列表，市场瞬间缩水且只留一条 warn。
-    //   （这是我加整体预算时引入的回归：「截断」与「整源失败」语义不同，不能共用判据。）
-    //
-    //   截断源的并集**不受 50% 比例约束** ——「不完整」本身就是需要合并的充分理由。
+    // 保护 A：被预算截断的源仍出现在结果里（只是不完整），不会触发下面的保护 B，
+    // 从而会把缓存的完整列表替换成缩水版；故单独与旧缓存按 source 取并集，
+    // 不受 50% 比例约束（「截断」与「整源失败」语义不同，不能共用判据）。
     const truncated = this._truncatedSources || new Set();
     if (prev && prev.plugins && prev.plugins.length > 0 && truncated.size > 0) {
       const freshNames = new Set(plugins.map((pp) => pp.name));
@@ -151,17 +139,17 @@ class PluginMarket {
       }
     }
 
-    // ── 保护 B（既有，2026-09）：本次结果比上次缓存显著缩水（<50%）→ 某源大面积失败（网络/限流），
-    //    沿用旧缓存中本次**完全缺失**的源；绝不因一次坏构建丢掉好缓存。
+    // 保护 B：本次结果较旧缓存缩水 <50%（某源大面积失败/限流）时，沿用旧缓存中
+    // 本次完全缺失的源，绝不因一次坏构建丢掉好缓存。
     if (prev && prev.plugins && prev.plugins.length > 0 && plugins.length < prev.plugins.length * 0.5) {
       const freshSources = new Set(plugins.map((pp) => pp.source));
       const prevByKey = new Map(prev.plugins.map((pp) => [pp.name, pp]));
-      const keepPrev = prev.plugins.filter((pp) => !freshSources.has(pp.source)); // 本次整个源失败 → 沿用旧源全部
+      const keepPrev = prev.plugins.filter((pp) => !freshSources.has(pp.source)); // 本次整源失败 -> 沿用旧源全部
       for (const kp of keepPrev) { if (!seen.has(kp.name)) { seen.add(kp.name); plugins.push(kp); } }
       this.logger.warn && this.logger.warn('market index partial build: ' + plugins.length + ' (prev ' + prev.plugins.length + ') — 失败源已沿用旧缓存');
     }
 
-    // 合并进来的旧条目未参与上面的排序 → 重排一次，保持 stars 降序（前端依赖该序）。
+    // 合并的旧条目未参与排序，重排保持 stars 降序（前端依赖该序）。
     plugins.sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
     this._cache = { indexedAt: Date.now(), sources: { npm: npm.length, github: gh.length, community: community.length }, total: plugins.length, plugins };
@@ -195,7 +183,7 @@ class PluginMarket {
     // 并行验证 dsh.bundle
     const batch = 8;
     for (let i = 0; i < names.length; i += batch) {
-      // P2-8：预算耗尽即停止发起新批次（已采集的部分照常返回）。
+      // 预算耗尽即停止发起新批次（已采集部分照常返回）。
       if (this._budgetExhausted()) { this._truncatedSources.add("npm"); this.logger.warn && this.logger.warn("market: npm 源预算耗尽，已处理 " + i + "/" + names.length + " 个候选"); break; }
       const slice = names.slice(i, i + batch);
       await Promise.all(slice.map(async (name) => {
@@ -237,7 +225,6 @@ class PluginMarket {
           if (r.full_name === 'deepseek-ai/deepseek-harness') continue;
           const meta = await this.safeRepoPkg(r.full_name);
           if (meta && meta.dsh && meta.dsh.bundle) {
-            const pkgName = meta.name || r.name;
             out.push(githubEntry(meta, r));
           }
         }
@@ -261,10 +248,10 @@ class PluginMarket {
       const links = [];
       let m;
       while ((m = re.exec(md)) !== null) { links.push({ npmName: m[2], ghName: m[3], label: m[1] || '' }); }
-      // 2026-09 提速：候选（~2468）串行逐个打 npm 太慢/易整体超时 → 并发批次（8），单条失败安全跳过
+      // 候选约 2468，串行逐个查 npm 太慢/易整体超时 -> 8 并发批次，单条失败跳过
       const seenName = new Set();
       for (let i = 0; i < links.length; i += 8) {
-        // P2-8：预算耗尽即停止（社区源候选最多，是最容易超时的一段）。
+        // 预算耗尽即停止（社区源候选最多，最易超时）。
         if (this._budgetExhausted()) { this._truncatedSources.add("community"); this.logger.warn && this.logger.warn("market: community 源预算耗尽，已处理 " + i + "/" + links.length + " 个候选"); break; }
         const slice = links.slice(i, i + 8);
         await Promise.all(slice.map((link) => addCommunityLink(this, link, out, seenName)));

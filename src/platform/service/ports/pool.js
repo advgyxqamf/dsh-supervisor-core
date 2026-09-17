@@ -1,12 +1,9 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════
 // 系统级统一端口注册表（PortRegistry）。
-//  - 全系统所有端口登记为唯一来源的「端口记录」{ port, role, owner, createdAt }；
-//  - 持久化到 ports.json（0600）：守卫重启后绑定全量恢复，不丢、不重复分配；
-//  - owner 归属：删除对象即释放端口；注册的唯一事实源。
+// 全系统所有端口登记为唯一来源的端口记录 { port, role, owner, createdAt }，持久化到 ports.json（0600）：
+// 守卫重启后绑定全量恢复，不丢、不重复分配；owner 归属，删除对象即释放端口。
 // 职责分层：纯算法 core.js / 持久化 store.js / 迁移 migrate.js / 探测 probe.js / 分配 alloc.js。
-// ═══════════════════════════════════════════════════════════════
 
 const path = require('node:path');
 const stateRoot = require('../../service/state-root');
@@ -19,7 +16,7 @@ const { PortAllocator } = require('./alloc');
 class PortRegistry {
   /** @param {object} [opts] { file, pools } — file 默认 <状态根>/supervisor/ports.json。 */
   constructor(opts) {
-    // os.homedir() 是三平台正确来源（Windows 用 USERPROFILE）——原 env.HOME||'/tmp' 在 Windows 落 \\tmp。
+    // os.homedir() 是三平台正确来源（Windows 用 USERPROFILE）——原 env.HOME||/tmp 在 Windows 落到盘根 tmp。
     this._file = (opts && opts.file) || path.join(stateRoot.supervisorDir(), 'ports.json');
     this._records = new Map();   // port -> { port, role, owner, createdAt }
     this._allocLock = false;     // 分配互斥：探测(await)窗口内并发调用必须串行
@@ -37,7 +34,7 @@ class PortRegistry {
   /** 实例侧注册接口（委托模块级函数；段名/池名同样是域知识）。 */
   registerSegment(role, pool) { core.registerSegment(role, pool); return this; }
 
-  /** 逻辑段 → 池定义（未注册段名回退 managed 池）。 */
+  /** 逻辑段到池定义（未注册段名回退 managed 池）。 */
   rangeOf(segment) { return core.rangeOf(this._pools, segment); }
 
   _anchorOffset(segment) { return core.anchorOffset(this._pools, segment); }
@@ -51,7 +48,7 @@ class PortRegistry {
     this._load();
   }
 
-  /* ═══ 持久化（委托 store）═══ */
+  /* 持久化（委托 store） */
   _load() {
     this._records = new Map();
     for (const r of store.loadRecords(this._file)) this._records.set(r.port, r);
@@ -66,13 +63,13 @@ class PortRegistry {
 
   _save() { store.saveRecords(this._file, [...this._records.values()]); }
 
-  /** 通用记录迁移：owner 命中任一前缀的记录 oldFile → newFile，并从旧文件清除。 */
+  /** 通用记录迁移：owner 命中任一前缀的记录 oldFile 到 newFile，并从旧文件清除。 */
   migrateByOwnerPrefix(oldFile, newFile, prefixes) {
     return migrate.migrateByOwnerPrefix(oldFile, newFile, prefixes);
   }
 
-  /* ═══ 登记（固定 / 用户 / 动态）═══ */
-  /** 登记固定端口；同端口已被其它固定角色占用 → 报错；user/动态记录 → 固定权威覆盖。 */
+  /* 登记（固定 / 用户 / 动态） */
+  /** 登记固定端口；同端口已被其它固定角色占用则报错；user/动态记录由固定权威覆盖。 */
   register(role, port) {
     const p = Number(port);
     if (!Number.isInteger(p) || p <= 0 || p > 65535) throw new Error('ports.register: 非法端口 ' + port);
@@ -108,8 +105,8 @@ class PortRegistry {
     if (removed) this._save();
   }
 
-  /** 释放端口：不传 ownerId → 按端口号；传了 → 仅当登记 owner 匹配才释放。
-   *  ⚠ 空值检查必须在 owner 比较之前（旧实现顺序反了会抛 TypeError）。
+  /** 释放端口：不传 ownerId 按端口号；传了则仅当登记 owner 匹配才释放。
+   *  注意空值检查必须在 owner 比较之前（旧实现顺序反了会抛 TypeError）。
    *  @returns {boolean} 是否真的释放了一条记录 */
   release(port, ownerId) {
     const p = Number(port);
@@ -121,7 +118,7 @@ class PortRegistry {
     return true;
   }
 
-  /* ═══ 查询 ═══ */
+  /* 查询 */
   /** 按 role 取端口（固定端口）。 */
   get(role) {
     for (const r of this._records.values()) if (r.role === role) return r.port;
@@ -160,8 +157,8 @@ class PortRegistry {
     return [...byPort.values()];
   }
 
-  /* ═══ 确定性槽位仲裁 / 动态分配（委托 PortAllocator）═══ */
-  /** 统一「绑定持久 + 确定性分配 + 孤儿回收」，池满返回显式 conflict。 */
+  /* 确定性槽位仲裁 / 动态分配（委托 PortAllocator） */
+  /** 统一绑定持久 + 确定性分配 + 孤儿回收，池满返回显式 conflict。 */
   claimSlot(rangeKey, owner, opts) { return this._alloc.claimSlot(rangeKey, owner, opts); }
 
   /** 指定逻辑段分配空闲端口并登记（owner 绑定）；池满返回 null。 */
@@ -176,7 +173,7 @@ class PortRegistry {
     }
   }
 
-  /* ═══ 容量 ═══ */
+  /* 容量 */
   /** 池容量视图：每池 { base, size, used, free, utilization }。 */
   capacity() { return core.capacityOf(this._pools, this._records); }
 

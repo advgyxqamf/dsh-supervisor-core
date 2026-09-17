@@ -1,20 +1,14 @@
 'use strict';
 
-// autostart/win32.js —— Windows 自启策略（schtasks DSH-Supervisor-GUI）。
-//
-// Windows 崩溃自拉宿主（2026-09 补齐）：schtasks ONLOGON 只登录启动一次，进程崩溃后不会重启。
-// 方案：双任务——(a) ONLOGON 启动 GUI 壳（用户常驻入口）；(b) Watchdog 每 5 分钟检查守卫。
-// 看护（DSH-Supervisor-Watchdog）与守卫任务（DSH-Supervisor）的所有者 = **桌面壳**
-//   （KERNEL-DAEMON-CONTRACT D6 / KERNEL-LAUNCH-STANDARD H5）。
-//   2026-09-15：本模块只保留「GUI 壳开机自启」这一个语义 —— 不再创建 watchdog、
-//   不再 enable/disable 守卫任务（否则与壳争定义，且形成第二个启动器）。
+// Windows 自启策略（schtasks DSH-Supervisor-GUI）。
+// schtasks ONLOGON 只在登录时启动一次，进程崩溃后不会重启，故由壳建立 watchdog 任务每 5 分钟
+// 检查守卫。守卫任务与 watchdog 的所有者都是桌面壳；本模块只保留「GUI 壳开机自启」这一个语义，
+// 不再创建 watchdog、不再 enable/disable 守卫任务（否则与壳争定义，且形成第二个启动器）。
 
 const ex = require('../../util/exec');
 
-/** 自启状态：三个任务的**职责分离**（2026-09-11 架构修正）：
- *   DSH-Supervisor          -> 守卫守护进程（**由桌面壳建立**）
- *   DSH-Supervisor-GUI      -> 登录时打开桌面壳（本开关管理）
- *   DSH-Supervisor-Watchdog -> 每 5 分钟保活（崩溃自拉，归壳） */
+/** 自启状态（三个任务职责分离）：DSH-Supervisor 为守卫守护进程（壳建立），
+ *  DSH-Supervisor-GUI 为登录时打开桌面壳（本开关管理），DSH-Supervisor-Watchdog 为每 5 分钟保活（归壳）。 */
 function status() {
   let guard = false, gui = false, watchdog = false;
   const has = (tn) => {

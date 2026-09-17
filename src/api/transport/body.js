@@ -1,13 +1,8 @@
 'use strict';
 
-// api/transport/body —— 有界 body 读取（步骤 9：从 index.js 拆出的传输层原语）。
-//
-// 为什么单列 transport/：
-//   这是**传输协议**关注点（读取/限长/超限应答），与安全模型、域分派无关；
-//   归入 transport/ 便于后续把 WS 升级等其它传输原语也收拢到同一处。
+// api/transport/body —— 有界 body 读取（传输层原语，与安全模型、域分派无关）。
 
-/** 有界 body 读取：超过 maxBytes 时先应答 413 再断开连接。
- *  旧实现直接 req.destroy() 且不响应，客户端会永久挂起；这里保证任何输入都有终态应答。 */
+/** 有界 body 读取：超过 maxBytes 时先应答 413 再断开连接，保证任何输入都有终态应答。 */
 function collectBody(req, res, maxBytes, onDone) {
   let body = '';
   let over = false;
@@ -27,7 +22,22 @@ function collectBody(req, res, maxBytes, onDone) {
     }
   });
   req.on('error', () => {});
-  req.on('end', () => { if (!over) onDone(body); });
+  // onDone 是延迟回调（'end' 事件内同步调用）：其同步抛出会逃出请求处理的异常边界，
+  //   升级为进程级 uncaughtException。必须在本层接住并给出终态应答。
+  req.on('end', () => {
+    if (over) return;
+    try { onDone(body); }
+    catch (e) {
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: (e && e.message) || String(e) }));
+        } else if (!res.writableEnded) {
+          res.end();
+        }
+      } catch {}
+    }
+  });
 }
 
 module.exports = { collectBody };

@@ -1,22 +1,18 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════
-// 端口池与逻辑段的**纯**核心（无 IO / 无定时 / 无进程）。
-//
-// 模型：少数「物理池」+ 「逻辑段→池」映射。逻辑段名（role）是端口记录上的业务
-// 标签，仅决定从哪个池取号。⚠ 具体段名是域知识，不在本平台模块出现（门禁 DS-G4）：
-// 由域在装配期经 registerSegment(role, pool) 申报。
+// 端口池与逻辑段的纯核心（无 IO / 无定时 / 无进程）。
+// 模型：少数物理池 + 逻辑段到池的映射。逻辑段名仅决定从哪个池取号，具体段名是域知识，
+// 不在本平台模块出现（门禁 DS-G4）：由域在装配期经 registerSegment(role, pool) 申报。
 // 设计依据：RFC 6335 §6（三段制）+ Kubernetes NodePort 分配器（显式 ErrFull）。
-// ═══════════════════════════════════════════════════════════════
 
 const BASE_POOLS = {
   managed: { base: 20000, count: 4000 },      // 通用共享池（默认 20000-23999）
 };
 const DEFAULT_POOLS = Object.assign({}, BASE_POOLS);
 
-// 逻辑段（role）→ 物理池；未申报段名一律回退通用池 managed（前向兼容）。
+// 逻辑段（role）-> 物理池；未申报段名一律回退通用池 managed（前向兼容）。
 const SEGMENT_POOL = Object.create(null);
-// 段 → 池内显式锚点（可选，由域申报）：给定后「同池各段起点」不依赖申报顺序。
+// 段 -> 池内显式锚点（可选，由域申报）：给定后「同池各段起点」不依赖申报顺序。
 const SEGMENT_ANCHOR = Object.create(null);
 
 // 共享单例引用（在 index.js 构造后回填）：使模块级 registerPools 能同步已存在实例。
@@ -50,13 +46,13 @@ function registerSegment(role, pool) {
   return Object.assign({}, SEGMENT_POOL);
 }
 
-/** 逻辑段 → 池定义（未注册段名回退 managed 池）。 */
+/** 逻辑段到池定义（未注册段名回退 managed 池）。 */
 function rangeOf(pools, segment) {
   const pool = SEGMENT_POOL[segment] || 'managed';
   return pools[pool] || DEFAULT_POOLS[pool] || DEFAULT_POOLS.managed;
 }
 
-/** 逻辑段在所属池内的锚点偏移：域申报 anchor 优先，否则同池段序 × 1000。 */
+/** 逻辑段在所属池内的锚点偏移：域申报 anchor 优先，否则同池段序 x 1000。 */
 function anchorOffset(pools, segment) {
   const range = rangeOf(pools, segment);
   const explicit = SEGMENT_ANCHOR[segment];
@@ -115,7 +111,7 @@ function snapshotOf(records) {
 }
 
 module.exports = {
-  BASE_POOLS, DEFAULT_POOLS, SEGMENT_POOL, SEGMENT_ANCHOR,
+  BASE_POOLS, DEFAULT_POOLS, SEGMENT_POOL,
   bindShared, registerPools, registerSegment,
   rangeOf, anchorOffset, reservedPoolOf, capacityOf, availableOf, snapshotOf,
 };

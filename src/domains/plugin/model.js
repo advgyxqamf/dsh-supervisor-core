@@ -2,16 +2,9 @@
 
 const path = require('node:path');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 领域模型（域：plugin / model，纯）
-//
-// F1：内置保护名单 + 作业记录形状 + 纯状态迁移。**零 IO、零 this 协作**。
-//   · PROTECTED           —— 内置组件名单（禁止卸载/禁用）
-//   · createJobRecord     —— 作业记录（install/uninstall/update 统一形状）
-//   · finishJobRecord     —— 作业收尾（状态/错误/完成时刻）
-//   · planJobCleanup      —— 作业保留上限（超出清理最旧）
-//   · taskStateToJobState —— TaskRegistry 状态 → 作业视图状态（单一事实源映射）
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域领域模型（纯，零 IO、零 this 协作）。
+// 内置保护名单 PROTECTED、作业记录形状与纯状态迁移（createJobRecord/finishJobRecord/
+// planJobCleanup/taskStateToJobState）、补丁行归属与包名归属判定、home 补丁层路径推导。
 
 /** 内置组件：禁止卸载/禁用（bind 进 store/ops 的判定）。 */
 const PROTECTED = new Set(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']);
@@ -41,7 +34,7 @@ function planJobCleanup(ids, max = MAX_JOBS) {
   return ids.slice(0, ids.length - max);
 }
 
-/** TaskRegistry 状态 → 作业视图状态（succeeded/skipped→done；failed/canceled→failed）。 */
+/** TaskRegistry 状态映射为作业视图状态（succeeded/skipped->done；failed/canceled->failed）。 */
 function taskStateToJobState(s) {
   return (s === 'succeeded' || s === 'skipped') ? 'done'
     : (s === 'failed' || s === 'canceled') ? 'failed'
@@ -74,6 +67,6 @@ function targetHomePatchPath(target) {
 }
 
 module.exports = {
-  PROTECTED, MAX_JOBS, createJobRecord, finishJobRecord, planJobCleanup, taskStateToJobState,
+  PROTECTED, createJobRecord, finishJobRecord, planJobCleanup, taskStateToJobState,
   isProtectedName, isOwnRow, isOwnDisabled, ownerPackage, targetHomePatchPath,
 };

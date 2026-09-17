@@ -1,10 +1,9 @@
 'use strict';
 
-// 用量账本（IO）：记账 + 按 key/model 聚合 + 原子落盘 + 汇总视图。
-// 从 forward-core.js:476-539 抽出。写权单闸：落盘前问注入的 canPersist()
-// （RT1 store.js 提供唯一闸；本模块不再自行判断 _persistEnabled）。
-// .tmp 命名与 store.js 统一：<file>.tmp.<pid>.<ts>（唯一，防并发写混合内容）。
-// 依赖：node:fs/node:path（IO 模块）+ 注入的纯函数（keyFingerprint/estimateCost）。
+// 用量账本（IO）：记账 + 按 key/model 聚合 + 原子落盘 + 汇总视图。写权单闸：落盘前问注入的
+// canPersist()（store.js 提供唯一闸，本模块不再自行判断 _persistEnabled）。.tmp 命名与 store.js
+// 统一为 <file>.tmp.<pid>.<ts>（唯一，防并发写混合内容）。依赖 node:fs/node:path 与注入的
+// 纯函数（keyFingerprint/estimateCost）。
 
 const fs = require('node:fs');
 const path = require('node:path');

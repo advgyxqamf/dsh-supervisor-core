@@ -3,14 +3,13 @@
 const platform = require('../../platform/os/index');
 const pidlook = require('../../platform/os/pidlookup');
 
-// frpc 进程托管 + settings 持久化 + status + syncFromInstances。
-// frp 安装（下载/校验/解压）在 frp-install.js，按副作用生命周期切开。
-// - 由受管清单里开启 frpEnabled 的实例动态生成 frpc.toml
-// - 托管 frpc 进程生命周期（启动/停止/崩溃退避重启/孤儿清理/权限加固）
+// frpc 进程托管 + settings 持久化 + status + syncFromInstances（frp 安装/校验/解压在 frp-install.js）。
+// 由受管清单里开启 frpEnabled 的实例动态生成 frpc.toml，并托管 frpc 进程生命周期
+// （启动/停止/崩溃退避重启/孤儿清理/权限加固）。
 
 const fs = require('node:fs');
 const path = require('node:path');
-// SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）；需读 frpc 输出 → piped。
+// SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）；需读 frpc 输出，故用 piped。
 const spawnOS = require('../../platform/os/spawn');
 const { buildFrpcToml } = require('./core');
 const { frpPlatformTag, download, installFrpc } = require('./frp-install');
@@ -28,7 +27,7 @@ class FrpManager {
     this.binPath = path.join(this.binDir, tag ? (tag.exe ? 'frpc.exe' : 'frpc') : 'frpc');
     this.child = null;
     this.logTail = [];
-    // 兜底重启（2026-09 修复）：frpc 非预期退出（崩溃/配置错误/OOM）时自动重拉。
+    // 兜底重启：frpc 非预期退出（崩溃/配置错误/OOM）时自动重拉。
     this._lastCount = 0;      // 最近一次生成的 [[proxies]] 数（决定是否值得重启）
     this._restartTimer = null;
     this._restartAttempts = 0;
@@ -37,7 +36,7 @@ class FrpManager {
     this._hardenPermissions(); // 历史遗留文件权限加固（见方法说明）
   }
 
-  /** 敏感文件权限加固（2026-09 修复）：frpc.toml 含 auth.token 明文、frp.json 同含 token。
+  /** 敏感文件权限加固：frpc.toml 含 auth.token 明文、frp.json 同含 token；
    *  新写入已用 0600，但历史遗留文件可能是早期版本以默认 umask 写出的 0644/0664。 */
   _hardenPermissions() {
     try {
@@ -48,7 +47,7 @@ class FrpManager {
     } catch { /* 平台层不可用时忽略（不阻断 frp 功能） */ }
   }
 
-  /* ── 设置持久化 ── */
+  /* 设置持久化 */
   loadSettings() {
     try {
       const s = JSON.parse(fs.readFileSync(this.settingsFile, 'utf8'));
@@ -71,7 +70,7 @@ class FrpManager {
     try { fs.chmodSync(this.settingsFile, 0o600); } catch {}
   }
 
-  /* ── 状态 ─ */
+  /* 状态 */
   status() {
     return {
       installed: fs.existsSync(this.binPath),
@@ -116,7 +115,7 @@ class FrpManager {
   start() {
     if (this.child && this.child.pid) return { ok: true, already: true, pid: this.child.pid };
     this._intentionalStop = false; // 显式启动：清除主动停止标记
-    // 稳定运行 60s → 重置重试计数。
+    // 稳定运行 60s 后重置重试计数。
     if (this._stableTimer) clearTimeout(this._stableTimer);
     this._stableTimer = setTimeout(() => { this._restartAttempts = 0; }, 60000);
     if (this._stableTimer.unref) this._stableTimer.unref();
@@ -124,7 +123,7 @@ class FrpManager {
     this._cleanupOrphans();
     if (!fs.existsSync(this.binPath)) return { ok: false, error: 'frpc binary missing', needInstall: true };
     try { fs.accessSync(this.configFile, fs.constants.R_OK); } catch { return { ok: false, error: 'no config generated yet' }; }
-    // ⚠ spawn 可能**同步抛出**（binPath 不是可执行格式），必须降级为返回值而非崩溃进程。
+    // spawn 可能同步抛出（binPath 不是可执行格式），必须降级为返回值而非崩溃进程。
     let child;
     try {
       child = spawnOS.piped(this.binPath, ['-c', this.configFile]);
@@ -139,7 +138,7 @@ class FrpManager {
       this.logTail.push(new Date().toISOString().slice(11, 19) + ' ' + line);
       if (this.logTail.length > 200) this.logTail.splice(0, this.logTail.length - 200);
     };
-    // ⚠ 必须监听 'error'：二进制存在但不可执行时 Node 会**异步** emit 'error'；无监听器即未捕获异常。
+    // 必须监听 'error'：二进制存在但不可执行时 Node 会异步 emit 'error'，无监听器即未捕获异常。
     child.on('error', (e) => {
       pushLog('[spawn error] ' + ((e && e.message) || e));
       if (this.child === child) this.child = null;
@@ -182,7 +181,7 @@ class FrpManager {
     this._intentionalStop = true;
     if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
     if (!this.child) {
-      // 本守卫无句柄：可能是守卫重启产生的孤儿 frpc → 按配置特征清理。
+      // 本守卫无句柄：可能是守卫重启产生的孤儿 frpc，按配置特征清理。
       const killed = this._cleanupOrphans();
       if (killed > 0 && this.events) this.events.append('frpc_stopped', {});
       return { ok: true, already: true };

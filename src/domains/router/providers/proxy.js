@@ -1,15 +1,13 @@
 'use strict';
 
-// 反代供应商：账号=代理实例（进程），每账号一个实例（硬规则）。
-// 本文件 = 实例进程治理入口 + 账号生命周期钩子 + 池/探测/重启/命令委托。
-//   · 命令拼装 → command.js（纯）      · 实例池决策 → pool.js（纯）
-//   · spawn/探活/配额探测 → probe.js   · 重启重拉/对账 → restart.js
-//   · 冻结/解冻状态机 → base.js/policies/freeze.js
+// 反代供应商：账号=代理实例（进程），每账号一个实例（硬规则）。本文件是实例进程治理入口 +
+// 账号生命周期钩子 + 池/探测/重启/命令委托：命令拼装归 command.js，实例池决策归 pool.js，
+// spawn/探活/配额探测归 probe.js，重启重拉/对账归 restart.js，冻结/解冻状态机归 base.js 与 freeze.js。
 
 const { ProviderBase } = require('./base');
 const { keyFingerprint, maskKey } = require('./model');
 const { ProxyInstance } = require('../model');
-require('../port-segments'); // DS-G4 §4.2：本域端口段/独立池申报（require 即注入）
+require('../port-segments'); // 本域端口段/独立池申报（require 即注入）
 const ports = require('../../../platform/service/ports').shared;
 const pidlook = require('../../../platform/os/pidlookup');
 const { npxBin } = require('../../../platform/os/exec-path');
@@ -40,7 +38,7 @@ class ProxyProvider extends ProviderBase {
       logger: this.logger,
       isStopping: () => this._stopping,
     });
-    // ctor 注入钩子（打破 base→proxy 的 this.stopInstance 反向边）：删账号时释放实例与端口绑定
+    // ctor 注入钩子（打破 base 到 proxy 的 this.stopInstance 反向边）：删账号时释放实例与端口绑定
     this._hooks = this._hooks || {};
     this._hooks.onDiscardAccount = (acc) => {
       if (acc.instance) { try { this.stopInstance(acc.instance); } catch {} }
@@ -56,7 +54,7 @@ class ProxyProvider extends ProviderBase {
 
   accountOf(inst) { return this.accounts.find((a) => a.key === inst.key) || null; }
 
-  /** 账号 → 实例映射（一账号一实例）：usageOf 派生 warming 的依据。 */
+  /** 账号 -> 实例映射（一账号一实例）：usageOf 派生 warming 的依据。 */
   instanceOf(acc) {
     if (!acc) return null;
     return (this.instances || []).find((i) => i.keyId === acc.keyId) || acc.instance || null;
@@ -112,7 +110,7 @@ class ProxyProvider extends ProviderBase {
   _cachedPkgBin(pkg) { return probe.cachedPkgBin(pkg); }
   _ensurePkgCached(app) { return probe.ensurePkgCached(this, app); }
 
-  /** 启动实例（底层治理在 probe.js）。⚠ 方法保留在原型上：测试以 _doStart 打桩替换 spawn。 */
+  /** 启动实例（底层治理在 probe.js）。注意：方法保留在原型上，测试以 _doStart 打桩替换 spawn。 */
   async _doStart(inst) { return probe.spawnInstance(this, inst); }
 
   /** 标记实例被请求使用：只记录 lastUsedAt（清零归 markRequestOk，避免熔断计数到不了阈值）。 */
@@ -129,7 +127,7 @@ class ProxyProvider extends ProviderBase {
 
   /** 实例停止仲裁（委托 instance-lifecycle.js）。 */
   _canStopInstance(acc) { return life.canStopInstance(this, acc); }
-  /** 实例停止（幂等）：在途/在用 → 标记待停；force 跳过仲裁（委托 instance-lifecycle.js）。 */
+  /** 实例停止（幂等）：在途/在用 -> 标记待停；force 跳过仲裁（委托 instance-lifecycle.js）。 */
   stopInstance(inst, force) { return life.stopInstance(this, inst, force); }
   /** 请求结束补刀（委托 instance-lifecycle.js）。 */
   _retryPendingStop(acc) { return life.retryPendingStop(this, acc); }
@@ -173,7 +171,7 @@ class ProxyProvider extends ProviderBase {
     this._restart.respawn(inst, { acc, hadPid });
   }
 
-  /** 请求级熔断：连续 ≥2 次报错 → 重启实例（与健康监测 _monitorFails 独立）。 */
+  /** 请求级熔断：连续 ≥2 次报错 -> 重启实例（与健康监测 _monitorFails 独立）。 */
   markInstanceProblem(instOrAcc, reason) {
     try {
       const inst = instOrAcc && instOrAcc.pid ? instOrAcc : null;
@@ -234,7 +232,7 @@ class ProxyProvider extends ProviderBase {
 
   _probeAfterResponseFreeze(acc) { return probe.probeAfterResponseFreeze(this, acc); }
 
-  // ── 实例池策略（纯决策在 pool.js，此处读 provider 状态并落 sticky）──
+  // 实例池策略（纯决策在 pool.js，此处读 provider 状态并落 sticky）
   _quotaPercent(acc) { return poolPolicy.quotaPercent(acc); }
 
   residentAccount() {

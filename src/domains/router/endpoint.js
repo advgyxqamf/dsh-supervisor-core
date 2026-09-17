@@ -2,9 +2,9 @@
 
 const https = require('node:https');
 
-// Q8 激活与端点启停 + Q9 请求分派与 HTTP 装配。
-// 域内唯一 require('node:http') 并 createServer 的地方；转发经注入的 forward.proxyFor，
-// 实例保障经注入的 scheduler.ensureProviderInstances —— 本文件不 require 实现（手法 B）。
+// Q8 激活与端点启停 + Q9 请求分派与 HTTP 装配。域内唯一 require('node:http') 并 createServer
+// 的地方；转发经注入的 forward.proxyFor，实例保障经注入的 scheduler.ensureProviderInstances，
+// 本文件不 require 实现（手法 B）。
 //
 // 契约导出：createEndpoint(deps)；deps={ state, logger, events, ports, forward, getProvider, save, scheduler }。
 
@@ -106,7 +106,8 @@ function createEndpoint(deps) {
     if (p.activated) {
       p.activated = false;
       stopProviderServer(id);
-      if (p.kind === 'proxy') { for (const i of (p.instances || [])) { try { p.stopInstance(i); } catch {} } }
+      // force=true：停用是资源回收语义；不带 force 时在用实例只挂待停标记，而停用后补刀不可达，进程泄漏。
+      if (p.kind === 'proxy') { for (const i of (p.instances || [])) { try { p.stopInstance(i, true); } catch {} } }
       if (events) events.append('router_provider_deactivated', { id, name: p.name });
       save();
     }
@@ -114,7 +115,7 @@ function createEndpoint(deps) {
   }
 
   /** 守卫/路由器启动恢复：已激活供应商端点 + 反代主实例常驻（幂等）。
-   *  兼容迁移：旧激活供应商可能尚无 apiPort → 启动时补分配（此后持久化，重启复用）。 */
+   *  兼容迁移：旧激活供应商可能尚无 apiPort，启动时补分配（此后持久化，重启复用）。 */
   async function startActivatedProviders() {
     for (const p of state.providers || []) {
       if (p.activated !== true) continue;

@@ -1,8 +1,8 @@
 'use strict';
 
 // 远程控制编排主体（LanManager）：多实例反向代理（relay）+ 公网暴露（frpc）。
-// 单一数据源：远程控制配置存于 instances.json；lanInstances 只是内存派生缓存（由 syncProxy 维护）。
-// 依赖：managed / ports / proxy / frp / core（单向，见 index.js 门面注释）。
+// 单一数据源是 instances.json，lanInstances 只是 syncProxy 维护的内存派生缓存；
+// 依赖 managed / ports / proxy / frp / core（单向，见 index.js 门面注释）。
 
 const managed = require('./managed');
 const portsvc = require('./ports');
@@ -34,11 +34,11 @@ class LanManager {
     this.instances = opts.instances; // InstanceManager（沙箱实例配置单一数据源）
     this.configPath = opts.configPath || ''; // 端口回收 reclaimCfg 精确匹配——防误杀其它配置的 lan-daemon
     this.mainOf = opts.mainOf || null; // 守卫核心服务的原生主干视图
-    this.persist = opts.persist || null; // 持久化路由：沙箱→instances.save()，main 变更→守卫 dsh-main.json
+    this.persist = opts.persist || null; // 持久化路由：沙箱写 instances.save()，main 变更写守卫 dsh-main.json
     // frp 托管经 ctor 注入（默认真实实现）：替身价值高，单测可给假 frp。
     this.frp = opts.frp || new FrpManager({ dir: opts.stateDir, logger: this.logger, events: this.events });
     this.lanInstances = []; // [{ id, name, dshPort, wanPort, token, enabled, frpEnabled, frpRemotePort, localPort }]
-    this._reconcileInFlight = null; // 对账单飞（P2-8）：避免 2s 节拍叠加串行 TCP 探测
+    this._reconcileInFlight = null; // 对账单飞：避免 2s 节拍叠加串行 TCP 探测
     this._lanServers = {};   // id -> http.Server（relay）
     // 令牌只读来源（DshTokenService 注入）：不持久化令牌副本，一律按需 tokenOf。
     this.tokenOf = opts.tokenOf || (() => '');
@@ -63,7 +63,7 @@ class LanManager {
     const addresses = this.localAddresses();
     const insts = this._allManaged();
     const remoteInsts = insts.filter((x) => x.remoteEnabled);
-    // 幂等自愈：remoteEnabled 实例 → 异步补建代理（不可达由 syncProxy 内 TCP 裁决跳过）。
+    // 幂等自愈：remoteEnabled 实例异步补建代理（不可达由 syncProxy 内 TCP 裁决跳过）。
     for (const inst of remoteInsts) {
       if (!this.lanInstances.some((p) => p.dshPort === inst.port)) {
         this._syncProxyQueued(inst).catch((e) => this.logger.warn && this.logger.warn('syncProxy failed: ' + e.message));
@@ -154,9 +154,9 @@ class LanManager {
     }
   }
   /** 远程代理对账：注册只与「开关」绑定；relay 运行 = 目标存活；孤儿注册移除。
-   *  P2-8 单飞：对账内含逐实例串行 await targetReachable（每个最多 600ms），而被 2 秒级节拍多次
-   *  触发；同刻只允许一轮在跑，后续调用复用同一在途 Promise。
-   *  ⚠ 刻意**不加 async**：async 总会把返回值包一层新 Promise（单飞身份丢失）。 */
+   *  单飞：对账内含逐实例串行 await targetReachable（每个最多 600ms），而被 2 秒级节拍多次触发；
+   *  同刻只允许一轮在跑，后续调用复用同一在途 Promise。
+   *  刻意不加 async：async 会把返回值包一层新 Promise，单飞身份丢失。 */
   reconcile() {
     if (this._reconcileInFlight) return this._reconcileInFlight;
     this._reconcileInFlight = this._reconcileOnce()
@@ -178,12 +178,12 @@ class LanManager {
     if (!inst) return;
     if (inst.remoteEnabled) {
       const owner = 'relay:' + inst.id;
-      // 已登记且端口有效 → 确保 server 在跑，直接返回（幂等，不做任何重分配）。
+      // 已登记且端口有效：确保 server 在跑后直接返回（幂等，不重分配）。
       const existing = this.lanInstances.find((p) => p.dshPort === inst.port);
       if (existing && existing.wanPort) {
         const srv = this._lanServers && this._lanServers[inst.id];
         if (!srv) this._startLanServer(existing);
-        // P1（2026-09-13）：**令牌变化必须热换到已在运行的 relay**（旧快路径直接 return，令牌无声残留）。
+        // 令牌变化必须热换到已在运行的 relay，否则旧快路径直接 return 会让令牌无声残留。
         const want = String(inst.remoteToken || '');
         if (existing.token !== want) applyRelayToken(this, existing, want);
         // 同时热换 frp 开关/远端端口（setFrp 改的就是这两个字段）。
@@ -249,7 +249,6 @@ class LanManager {
   /** 实例停止时联动远程代理（委托 ops/reconcile.js）。 */
   instanceStop(inst) { return reconcile.instanceStop(this, inst); }
   _startLanServer(inst) { return lanServers.startLanServer(this, inst); }
-  _handleRelayListenFail(inst) { return lanServers.handleRelayListenFail(this, inst); }
   _stopLanServer(id) { return lanServers.stopLanServer(this, id); }
   /** 守卫优雅退出时调用（委托 ops/lan-servers.js）。 */
   shutdown() { return lanServers.shutdown(this); }

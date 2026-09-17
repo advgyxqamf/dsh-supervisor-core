@@ -1,11 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 多实例管理器 —— 门面 + 组装根（域：instance）
-// 只做组合与委托：构造纯模块/IO 模块实例、注入协作方，导出 class InstanceManager。
-// 对外契约逐字保持（16 个成员 + instances 活数组 + 6 个回调访问器，见 §3.3）。
-// 域内依赖：index → ops/scheduler → lifecycle → store → model/sandbox/state-machine（单向 DAG）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 多实例管理器：门面 + 组装根。只做组合与委托（构造纯模块/IO 模块、注入协作方），
+// 导出 class InstanceManager；对外契约逐字保持（16 成员 + instances 活数组 + 6 回调访问器，见 §3.3）。
+// 域内依赖：index -> ops -> lifecycle -> store -> model/sandbox/state-machine（单向 DAG）。
 
 const path = require('node:path');
 const os = require('node:os');
@@ -41,16 +38,16 @@ class InstanceManager {
     };
     ctx.lifecycle = this._lifecycle = createLifecycle(ctx);
     ctx.upgrade = this._upgrade = createUpgrade(ctx);
-    ctx.install = (inst) => this._upgrade.installSandbox(inst); // 注入而非 require（避免 lifecycle⇄upgrade 成环）
+    ctx.install = (inst) => this._upgrade.installSandbox(inst); // 注入而非 require（避免 lifecycle 与 upgrade 成环）
     ctx.ops = this._ops = createOps(ctx);
   }
 
-  /** instances **活数组**：每次返回 store 当前数组（身份稳定；app/state/store.js 等 20+ 处持引用直读/splice）。
-   *  ⚠ 跨域消费方（DG-11）只经下面的查询接口取用，不直读本内部活数组。 */
+  /** instances 活数组：每次返回 store 当前数组（身份稳定；app/state/store.js 等 20+ 处持引用直读/splice）。
+   *  跨域消费方（DG-11）只经下面的查询接口取用，不直读本内部活数组。 */
   get instances() { return this._store.instances; }
   set instances(list) { this._store.replace(list); }
 
-  // ── 查询接口（DG-11 契约面）：每次经 store 取当前数组，保持「活数组身份」语义（非快照）──
+  // 查询接口（DG-11 契约面）：每次经 store 取当前数组，保持活数组身份语义（非快照）。
   /** 当前实例数组（store 当前引用）。 */
   all() { return this._store.instances; }
   /** 遍历当前实例（委托数组 forEach）。 */
@@ -78,7 +75,7 @@ class InstanceManager {
   get onDestroy() { return this._hooks.onDestroy || null; }
   set onDestroy(fn) { this._hooks.onDestroy = fn; }
 
-  // ── 域间契约面（签名与语义逐字保持）──
+  // 域间契约面（签名与语义逐字保持）。
   load() { return this._store.load(); }
   save() { return this._store.save(); }
   list() { return this._ops.list(); }

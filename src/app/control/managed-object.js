@@ -1,17 +1,10 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// app/control/managed-object.js —— 受管对象目录的**纯模型**（词表 + entry + 所有权）。
+// app/control/managed-object.js —— 受管对象目录的纯模型（词表 + entry + 所有权）。
 //
-// 从 control/registry.js 拆出（DF-2：registry.js 443 → ≤400；DF-3：纯模型与持久化/心跳分离）。
-// registry.js 仍定义并导出 PHASES（K3-d：`^const PHASES = [` 的唯一源必须在 registry.js），
-// 并 re-export 本模块的 createEntry/kindMeta/... —— 对
-//   test/guard-domain-model-gate-test.js（createEntry）
-//   test/managed-registry-test.js（MANAGED_KINDS/DESIRED）
-//   src/app/control/adapters.js（kindMeta，仍 require './registry' 单一源）
-// 的公开导出面逐字不变。
-// 本模块零 IO、零 this，可 require 后独立单测（DF-6）。
-// ══════════════════════════════════════════════════════════════════════════
+// registry.js 仍定义并导出 PHASES（其字面量唯一源必须在 registry.js），
+// 并 re-export 本模块的 createEntry/kindMeta 等，公开导出面保持不变。
+// 本模块零 IO、零 this，可 require 后独立单测。
 
 /** desired 唯一取值：用户意图（running=应保持运行 / stopped=应停止）。与 guardian（自动拉起策略）正交。 */
 const DESIRED = ['running', 'stopped'];
@@ -36,19 +29,17 @@ function registerKind(kind, meta) {
   _customKinds[kind] = Object.assign({ label: kind, startable: false, guardable: false }, meta || {});
 }
 
-/** **域 A（用户意图域）**的 kind 清单 —— 只有它们才持有 `guardian` 字段。
+/** 域 A（用户意图域）的 kind 清单——只有它们才持有 `guardian` 字段。
  *
- *  契约：GUARD-DOMAIN-MODEL §2/§3 G-1。
- *   · 域 A = dsh / sandbox-instance：有"用户意图轴"（desired × guardian），
- *     `guardian` 表示"崩溃时是否按用户意图自愈"；
- *   · 域 B = router-daemon / lan-daemon（基础设施）：**无用户意图轴**，由保活路径无条件拉起，
- *     故**根本不物化该字段**（不是"置 false"，而是"不存在"——契约 §5 GD-1 的字面要求）。
+ *  契约 GUARD-DOMAIN-MODEL §2/§3 G-1：
+ *   - 域 A = dsh / sandbox-instance：有用户意图轴（desired × guardian），
+ *     guardian 表示崩溃时是否按用户意图自愈；
+ *   - 域 B = router-daemon / lan-daemon（基础设施）：无用户意图轴，由保活路径无条件拉起，
+ *     故根本不物化该字段（不是「置 false」，而是「不存在」——契约 §5 GD-1 的字面要求）。
  *
- *  为什么必须在这里区分而不是在申报处：申报处只是"不写"，但 `createEntry` 会对**所有** kind
- *  无条件物化该字段并随目录持久化 → 旧版本残留的 `guardian: true` 永远清不掉（`update` 见
- *  `p.guardian === undefined` 即跳过）。实测升级路径确实如此（真机 managed-objects.json
- *  里两个 daemon 至今带 `guardian: true`）。故判据必须落在**入口**（createEntry/load/save/update），
- *  让域 B 的该字段**从不存在**，而不是"存在但为 false"。 */
+ *  判据必须落在入口（createEntry/load/save/update）而非申报处：申报处只是「不写」，
+ *  但 createEntry 会对所有 kind 无条件物化该字段并随目录持久化，旧版本残留的
+ *  `guardian: true` 便永远清不掉（update 见 `p.guardian === undefined` 即跳过）。 */
 const DOMAIN_A_KINDS = new Set(['dsh', 'sandbox-instance']);
 
 /** 该 kind 是否属域 A（只有域 A 才有 guardian 字段）。 */
@@ -67,11 +58,11 @@ function createEntry(o) {
     id: o.id,
     name: String(o.name || o.id),
     // 应然（业务申报 / 用户操作；唯一持久意图）
-    //   desired：两域共用同一字段名，但**语义不同**——
+    //   desired：两域共用同一字段名，但语义不同——
     //     域 A = 用户意图；域 B = 「当前业务是否需要它」的条件（契约 §2）。
     desired: (o.desired === 'stopped') ? 'stopped' : 'running',
-    // guardian：**域 A 专有字段**（契约 §2/§3 G-1）。域 B 基础设施**不物化**它——
-    //   见 isDomainA 的说明：不是"置 false"，是"不存在"，这样旧残留才清得掉。
+    // guardian：域 A 专有字段（契约 §2/§3 G-1）。域 B 基础设施不物化它——
+    //   不是「置 false」，是「不存在」，这样旧残留才清得掉。
     ...(isDomainA(o.kind) ? { guardian: o.guardian === true } : {}),
     // 所有权（注册时申报；持久）
     ownership: normalizeOwnership(o.ownership),
@@ -85,7 +76,7 @@ function createEntry(o) {
     // 域摘要引用（R4：daemon 类黑盒经 ctl 向目录呈报的紧凑摘要，只存引用/只读缓存，不持久化；
     // 形如 { runState, providers, accounts, proxyInstances, resourcePorts, fetchedAt }）
     domainSummary: null,
-    // 退避（R3 调谐用；崩溃窗口）——随目录持久化（B2 归一，见 _load/_save）
+    // 退避（调谐用；崩溃窗口）随目录持久化（见 _load/_save）。
     backoffLevel: 0,
     backoffUntil: null,
     crashWindowStart: null,

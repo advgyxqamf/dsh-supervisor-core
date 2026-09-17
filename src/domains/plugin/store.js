@@ -2,20 +2,11 @@
 
 const http = require('node:http');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 只读持久化 / 已装清单视图（域：plugin / store，读）
-//
-// F5 + F12：
-//   · readProfile / pkgVersion / readManifest / readHomePatch / overlayEntries
-//   —— profile package.json、node_modules 版本、home 补丁层、overlay 的**只读**读取；
-//   · inventory —— 运行态 inventory（HTTP RPC，只读）；
-//   · installedOn —— 单目标已装插件（读盘）；
-//   · listInstalled / listInstalledNative —— 多目标聚合视图（目标由调用方解析后传入，
-//     **本文件不 require targets、不反向依赖 ops**）。
-//   · PluginStore._patchEntryIdsForPlugin —— 补丁行 id 推导（包名边界匹配）。
-//
-// 写（原子写 + 串行队列 + scrub）在 layers.js；作业/编排在 jobs.js / ops.js。
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域只读持久化 / 已装清单视图（读）。
+// profile/版本/manifest/home 补丁层/overlay 的只读读取，inventory 为运行态 HTTP RPC；
+// listInstalled 聚合多目标（targets 由调用方解析后传入，本文件不 require targets、
+// 不反向依赖 ops）；PluginStore._patchEntryIdsForPlugin 推导补丁行 id（包名边界匹配）。
+// 写路径（原子写+串行队列+scrub）在 layers.js，作业/编排在 jobs.js/ops.js。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -33,10 +24,8 @@ function pkgVersion(profileDir, name) {
   catch { return null; }
 }
 
-/** 读原生 profile manifest（profileDir 下的 package.json）。 */
-function readManifest(profileDir) {
-  try { return JSON.parse(fs.readFileSync(path.join(profileDir, 'package.json'), 'utf8')); } catch { return {}; }
-}
+/** 读原生 profile manifest（与 readProfile 同一文件、同一语义，单一实现）。 */
+function readManifest(profileDir) { return readProfile(profileDir); }
 
 /** 读 home 补丁层（JSON；ENOENT 视为空；YAML 视为不可改写）。 */
 function readHomePatch(target) {
@@ -54,7 +43,7 @@ function readHomePatch(target) {
   }
 }
 
-/** 读 legacy overlay 条目（函数化：路径显式入参，不再用 getter）。 */
+/** 读 legacy overlay 条目（路径显式入参）。 */
 function overlayEntries(overlayFile) {
   try { return JSON.parse(fs.readFileSync(overlayFile, 'utf8')); } catch { return []; }
 }
@@ -114,7 +103,7 @@ async function listInstalledNative(ctx, nativeTarget) {
     counts: { rows: rows.length, active: rows.filter((r0) => r0.fiberPhase === 'active').length, disabledBase: rows.filter((r0) => r0.baseDisabled).length, pkgs: builtinPkgs.length },
     rows,
     builtinBundles: bundles.filter((n) => PROTECTED.has(n)).map((n) => ({ name: n, readonly: true })),
-    installationOwned: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+    installationOwned: [...PROTECTED],
   };
 }
 
@@ -129,10 +118,8 @@ async function listInstalled(ctx, targets) {
       byName.get(p.name).targets.push(t.id);
     }
   }
-  // enabled 计算：任一目标处于启用态即视为启用——
-  //  生效面：bundles 加载层 + home 补丁层（DSH_HOME/cordis.patch.yml，热载）禁用行 + 原生 legacy overlay
-  //  - disabledByPatch：home 补丁层中该插件有 disabled:true 行 → 禁用（双域一致）
-  //  - disabledByOverlay：原生 legacy --patch overlay 行 → 禁用（迁移期兼容）
+  // enabled 计算：任一目标启用即视为启用。生效面 = bundles 加载层 + home 补丁层
+  // 禁用行（DSH_HOME/cordis.patch.yml，热载）+ 原生 legacy overlay（迁移期兼容）。
   const overlayIds = new Set(ctx.overlayEntries().map((e) => e.id));
   const homePatchDisabledIds = (t) => {
     const hp = readHomePatch(t);
@@ -190,8 +177,8 @@ class PluginStore {
         const entries = ((await this._getInventory()) || {}).entries || [];
         for (const e of entries) {
           const mn = String(e.moduleName || '');
-          // 包名边界匹配：相等，或以 <name>/ 开头（子路径），或以 <name>@ 开头（带版本后缀）。
-          // 明确**排除** -/. 等可延长包名的字符（否则 dsh-tool 会吞掉 dsh-tool-extra）。
+          // 包名边界匹配：相等、以 <name>/ 开头（子路径）或以 <name>@ 开头（带版本）。
+          // 明确排除 -/. 等可延长包名的字符，否则 dsh-tool 会吞掉 dsh-tool-extra。
           if (mn === name || mn.startsWith(name + '/') || mn.startsWith(name + '@')) ids.add(e.entryId);
         }
       } catch {}
@@ -201,6 +188,6 @@ class PluginStore {
 }
 
 module.exports = {
-  readProfile, pkgVersion, readManifest, readHomePatch, overlayEntries, inventory,
-  installedOn, listInstalledNative, listInstalled, PluginStore,
+  readProfile, readManifest, readHomePatch, overlayEntries, inventory,
+  installedOn, listInstalled, PluginStore,
 };

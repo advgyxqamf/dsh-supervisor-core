@@ -1,7 +1,6 @@
 'use strict';
 
-// 插件市场 —— 条目构造（纯，无 IO）。
-// 从 market.js 抽出：npm / github 条目对象工厂，保持 indexNpm/indexGithub 的循环体浅嵌套。
+// 插件市场条目构造（纯，无 IO）：npm/GitHub 条目对象工厂。
 
 const { pickAuthor } = require('./classify');
 

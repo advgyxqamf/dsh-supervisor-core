@@ -1,16 +1,15 @@
 'use strict';
 
-// 分级日志 + 统一轮转：工业级日志地基。
-// 三路独立文件（守卫 / DSH 输出 / 升级输出），同一轮转策略：
+// 分级日志 + 统一轮转：三类独立文件（守卫 / DSH 输出 / 升级输出）同一策略，
 // 超过 maxBytes 改名 .1 保留一代，绝不无限增长。
-// 同时镜像到 stderr —— systemd user unit 下由 journald 收敛，journalctl 可查。
+// 同时镜像到 stderr：systemd user unit 下由 journald 收敛，journalctl 可查。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
-/** 轮转写入器：逐行追加，超限轮转（保留一代 .1）。 */
+// 轮转写入器：逐行追加，超限轮转（保留一代 .1）。
 class Rotator {
   constructor(file, maxBytes) {
     this.file = file;
@@ -40,15 +39,15 @@ class Rotator {
       console.error('[logger] rotate failed:', e.message);
     }
     try {
-      // mode 仅作用于文件首次创建：日志文件（含 dsh 输出的启动令牌 URL）权限收紧为 0600，
-      // 与 state.json 一致（旧实现默认 0644，同机其他用户可读会话令牌）
+      // mode 仅作用于文件首次创建：日志含 dsh 输出的启动令牌 URL，故权限收紧为 0600，
+      // 与 state.json 一致；默认 0644 时同机其他用户可读会话令牌。
       fs.appendFileSync(this.file, line + '\n', { mode: 0o600 });
     } catch (e) {
       console.error('[logger] write failed:', e.message);
     }
   }
 
-  /** 读取日志尾部至多 n 行（空行省略；供测试/调试读取已落盘内容）。文件不存在返回空数组。 */
+  // 读取日志尾部至多 n 行（空行省略；供测试/调试读已落盘内容）。文件不存在返回空数组。
   tail(n) {
     if (!this.file) return [];
     try {
@@ -62,7 +61,7 @@ class Rotator {
 
 }
 
-/** 行缓冲：把任意切分的 chunk 还原成完整行再落盘（防半行日志）。 */
+// 行缓冲：把任意切分的 chunk 还原成完整行再落盘（防半行日志）。
 class LineBuffer {
   constructor(onLine) {
     this.onLine = onLine;
@@ -85,16 +84,13 @@ class LineBuffer {
   }
 }
 
-/**
- * 创建分级 logger。
- * @param {object} opts { file, level='info', maxBytes=5MB, mirror=true }
- * @returns {{debug,info,warn,error, writer: Rotator}}
- */
+// 创建分级 logger。opts: { file, level='info', maxBytes=5MB, mirror=true }，
+// 返回 { debug, info, warn, error, writer: Rotator }。
 function createLogger(opts) {
   const o = opts || {};
   const threshold = LEVELS[o.level] || LEVELS.info;
   const writer = new Rotator(o.file, o.maxBytes);
-  // 系统日志框架（历史设计文档）：可选 process 标识日志归属进程（additive）。
+  // 可选 process 标识日志归属进程（行级 producer）。
   const tag = o.process ? '[' + o.process + '] ' : '';
   const emit = (lv, msg) => {
     if ((LEVELS[lv] || 0) < threshold) return;

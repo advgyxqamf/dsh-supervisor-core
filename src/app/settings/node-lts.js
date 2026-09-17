@@ -1,7 +1,7 @@
 'use strict';
 
-// §7.6 拆分自 supervisor.js → app/settings/settings-view.js → app/settings/node-lts.js（步骤7 分片 C）。
-// 导出形态按 STEP7-INTERFACE-CONTRACT §2 统一为 { methods }；方法内部继续用 this 协作。
+// app/settings/node-lts.js —— Node LTS 在线检查门面（本地判定 + 可刷新缓存）。
+// 导出形态 { methods }，方法经 this 协作。
 const fs = require('node:fs');
 const path = require('node:path');
 

@@ -1,6 +1,6 @@
 'use strict';
 
-// 域：远程控制/中继 API（lan frp·lan-access）。
+// 域：远程控制/中继 API（lan frp / lan-access）。
 function owns(pathname) {
   return pathname === '/lan-access' || pathname.startsWith('/lan/frp/') || pathname === '/lan/frp';
 }
@@ -32,7 +32,7 @@ function handle(ctx) {
     if (req.method === 'GET' && pathname === '/lan-access') {
       return Promise.resolve(sup.listLan()).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: e.message }));
     }
-  // 域内未匹配(方法/子路径) → 全局兜底语义(与单文件时代一致)
+  // 域内未匹配(方法/子路径)：全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });
 }

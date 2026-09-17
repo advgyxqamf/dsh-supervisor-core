@@ -1,19 +1,17 @@
 'use strict';
 
-// api/static —— UI 产物目录解析 + MIME + CSP + 静态托管（步骤 9：从 index.js 拆出）。
+// api/static —— UI 产物目录解析 + MIME + CSP + 静态托管。
 //
-// ⚠ 本文件是**安全面**（CSP / nosniff / 路径穿越防护 / 禁止缓存），
-//   拆分纯属结构搬家，语义必须逐字保持——任何"顺手优化"都可能削弱防线。
-//   门禁见 test/core-test.js（CSP 头、nosniff、编码穿越 404/403）。
+// 本文件是安全面（CSP / nosniff / 路径穿越防护 / 禁止缓存），语义不得"顺手优化"；
+// 门禁见 test/core-test.js（CSP 头、nosniff、编码穿越 404/403）。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-// 前端静态资源目录解析（2026-09-02：新 React UI 全面接管，老 vanilla ui/ 已删除退出；
-//  2026-09-06 Phase 1 修复：打包后 __dirname 不再等于源码目录，改多候选探测覆盖全部发行形态）。
+// 前端静态资源目录解析：打包后 __dirname 不再等于源码目录，故多候选探测覆盖全部发行形态。
 //  候选（按优先级，命中 supervisor.html 即用）：
 //    0) $DSH_UI_DIR                     — 显式注入（测试/特殊部署）
-//    1) <__dirname>/ui-react            — Node launcher 统一形态（core.cjs 同目录 ui-react）2026-09 定案
+//    1) <__dirname>/ui-react            — Node launcher 统一形态（core.cjs 同目录 ui-react）
 //    2) <exe 同目录>/ui-react            — 单文件分发态（二进制旁放 ui-react）
 //    3) <exe>/../ui-react                — npm 子包态（pkg/bin/dsh-supervisor + pkg/ui-react）
 //    4) <repo 根>/ui-react               — 源码态发布镜像（release.sh 产物）
@@ -25,7 +23,7 @@ function resolveUiDir() {
   })();
   const candidates = [
     process.env.DSH_UI_DIR || null,
-    path.join(__dirname, 'ui-react'),         // ① launcher 统一形态（core.cjs 旁）
+    path.join(__dirname, 'ui-react'),         // launcher 统一形态（core.cjs 旁）
     path.join(exeDir, 'ui-react'),
     path.join(exeDir, '..', 'ui-react'),
     path.join(__dirname, '..', '..', 'ui-react'),
@@ -76,8 +74,7 @@ function serveStatic(res, file, corsOrigin) {
       'X-Content-Type-Options': 'nosniff',
     };
     if (corsOrigin) { headers['Access-Control-Allow-Origin'] = corsOrigin; }
-    // 面板资源一律不缓存（no-store）：前端改动立即生效——避免浏览器缓存旧版
-    // 导致的渲染异常（如卡片锁定状态不显示等）
+    // 面板资源一律 no-store：前端改动立即生效，避免浏览器缓存旧版导致渲染异常。
     headers['Cache-Control'] = 'no-store';
     res.writeHead(200, headers);
     res.end(content);
@@ -92,4 +89,4 @@ function serveStatic(res, file, corsOrigin) {
   }
 }
 
-module.exports = { UI_DIR, MIME, CSP, serveStatic, resolveUiDir };
+module.exports = { MIME, CSP, serveStatic };

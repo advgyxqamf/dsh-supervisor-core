@@ -1,12 +1,9 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/control/projection.js —— 聚合视图投影工厂（真 ctor 注入）。
-//
-// 级 2：createProjection(deps) 自己持有三个 sync 视图实现（纯视图投影，不驱动启停）。
+// createProjection(deps) 自己持有三个 sync 视图实现（纯视图投影，不驱动启停）：
 //   const p = createProjection({ getLifecycleManager, getState, getManagedObjects });
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 可只 require 本模块 + 假 deps 直测。
 
 function createProjection(deps) {
   const g = deps || {};

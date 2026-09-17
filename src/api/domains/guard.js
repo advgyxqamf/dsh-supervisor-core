@@ -1,6 +1,6 @@
 'use strict';
 
-// 域：守卫/设置 API（changelog·guard 版本·autostart·settings·self-update·env·ports）。
+// 域：守卫/设置 API（changelog / guard 版本 / autostart / settings / self-update / env / ports）。
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -12,8 +12,7 @@ function owns(pathname) {
 }
 
 /** 更新日志（DSH）：只展示 DeepSeek Harness 相关内容（来自 NativeManager 版本信息），与管家无关。
- *  命名统一（A4）：UI 中该能力位于「概览」页的「版本与升级」区块（非独立页面）——
- *  历史注释曾按独立页面描述，易误导；此处按真实位置表述。 */
+ *  该能力在 UI 中位于「概览」页的「版本与升级」区块（非独立页面）。 */
 function fetchDshChangelog(res, sup) {
   const v = (sup && sup.nativeManager) ? sup.nativeManager.versionInfo() : {};
   const inst = v.installed || '未安装';
@@ -181,7 +180,7 @@ function handle(ctx) {
     if (req.method === 'GET' && pathname === '/ports') {
       return Promise.resolve(sup.listPorts()).then((r) => send(200, r)).catch((e) => send(500, { error: e && e.message }));
     }
-  // 域内未匹配(方法/子路径) → 全局兜底语义(与单文件时代一致)
+  // 域内未匹配(方法/子路径)：全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });
 }

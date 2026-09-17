@@ -1,29 +1,11 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 产品状态根（**与 DSH 的 ~/.dsh 完全独立**）
-//
-// ## 为什么（2026-09-15 架构纠偏）
-//
-//   我们是**管控 DSH 的独立产品**，却把全部状态（config/state/ports/logs/events）
-//   放在**被管控对象** DSH 的数据目录 ~/.dsh/supervisor 下 —— 概念错位：
-//   DSH 卸载/清理/迁移数据目录时会把我们一并带走；测试也据此隔离，把错位固化。
-//
-//   现改为**自有状态根**，遵循 XDG（Linux/macOS）与平台惯例（Windows）：
-//     · 覆盖：DSH_SUPERVISOR_HOME（测试/特殊部署）
-//     · Linux：$XDG_STATE_HOME/dsh-supervisor 或 ~/.local/state/dsh-supervisor
-//     · macOS：~/Library/Application Support/dsh-supervisor
-//     · Windows：%LOCALAPPDATA%\dsh-supervisor
-//
-//   目录：<root>/supervisor（内核状态）、<root>/shell（桌面壳状态）。
-//   DSH **自身**的数据（~/.dsh/profiles、DSH_HOME）不在此列 —— 那是被管控对象的数据。
-//
-// ## 单一事实源
-//
-//   本模块是内核侧唯一入口；桌面壳侧在**壳仓**的 src-tauri/src/env.rs（本仓不持有 src-tauri/）。两侧各持 schema 常量，
-//   由门禁握手锁定（同 runtime.json 的做法）。
-
-// ═══════════════════════════════════════════════════════════════════════════
+// 产品状态根（与 DSH 的 ~/.dsh 完全独立）。
+// 为什么：我们管控 DSH，却曾把全部状态放在被管控对象的数据目录下，DSH 卸载/清理会带走我们，
+// 概念错位。现采用自有状态根：覆盖 DSH_SUPERVISOR_HOME；Linux $XDG_STATE_HOME/dsh-supervisor
+// 或 ~/.local/state/dsh-supervisor；macOS ~/Library/Application Support/dsh-supervisor；
+// Windows %LOCALAPPDATA%\dsh-supervisor。目录为 <root>/supervisor（内核）与 <root>/shell（桌面壳）。
+// 单一事实源：本模块是内核侧唯一入口；桌面壳侧在壳仓 src-tauri/src/env.rs，两侧 schema 常量由门禁握手锁定。
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -67,11 +49,8 @@ function legacyShellDir() {
   return path.join(os.homedir(), '.dsh', 'shell');
 }
 
-/**
- * 前向自愈迁移：旧位置存在、新位置不存在时整目录搬移。
- *   不双读、不复制；失败静默（下次启动再试）。
- * @returns {string[]} 实际迁移的 [from -> to] 描述（供日志）
- */
+/** 前向自愈迁移：旧位置存在、新位置不存在时整目录搬移。不双读、不复制；失败静默（下次启动再试）。
+ *  @returns {string[]} 实际迁移的 [from -> to] 描述（供日志） */
 function migrateLegacy() {
   const moved = [];
   for (const [from, to] of [
@@ -94,5 +73,5 @@ function migrateLegacy() {
   return moved;
 }
 
-// legacy* 仅本模块 migrateLegacy 内部使用，不对外导出（收窄公开面）。
+// legacy* 仅 migrateLegacy 内部使用，不对外导出（收窄公开面）。
 module.exports = { SCHEMA, root, supervisorDir, shellDir, migrateLegacy };

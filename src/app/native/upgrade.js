@@ -115,7 +115,7 @@ function finishVerified(host, oldV, target, task) {
   return { ok: true, result: 'upgraded', from: oldV, to: target };
 }
 
-/** 第三步：拉起新版本并内联健康验证（unit=null）。失败 → 自动回滚。 */
+/** 第三步：拉起新版本并内联健康验证（unit=null）。失败则自动回滚。 */
 async function verifyAndFinalize(host, oldV, target, task) {
   host.upgradeState = 'verifying';
   markStep(host, task, '拉起并验证');
@@ -234,7 +234,7 @@ async function handleUpgradeFailure(host, err) {
   host._activeTaskId = null;
 }
 
-/** 一键升级（统一任务模型）：先停 DSH → 安装 → 验证 → 失败自动回滚。 */
+/** 一键升级（统一任务模型）：先停 DSH、安装、验证，失败自动回滚。 */
 async function upgrade(host, requestedVersion) {
   if (!policies.isValidVersion(requestedVersion)) return { ok: false, error: '非法版本号: ' + requestedVersion };
   beginUpgradeState(host, requestedVersion);
@@ -265,4 +265,4 @@ async function upgrade(host, requestedVersion) {
   }
 }
 
-module.exports = { upgrade, rollbackNative, handleUpgradeFailure, PKG_DEFAULT };
+module.exports = { upgrade, PKG_DEFAULT };

@@ -1,16 +1,12 @@
 'use strict';
 
-// app/domain-actions/lan.js —— relay(lan) 域**写动作**（R7/R8：facade 只读，写动作下沉）。
-//
-// 来源：src/app/facade/lan.js#setLanFrp / lanFrpc / syncFrpc（逐字搬迁 + 旁路消除）。
-//
-// ★ 消除旁路（R7 核心）：本地（非 daemon）模式不再直接穿透 `this.lan` 改 LanManager 状态，
-//   而是经 **lifecycleManager 的 'lan' 登记项**（app/control/adapters.js 注册时把 module 挂上）
-//   这一唯一入口取用模块 —— 生命周期登记/视图不再被绕开。
-//   daemon 模式仍经 43108 ctl 委托（daemon 是唯一事实源）。
+// app/domain-actions/lan.js —— relay(lan) 域写动作（facade 只读，写动作下沉至此）。
+// 本地（非 daemon）模式不直接穿透 this.lan 改 LanManager 状态，而是经 lifecycleManager 的
+// 'lan' 登记项（app/control/adapters.js 注册时把 module 挂上）这一唯一入口取用模块，
+// 生命周期登记/视图不被绕开；daemon 模式仍经 43108 ctl 委托（daemon 是唯一事实源）。
 
 /** 经生命周期登记项取本地 LanManager（唯一入口；非 daemon 模式）。
- *  无 lifecycleManager（非守卫/单测上下文）时回退宿主对象，保证可独立单测（DF-6）。 */
+ *  无 lifecycleManager（非守卫/单测上下文）时回退宿主对象，保证可独立单测。 */
 function lanModule(host) {
   const lm = host.lifecycleManager;
   if (lm && typeof lm.get === 'function') {
@@ -26,7 +22,7 @@ function lanModule(host) {
 
 module.exports = { methods: {
 
-  /** 设置实例公网暴露（frp）。写动作 → 必须经登记项；未注册则拒绝（不静默穿透）。 */
+  /** 设置实例公网暴露（frp）。写动作必须经登记项；未注册则拒绝（不静默穿透）。 */
   setLanFrp(id, frpEnabled, frpRemotePort) {
     if (this.daemons.enabled() /* daemon 启用即 ctl */) return this.ctl.lanCall('setFrp', [id, frpEnabled, frpRemotePort]);
     const lan = lanModule(this);

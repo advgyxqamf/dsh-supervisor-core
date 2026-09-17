@@ -2,15 +2,13 @@
 
 const portsShared = require('../../platform/service/ports').shared;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/assembly/api-rebind.js —— HTTP 监听主机重绑（面板切换「局域网访问」）
+// app/assembly/api-rebind.js —— HTTP 监听主机重绑（面板切换「局域网访问」）。
 //
-// ⚠ 步骤7 收尾（DS-3）：本逻辑**创建 HTTP 服务**，若直接 require api 则构成 app → api 越界。
-//   故 `createServer` 作为**注入依赖**（由 root 在装配时传入）——app 只依赖抽象，不依赖 api 模块。
-// ═══════════════════════════════════════════════════════════════════════════
+// 本逻辑创建 HTTP 服务，若直接 require api 则构成 app -> api 越界（契约 DS-3），
+// 故 createServer 作为注入依赖（由 root 在装配时传入），app 只依赖抽象，不依赖 api 模块。
 
 function _rebindApiHost(host, createServer) {
-    // createServer 由 root 注入（见文件头说明：避免 app → api 越界，契约 DS-3）。
+    // createServer 由 root 注入（见文件头说明：避免 app -> api 越界，契约 DS-3）。
     const old = host.api;
     if (old) {
       try { old.close(); } catch {}
@@ -40,7 +38,7 @@ function _rebindApiHost(host, createServer) {
         bind._tries = 0;
         host.api = server;
         // 重绑成功后同样登记**实际端口**（与 start() 的 listen 一致；D3）。
-        try { ports.register('supervisor-api', host.config.apiPort); } catch {}
+        try { portsShared.register('supervisor-api', host.config.apiPort); } catch (e) { host.logger.warn('ports.register(supervisor-api) 失败: ' + ((e && e.message) || e)); }
         host.events.append('api_listening', { host: host.config.apiHost, port: host.config.apiPort });
         host.logger.info('api listening on ' + host.config.apiHost + ':' + host.config.apiPort);
       });
@@ -50,9 +48,7 @@ function _rebindApiHost(host, createServer) {
     bind();
 }
 
-  /** 启动 HTTP API 服务（端口避让）。
-   *
-   *  `createServer` 同为**注入**（见文件头 DS-3 说明）——root 在装配时经原型包装传入。 */
+  /** 启动 HTTP API 服务（端口避让）。createServer 同为注入（见文件头 DS-3 说明）。 */
 function startApi(host, createServer) {
   const maxSkew = 50;
   const attempt = (port, skew) => {
@@ -72,14 +68,13 @@ function startApi(host, createServer) {
       const prev = host.config.apiPort;
       if (port !== prev) {
         // 释放旧端口登记：否则 ports.json 会留两条 supervisor-api，
-        //   而壳的就绪判据取首条 → 可能永远等「已废弃的旧端口」。
-        try { host.lifecycleManager && null; } catch {}
+        //   而壳的就绪判据取首条，可能永远等「已废弃的旧端口」。
         try { portsShared.release(prev, 'system:supervisor-api'); } catch {}
         host.config.apiPort = port;
         if (host.configPath) host.persistConfigPatch({ apiPort: port });
       }
       // 登记**实际绑定端口**（KERNEL-DAEMON-CONTRACT D3）：壳的唯一就绪判据。
-      try { ports.register('supervisor-api', port); } catch (e) { host.logger.warn('ports.register(actual) 失败: ' + e.message); }
+      try { portsShared.register('supervisor-api', port); } catch (e) { host.logger.warn('ports.register(actual) 失败: ' + e.message); }
       host.events.append('api_listening', { host: host.config.apiHost, port });
       host.logger.info('api listening on ' + host.config.apiHost + ':' + port);
     });

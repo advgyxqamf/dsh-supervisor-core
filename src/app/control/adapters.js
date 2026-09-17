@@ -1,17 +1,14 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // 模块适配器（adapters）—— 把现有模块对象包成 ManagedLifecycle 注册到 LifecycleManager。
-//
-// 每个适配器只做「翻译」：把模块现有的 start/stop/状态能力映射到统一生命周期抽象，
-// 不改模块内部逻辑。守卫 supervisor 启动时调用 registerAll() 完成注册。
-// ═══════════════════════════════════════════════════════════════════════════
+// 每个适配器只做翻译：把模块现有的 start/stop/状态能力映射到统一生命周期抽象，
+// 不改模块内部逻辑。
 
 const { ManagedLifecycle } = require('./entry');
 const { kindMeta } = require('./registry');
 
-/** 从受管类型表（MANAGED_KINDS，能力声明的**单一源**）取该模块的能力位。
- *  B1 断点修复：原声明无人消费 → 现由 adapters 注入、LifecycleManager 执法、snapshot 供 UI 灰化。
+/** 从受管类型表（MANAGED_KINDS，能力声明的单一源）取该模块的能力位。
+ *  adapters 注入、LifecycleManager 执法、snapshot 供 UI 灰化；
  *  未登记类型按「可启停/可守护」保守处理（不误禁）。 */
 function capsOf(objectKind) {
   const m = kindMeta(objectKind);
@@ -29,17 +26,16 @@ function registerAll(mgr, deps) {
   const { router, lan, instances, supervisor, pluginManager } = deps;
   const logger = (deps.logger) || null;
 
-  // ── 1. 智能路由（RouterService）──
+  // 1. 智能路由（RouterService）
   // 智能路由作为一个生命周期单元注册；其下「反代实例」是子层（由 router 自己管理），
   // 不在本注册表展开（保持 router 内部自治；本管理器只对 router 整体负责）。
-  // L3 进程解耦（2026-09）：router 优先独立 daemon 承载——统一生命周期启停必须走守卫的
-  // setRouterRunning（daemon 感知：拉/停独立进程 + 持久化 routerAutostart），
-  // 而不是直接 start() 守卫内嵌实例（监督模式下会双占 ctl 43107 / 状态与 daemon 脱节）。
+  // router 优先独立 daemon 承载：统一生命周期启停必须走守卫的 setRouterRunning
+  // （daemon 感知：拉/停独立进程 + 持久化 routerAutostart），而不是直接 start() 内嵌实例
+  // （否则会双占 ctl 43107 / 状态与 daemon 脱节）。
   if (router) {
     const sup = deps && deps.supervisor;
-    // ⚠ 契约 GUARD-DOMAIN-MODEL §2 域 B：router-daemon 是**基础设施**（能力自愈），
-    //   **不设 guardian**——它没有「用户意图轴」，失联即由保活路径无条件拉起（见 _daemonSuperviseOnce）。
-    //   曾写死 guardian: true 是拿用户意图模型硬套基础设施（既不可停，又衍生恒 true 的补丁判断）。
+    // 契约 GUARD-DOMAIN-MODEL §2 域 B：router-daemon 是基础设施，不设 guardian——
+    // 它没有用户意图轴，失联即由保活路径无条件拉起（见 _daemonSuperviseOnce）。
     const rlc = new ManagedLifecycle({
       id: 'router',
       ...capsOf('router-daemon'),
@@ -47,24 +43,23 @@ function registerAll(mgr, deps) {
       name: '智能路由',
       logger,
       start: async () => (sup && typeof sup.setRouterRunning === 'function') ? sup.setRouterRunning(true) : router.start(),
-      // 守卫自身 shutdown（_stopping=true）时 stopAll 不得停独立 router-daemon——
-      // L3a 语义：守卫退出不影响被管模块（daemon 独立生命周期继续服务）；仅显式用户停止才停 daemon
+      // 守卫自身 shutdown（_stopping=true）时 stopAll 不得停独立 router-daemon：
+      // 守卫退出不影响被管模块（daemon 独立生命周期继续服务）；仅显式用户停止才停 daemon。
       stop: async () => {
         if (sup && sup._stopping) return { ok: true, already: true, reason: 'guard-shutdown 不停 daemon' };
         return (sup && typeof sup.setRouterRunning === 'function') ? sup.setRouterRunning(false) : router.stop();
       },
-      // C3-5b：detail 走守卫真实 router 状态视图（daemon 模式经 ctl 取 daemon 实时态）；
-      // 曾引用不存在的 router.routerStatus（死回调，恒 null）。
+      // detail 走守卫真实 router 状态视图（daemon 模式经 ctl 取 daemon 实时态）。
       status: () => (sup && typeof sup.routerStatus === 'function') ? sup.routerStatus() : (router.status ? router.status() : null),
     });
     mgr.register(rlc);
   }
 
-  // ── 2. 远程控制（LanManager：relay + frpc）──
+  // 2. 远程控制（LanManager：relay + frpc）
   if (lan) {
-    // ⚠ 同上（契约 §2 域 B）：lan-daemon 是基础设施，**不设 guardian**。
+    // 注意 同上（契约 §2 域 B）：lan-daemon 是基础设施，**不设 guardian**。
     //   B 平面 id='lan'（历史命名，保持稳定以免破坏 API/测试消费面）；A 平面目录 id='lan-daemon'——
-    //   两平面经 _daemonSuperviseOnce('lan') ↔ registerAdapter('lan-daemon') 显式映射（G-5）。
+    //   两平面经 _daemonSuperviseOnce('lan') <-> registerAdapter('lan-daemon') 显式映射（G-5）。
     const llc = new ManagedLifecycle({
       id: 'lan',
       ...capsOf('lan-daemon'),
@@ -82,7 +77,7 @@ function registerAll(mgr, deps) {
     mgr.register(llc);
   }
 
-  // ── 3. 实例管理（沙箱实例集）——作为一个聚合生命周期单元注册，
+  //  3. 实例管理（沙箱实例集）——作为一个聚合生命周期单元注册，
   //    单个实例的启停由实例管理模块内部负责；本管理器提供整体聚合视图。
   if (instances) {
     const ilc = new ManagedLifecycle({
@@ -110,7 +105,7 @@ function registerAll(mgr, deps) {
     mgr.register(ilc);
   }
 
-  // ── 4. DeepSeek Harness（主 DSH）——守卫监管的核心对象 ──
+  //  4. DeepSeek Harness（主 DSH）——守卫监管的核心对象 
   if (supervisor) {
     // guardian 不在此写死：原生 DSH 守护开关(默认关, 持久化 dsh-main.json)由用户在面板控制，
     // 注册时从 supervisor 读当前值，此后经 _syncDshLifecycleView 从 A 平面(dsh-main.json)持续同步——
@@ -139,7 +134,7 @@ function registerAll(mgr, deps) {
     dsh._monitoring = true; // DSH 纳管（守卫 tick 对 desired=running 的 DSH 负责拉起——本就是守卫职责）
   }
 
-  // ── 5. 插件管理（插件生命周期聚合）──
+  //  5. 插件管理（插件生命周期聚合）
   if (pluginManager) {
     const plc = new ManagedLifecycle({
       id: 'plugins',

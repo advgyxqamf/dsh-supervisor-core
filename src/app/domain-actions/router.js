@@ -1,16 +1,13 @@
 'use strict';
 
-// app/domain-actions/router.js —— router 域**写动作**（R7/R8：facade 只读，写动作下沉）。
-//
-// 来源：src/app/facade/router.js#setRouterRunning（逐字搬迁，方法体零改写）。
+// app/domain-actions/router.js —— router 域写动作（facade 只读，写动作下沉至此）。
 // 导出契约与 facade 一致：module.exports = { methods }（app/assembly/facets.js 切面装配到实例）。
-//
-// 为什么必须在这里（R7）：setRouterRunning 改 config + 持久化 + 生命周期镜像，
-// 是**业务写动作**；留在门面会让 api → facade → 直接改状态，绕过生命周期/事件记账。
+// setRouterRunning 改 config + 持久化 + 生命周期镜像，是业务写动作；留在门面会让 api 经
+// facade 直接改状态，绕过生命周期/事件记账。
 
 module.exports = { methods: {
 
-  // ---- 智能路由开关管理 ----
+  // 智能路由开关管理
   async setRouterRunning(on) {
     // 统一生命周期视图同步：router 启停状态镜像到 lifecycleManager（归一化：启停路径收敛）
     const rlc = this.lifecycleManager ? this.lifecycleManager.get('router') : null;
@@ -18,10 +15,9 @@ module.exports = { methods: {
       // L3：优先独立 router-daemon（detached，守卫重启不影响）；daemon 不可用退回内嵌
       const rt = this.daemons.ensureRouterRuntime(true);
       if (rt.mode === 'daemon') {
-        // ⚠ 步骤7 收尾（P1 回归）：原 supervisor.js 在此有幂等兜底调用，下沉时丢失。
-        //   为什么必须有：daemon 模式下守卫**不得**写 providers.json（纪律本体在 _ensureRouterRuntime），
-        //     但那条路径依赖返回值判定；本处是**用户显式开启**路径，须再兜一次，
-        //     否则「三条 daemon 路径全覆盖」的不变量被破坏 → 双写 providers.json（漂移族 ghost）。
+        // daemon 模式下守卫不得写 providers.json（纪律本体在 _ensureRouterRuntime），但那条
+        // 路径依赖返回值判定；本处是用户显式开启路径，须再兜一次，否则「三条 daemon 路径
+        // 全覆盖」的不变量被破坏，双写 providers.json（漂移族 ghost）。
         this.daemons.disableRouterPersist();
         this.config.routerAutostart = true;
         this.state.persistConfigPatch({ routerAutostart: true });
@@ -34,7 +30,7 @@ module.exports = { methods: {
       if (rlc) { rlc.wantRunning(); rlc._monitoring = true; rlc.startedAt = rlc.startedAt || new Date().toISOString(); if (r.ok === false) { rlc._setPhase('stopped'); rlc.error = r.error; } /* healthy 由 _supervise mirror 观测置位 */ }
       return { ok: r.ok !== false, error: r.error, mode: rt.mode, ...this.views.routerStatus() };
     }
-    // 停止：若 daemon 在跑 → 停 daemon；否则停内嵌 router
+    // 停止：若 daemon 在跑则停 daemon；否则停内嵌 router
     const rt = this.daemons.ensureRouterRuntime(false);
     if (rt.mode === 'daemon' && rt.stopping) {
       this.config.routerAutostart = false;

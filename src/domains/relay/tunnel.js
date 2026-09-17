@@ -1,8 +1,8 @@
 'use strict';
 
 // WebSocket / 任意 Upgrade：重建原始请求头（含回环呈现 + DSH cookie）后建立双向 TCP 隧道。
-// 与 proxy.js 的 HTTP 路径共用同一套门禁判定（core）与会话桥（session）——
-// 只挡 HTTP 会留下 WS 绕过（未设 token 时公网可经 WS 拿到 DSH 特权通道）。
+// 与 proxy.js 的 HTTP 路径共用同一套门禁判定（core）与会话桥（session）；只挡 HTTP 会留下 WS 绕过
+// （未设 token 时公网可经 WS 拿到 DSH 特权通道）。
 
 const net = require('node:net');
 const { isTrustedSource, hasValidToken } = require('./core');
@@ -72,4 +72,4 @@ function createTunnelHandler({ session, authority, targetHost, targetPort, getTo
   };
 }
 
-module.exports = { createTunnelHandler, buildRawRequest };
+module.exports = { createTunnelHandler };

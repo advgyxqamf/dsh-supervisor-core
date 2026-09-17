@@ -1,7 +1,7 @@
 # 开发轨道（DEVELOPMENT-TRACK）
 
 > 本文件是**修改本仓时的强制流程**。规则不写在纸上才有用 —— 每一条都对应一个**会失败的门禁**。
-> 违反规则时，`npm test` 在**本机（Linux）**就会失败，不必等到 mac/win runner 或 CI。
+> 违反规则时，CI 门禁会失败（按 ACCEPTANCE-STANDARD，测试与验收一律经 CI 裁决，不在本机执行）。
 
 ---
 
@@ -18,15 +18,17 @@
 ## 1. 分层（`src/`）
 
 ```
-root        src/supervisor.js（组装根；build-launcher.sh 经 esbuild 打成 core.cjs）
+root        src/supervisor.js（进程入口薄壳；build-launcher.sh 经 esbuild 打成 core.cjs）
   ^
 api         HTTP/WS 契约面
   ^
-guard       守护与监督（supervisor/lifecycle/monitor/native/guardian）
+app         编排层（组装根与业务主体；原 guard/** 并入）
   ^
-domains     业务域（router/relay/instance/plugin/dist/shell）
+domains     业务域（router/relay/instance/plugin/shell）
   ^
-platform    平台抽象、配置、执行器、日志、矩阵 —— 所有人的地基
+platform    平台抽象、配置、执行器、日志、矩阵、分发 —— 所有人的地基
+  ^
+shared      纯函数（version/ip/guardian）—— 与 platform 并列 L0，出度恒为 0
 ```
 
 **`platform/` 不得依赖任何上层**（L-1）。其余跨层依赖**允许但必须登记**（L-2）。
@@ -37,9 +39,9 @@ platform    平台抽象、配置、执行器、日志、矩阵 —— 所有人
 
 | 依赖 | 为什么刻意 |
 |---|---|
-| `domains -> api/identity` | relay 复用回环/RFC1918 判定，**不得重写第二份**（`relay-source-gate-test` S-a 主动要求）|
-| `domains -> guard/lifecycle/ports`（9 处）| ports.js 自称「**系统级**统一端口管理」，instance/router/relay 都靠它登记端口 |
-| `guard -> domains/dist` | native 卸载要读镜像契约 |
+| `domains -> shared/ip` | relay 复用回环/RFC1918 判定，**不得重写第二份**（`relay-source-gate-test` S-a 主动要求）|
+| `domains -> platform/service`（端口）| ports.js 自称「**系统级**统一端口管理」，instance/router/relay 都靠它登记端口 |
+| `platform -> shared` | version/ip 为 L0 纯函数，platform 与 domains 共用同一份，不得各自重写 |
 | `api -> platform`、`root -> 全部` | 正常向下组装 |
 
 把这些写成「禁止」，门禁第一次运行就红，然后被人加白名单绕过 —— 那就成了摆设。
@@ -55,9 +57,9 @@ platform    平台抽象、配置、执行器、日志、矩阵 —— 所有人
 |---|---|
 | 平台差异（OS 判定、命令、路径、解析）| `src/platform/**`（**只能在这**）|
 | 业务逻辑（路由/中继/实例/插件/发布）| `src/domains/<域>/` |
-| 守护/监督/生命周期 | `src/guard/**` |
+| 守护/监督/生命周期（编排）| `src/app/**`（原 `guard/**` 并入）|
 | HTTP/WS 接口 | `src/api/**` |
-| 装配 | `src/supervisor.js`（**只做组装**）|
+| 装配 | `src/app/assembly/**`；`src/supervisor.js` 为薄壳（加载配置 → 调组装 → 启动 API）|
 
 ### 第 2 步：取平台事实（**唯一入口**）
 
@@ -67,7 +69,7 @@ if (process.platform === 'win32') { /* ... */ }
 const osMap = { win32: 'win', linux: 'linux', darwin: 'darwin' };
 
 // 正确：经平台层
-const matrix = require('../../platform/matrix');
+const matrix = require('../../platform/contract/matrix');
 const os = matrix.osTag();              // 'win' | 'darwin' | 'linux'
 const tag = matrix.npmTag();            // 'linux-x64' 等
 const frp = matrix.frpTag();            // 第三方命名 'windows_amd64'
@@ -83,7 +85,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 
 1. 先问：能否经 `platform/` 或**已登记的共享单元**？
 2. 不能，则在 `test/layering-and-dependency-gate-test.js` 的 `CROSS_LAYER` 增加一条，**写明理由**；
-3. 跑 `npm test` —— L-2c 会核对你写了理由、L-2b 会核对没有多余登记。
+3. 由 CI 门禁核对：L-2c 核对理由、L-2b 核对无多余登记（按 ACCEPTANCE-STANDARD，测试不在本机执行）。
 
 ### 第 4 步：写测试（**这是规则的核心**）
 
@@ -97,10 +99,7 @@ if (matrix.supportsProcessGroup()) { /* POSIX 进程组 */ }
 
 ### 第 5 步：验证（**不可跳过**）
 
-```bash
-npm test                          # 全量；新门禁会拦住越界
-bash release/scripts/ci-core.sh   # CI 等价预演（本仓自包含，无需壳仓）
-```
+按 ACCEPTANCE-STANDARD，测试与验收一律经 CI；本机只做 `node --check` 语法自校与只读检查，不得以本机结果作结论。
 
 ---
 
@@ -131,7 +130,7 @@ bash release/scripts/ci-core.sh   # CI 等价预演（本仓自包含，无需�
 | 步 | 动作 | 门禁 |
 |---|---|---|
 | 1 | `package.json#npmPublish.packages` 声明子包 | `platform-matrix-single-source-test` M-a |
-| 2 | `src/platform/matrix.js` 的 `SUPPORTED` 加入 | 同上 M-a/M-b |
+| 2 | `src/platform/contract/matrix.js` 的 `SUPPORTED` 加入 | 同上 M-a/M-b |
 | 3 | `src/platform/os/*` 补 Provider 分支（`capabilityProfile` 显式档位）| `cross-platform-architecture-gate-test` CP-3 |
 | 4 | `.github/workflows/build.yml` build 矩阵加入 runner | `release-auth-test` R6-a2 |
 
@@ -164,7 +163,7 @@ bash release/scripts/ci-core.sh   # CI 等价预演（本仓自包含，无需�
 - 凭据只允许在规范库（**真实用户 home** 下的 `.dsh/credentials/`；**禁止**实例子目录 / 附件目录 —— 那是 ephemeral 的）；
 - 用 `bash release/scripts/cred.sh list|doctor|verify` 查看与管理；
 - ⚠ `$HOME` 被重定向到实例数据目录，**一律用绝对路径**，禁止 `~`；
-- 新增 / 轮换后必须 `npm test`（`credential-hygiene-test`）。
+- 新增 / 轮换后必须经 `credential-hygiene-test`（由 CI 执行）。
 ### 5.2 不可逆操作（破坏性操作）
 
 **任何不可逆操作**（覆盖凭据 / 发 npm 包 / force push / 删分支 / 覆盖文件）执行前必须自问三问：
@@ -239,9 +238,11 @@ DSH 与 AI 运行时**都在** `/tmp` 用 `dsh-*` / `dsh-spill-*` / `dsh-subproc
 
 ### 为什么只设 `precheck` 与 `test`，不设 `build` 矩阵
 
-`build`（4 平台）与 `release` 是**条件 job**（`if: needs.precheck.outputs.need_build == 'true'`）：
-版本已全部发布时它们**根本不运行**。若把它们设为 required，GitHub 会等一个**永远不会出现的状态**
-→ 所有 PR **永久合不进去**。required 只能设**每次都会跑**的 job。
+`build`（4 平台）自 2026-09-14 起**每次 push / PR 都跑**（不受 `need_build` 门控，仅其中的 `--publish` 步骤受门控；
+见 `RELEASE-STANDARD.md` §4 与 `test/release-spec-consistency-test.js` 的 P-8）。
+仍是**条件 job** 的只有 `release`（tag `v*` 且 `need_build`）。
+required checks 只设 `precheck` 与 `test`（合并门禁）；`build` 只作构建验证，不设为 required ——
+条件 job 若设为 required，GitHub 会等一个**永远不会出现的状态**，所有 PR **永久合不进去**。
 
 ### 实测结论（修正我先前的判断）
 
@@ -284,10 +285,9 @@ git switch master && git pull --ff-only
 
 ### 为什么只设 precheck 与 test（重申）
 
-`build`（4 平台）与 `release` 是**条件 job**（`need_build == 'true'` 才跑）；
-版本已全部发布时它们**根本不运行**（本 PR 即为 `skipped`）。
-若设为 required，GitHub 会等一个**永远不会出现的状态** → 所有 PR 永久阻塞。
-故 required 只能设**每次都会跑**的 job。
+只有 `release` 是条件 job（`need_build == 'true'` 才跑，版本已全部发布时 `skipped`）；
+`build`（4 平台）**每次 push / PR 都跑**（见 `RELEASE-STANDARD.md` §4）。
+required 只设 `precheck` 与 `test` 两个**无条件** job；`build` 不设为 required。
 
 ### 壳仓
 
@@ -328,7 +328,7 @@ git switch master && git pull --ff-only
 
 | 文件 | 角色 |
 |---|---|
-| `DOMAIN-STRUCTURE-DESIGN.md` | **域内结构唯一权威（SSOT）**：DF-1..DF-7 + R1..R12 + 五域/app 逐文件目标结构 + DG-1..DG-14 + §8 须同步改的门禁 |
+| `DOMAIN-STRUCTURE-DESIGN.md` | **域内结构唯一权威（SSOT）**：DF-1..DF-7 + R1..R12 + 五域/app 逐文件目标结构 + DG-1..DG-16 + §8 须同步改的门禁 |
 | `EXECUTION-CONTRACT.md` | **并行施工接口冻结书**：判据 + 硬约束 + 冻结的内部导出面/依赖 + 迁移纪律（所有执行子代理逐条遵守） |
 | `design-notes/*.md` | 逐域详细设计（router / relay / instance / plugin / shell / app / gates） |
 

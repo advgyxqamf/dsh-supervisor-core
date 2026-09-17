@@ -1,16 +1,9 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 目标解析（域：plugin / targets，只读 fs）
-//
-// F3：把前端 target 串（native / all / id:<实例> / 实例 id）解析成可执行目标描述。
-//   全部显式传 ctx（配置 + instances 句柄），**不读 this**；仅fs.existsSync 只读探测。
-//   · pathExtra           —— PATH + ~/.npm-global/bin
-//   · nativeTarget        —— 原生 DSH 目标（js 入口经 runtime 由 node 承载）
-//   · sandboxTarget       —— 沙箱实例目标（HOME/DSH_HOME/NODE_PATH/store-dir）
-//   · allSandboxTargets   —— 已装 DSH 的沙箱目标
-//   · resolveTargets      —— target 串 → { ok, targets } / { ok:false, error }
-// ══════════════════════════════════════════════════════════════════════════
+// 插件域目标解析（只读 fs）。
+// 把前端 target 串（native / all / id:<实例> / 实例 id）解析成可执行目标描述；
+// 全部显式传 ctx（配置 + instances 句柄），不读 this；仅 fs.existsSync 只读探测。
+// pathExtra 把 ~/.npm-global/bin 追加进 PATH。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -28,7 +21,7 @@ function nativeTarget(ctx) {
     name: '原生实例',
     kind: 'native',
     bin: ctx.dshBin,
-    // 绑定后的原生入口可能是包内 JS（.../lib/bin.js）——必须用 node 承载（Windows 更甚：.js 不可直接执行）。
+    // 绑定后的原生入口可能是包内 JS（.../lib/bin.js），必须用 node 承载（Windows 上 .js 不可直接执行）。
     runtime: /\.(js|cjs|mjs)$/i.test(ctx.dshBin) ? process.execPath : null,
     profileDir: ctx.profileDir,
     profileName: ctx.profileName,
@@ -69,7 +62,7 @@ function allSandboxTargets(ctx) {
   return out;
 }
 
-/** target 串 → 目标列表。 */
+/** target 串 -> 目标列表。 */
 function resolveTargets(ctx, targetStr) {
   let str = (targetStr === undefined || targetStr === null || targetStr === '') ? 'native' : String(targetStr);
   if (str.startsWith('id:')) str = str.slice(3); // 前端目标前缀（id:<实例id>）
@@ -83,4 +76,4 @@ function resolveTargets(ctx, targetStr) {
   return { ok: true, targets: [t] };
 }
 
-module.exports = { pathExtra, nativeTarget, sandboxTarget, allSandboxTargets, resolveTargets };
+module.exports = { nativeTarget, sandboxTarget, allSandboxTargets, resolveTargets };

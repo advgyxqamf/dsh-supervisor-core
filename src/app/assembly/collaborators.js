@@ -1,29 +1,19 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/assembly/collaborators.js —— 具名协作方装配（级 2：真 ctor 注入）。
+// app/assembly/collaborators.js —— 具名协作方装配（真 ctor 注入）。
 //
-// ## 级 2 走完了什么
-//   批 9 的薄委托（协作方方法转发 host[既有方法]）已按切面逐批替换为**工厂 + deps**：
-//     · state   → state/collaborator.createStateStore(deps)（实现真在 state 里）
-//     · session → session/machine.createSession(deps)
-//     · control → control/collaborator.createControlPlane(deps)
-//   这三个协作方**自己持有实现**，可只 require 对应模块 + 假 deps 直接断言（DF-6）。
-//   host 只保留**兼容外壳**：旧方法名（_mPhase/_mSetPhase/…）是转发到 host.state/session 的
-//   薄方法，公共面（api/测试）不变。
-//
-// ## 未迁移的切面（薄委托仍在）
-//   ctl / daemons / main / views / audit / ui：其模块仍以 { methods } 形式装到 host；
-//   本文件的 THIN_SPEC 把它们收敛为具名协作方（转发到 host 上的既有实现）。
-//   后续批按同样手法逐个改为工厂即可（见 design-notes/EXEC3-app-ctor-injection.md 遗留）。
-// ═══════════════════════════════════════════════════════════════════════════
+// state / session / control 由工厂（createStateStore / createSession / createControlPlane）
+// 构造并自己持有实现，可只 require 对应模块 + 假 deps 直接断言；host 只保留兼容外壳
+// （旧方法名 _mPhase/_mSetPhase 等转发到 host.state/session），公共面（api/测试）不变。
+// ctl / daemons / main / views / audit / ui 仍以 { methods } 形式装到 host；
+// 本文件的 THIN_SPEC 把它们收敛为具名协作方（转发到 host 上的既有实现）。
 
 const { createStateStore } = require('../state/collaborator');
 const { createSession } = require('../session/machine');
 const { createControlPlane } = require('../control/collaborator');
 const { ENTRY_FIELDS, PROC_FIELDS } = require('../state/field-tables');
 
-// 薄委托切面 → { 协作方公开名: host 上的既有方法名 }
+// 薄委托切面 -> { 协作方公开名: host 上的既有方法名 }
 const THIN_SPEC = {
   ctl: {
     call: '_ctlCall', lanCall: '_lanCtlCall',
@@ -132,7 +122,7 @@ function installState(host) {
   host._enterUpgradeHoldAsync = () => state.enterUpgradeHoldAsync();
   host._exitUpgradeHold = (explicit) => state.exitUpgradeHold(explicit);
   installFieldHelpers(host, state);
-  // 兼容访问器（phase/desired/child/…）安装到 host 实例（非 prototype）。
+  // 兼容访问器（phase/desired/child/...）安装到 host 实例（非 prototype）。
   for (const name of Object.keys(state.accessors)) Object.defineProperty(host, name, state.accessors[name]);
 }
 
@@ -198,4 +188,4 @@ function installCollaborators(host, options) {
   return host;
 }
 
-module.exports = { THIN_SPEC, SPEC: THIN_SPEC, THIN_NAMES, assertCollaboratorTargets, installCollaborators };
+module.exports = { THIN_SPEC, SPEC: THIN_SPEC, assertCollaboratorTargets, installCollaborators };

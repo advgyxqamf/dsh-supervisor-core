@@ -1,22 +1,15 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// router 域契约声明（DOMAIN-STRUCTURE-DESIGN §10；纯数据，零 require）
-//
-// exports    ← src/domains/router/index.js 的 module.exports 字面量键（DG-9）
-// PUBLIC_API ← 全仓消费点（app/assembly、app/facade/router.js、app/daemons/runtime.js、
-//              app/domain-actions/router.js、app/session/shutdown.js）+ 冻结对外契约面（DG-10）
-// deps.hooks ← DG-4b 豁免出处（onPersist / _ccLoginReject / _ccLoginResolve）
-// pure       ← 逐文件判定「零 IO require」的纯文件（DG-3）
-// exempt     ← DG-4 合法例外：providers/base.js 抽象占位 + extends 继承（文档）
-// ═══════════════════════════════════════════════════════════════════════════
+// router 域契约声明（DOMAIN-STRUCTURE-DESIGN 第10节；纯数据，零 require）。
+// exports=index.js 的 module.exports 字面量键（DG-9）；PUBLIC_API=全仓消费点+冻结对外契约面（DG-10）；
+// deps.hooks=DG-4b 豁免出处；pure=零 IO require 的纯文件（DG-3）；exempt=DG-4 合法例外。
 
 module.exports = {
   domain: 'router',
 
   exports: ['RouterService'],
 
-  // 域间契约（消费方成员必须 ⊆ 本表；含 static presets 与冻结的 providers getter）
+  // 域间契约（消费方成员必须属于本表；含 static presets 与冻结的 providers getter）
   PUBLIC_API: [
     // 生命周期
     'start', 'stop', 'stopAndWait', 'stopAllInstances',

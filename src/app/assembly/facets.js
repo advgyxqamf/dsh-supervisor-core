@@ -1,35 +1,18 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/assembly/facets.js —— 编排层「切面装配清单 + 兼容门面落地」
+// app/assembly/facets.js —— 编排层「切面装配清单 + 兼容门面落地」。
 //
-// ## 取代了什么（AP1 · 批 8/10）
-//   旧 src/supervisor.js 末尾：
-//     for (const mod of APP_MODULES) {
-//       Object.assign(Supervisor.prototype, mod.methods);
-//       Object.defineProperties(Supervisor.prototype, mod.accessors);
-//     }
-//   这是全域最后两处**原型挂载**（DG-8 / DS-G3b 硬失败项），也是 DF-5「禁止把
-//   多个文件的方法合并到同一个 this」在 app 层的唯一载体。
-//
-// ## 现在怎么装
-//   装配目标是 **host 实例**（Supervisor 的组装上下文），不再触碰任何 prototype：
-//     · { methods }               → 成员方法，`this` = host（跨文件 this.X() 语义不变）
-//     · { accessors }             → get/set 描述符（落到 host 实例）
-//     · host-first 自由函数模块   → 首参绑定包装（`fn(this, ...args)`）
-//     · api-rebind                → 需 root 注入 createServer（app 不得 require api，DS-3）
-//     每个模块在 FACETS 里是一个**具名切面**（name）；本表是「哪些模块 → 哪些成员」
-//     的唯一声明处（兼容门面清单），取代盲目的 APP_MODULES 循环。
-//
-// ## 与 SSOT §5.6 的关系
-//   这是 SSOT §5.6「级 1（必做）= 停跨文件挂原型 + ≤150 行兼容门面」的落地：
-//   门面对外表现为 host 实例上的具名成员；级 2（按切面 ctor 注入、消除全部
-//   跨文件 this）留待批 9。fidelity 核对表见 design-notes/EXEC-app-unmix.md。
-// ═══════════════════════════════════════════════════════════════════════════
+// 取代旧 supervisor.js 末尾的原型挂载（DG-8 / DS-G3b 硬失败项）：装配目标是 host
+// 实例（Supervisor 的组装上下文），不再触碰任何 prototype：
+//   { methods }             -> 成员方法，this = host（跨文件 this.X() 语义不变）
+//   { accessors }           -> get/set 描述符（落到 host 实例）
+//   host-first 自由函数模块 -> 首参绑定包装（fn(this, ...args)）
+//   api-rebind              -> 需 root 注入 createServer（app 不得 require api，DS-3）
+// 每个模块在 FACETS 里是一个具名切面（name）；本表是「哪些模块 -> 哪些成员」的唯一声明处。
 
 const { installCollaborators } = require('./collaborators');
 
-// ── 切面清单（顺序与旧 APP_MODULES 逐字一致，保证同名成员覆盖序不变）──
+// 切面清单（顺序与旧 APP_MODULES 逐字一致，保证同名成员覆盖序不变）
 const FACETS = [
   { name: 'assembly/bootstrap', mod: require('./bootstrap'), hostFirst: true },
   { name: 'assembly/api-rebind', mod: require('./api-rebind'), apiRebind: true },
@@ -59,7 +42,7 @@ const FACETS = [
   { name: 'facade/ports', mod: require('../facade/ports') },
   { name: 'facade/main', mod: require('../facade/main') },
   { name: 'facade/status', mod: require('../facade/status'), hostFirst: true },
-  // R7/R8（2026-09-17）：域写动作下沉 app/domain-actions/（facade 只读）——同一装配契约。
+  // 域写动作下沉 app/domain-actions/（facade 只读），同一装配契约。
   { name: 'domain-actions/router', mod: require('../domain-actions/router') },
   { name: 'domain-actions/lan', mod: require('../domain-actions/lan') },
   { name: 'domain-actions/main', mod: require('../domain-actions/main') },
@@ -96,7 +79,7 @@ function installHostFirst(host, mod) {
 }
 
 /**
- * 组装期把全部切面装到 host 实例。**必须在 composeSystem 业务体之前调用**——
+ * 组装期把全部切面装到 host 实例。必须在 composeSystem 业务体之前调用：
  * compose 构造期即会经 host._mSetX()/_bindNativeDshCommand()/loadState() 取用。
  * @param host  组装上下文（Supervisor 实例）
  * @param deps  { createServer } 由 root 注入（app 不得 require api，DS-3）
@@ -105,7 +88,7 @@ function installFacets(host, deps) {
   const d = deps || {};
   for (const f of FACETS) {
     if (f.apiRebind) {
-      // api-rebind 的 startApi/_rebindApiHost 需要 createServer —— 以注入方式提供。
+      // api-rebind 的 startApi/_rebindApiHost 需要 createServer，以注入方式提供。
       host._apiStart = function _apiStart() { return f.mod.startApi(this, d.createServer); };
       host._apiRebind = function _apiRebind() { return f.mod._rebindApiHost(this, d.createServer); };
       continue;
@@ -116,8 +99,8 @@ function installFacets(host, deps) {
     // 字段 helper（_mXxx/_mSetXxx）由生成器产出于实例上（取代挂原型）。
     if (typeof f.mod.buildFieldHelpers === 'function') f.mod.buildFieldHelpers(host);
   }
-  // 级 2：state/session/control 由**真 ctor 工厂**构造（自己持有实现）；其余切面为薄委托。
-  // 必须在全部切面装毕之后——薄委托协作方转发到 host 上的既有切面方法。
+  // state/session/control 由真 ctor 工厂构造（自己持有实现）；其余切面为薄委托。
+  // 必须在全部切面装毕之后：薄委托协作方转发到 host 上的既有切面方法。
   installCollaborators(host, { validate: true });
 }
 

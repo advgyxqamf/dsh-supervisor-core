@@ -9,7 +9,7 @@
  * state = { accounts:[{key,keyId,maskedKey,status,usable,running}],
  *           selectedAccountKeyId, activeAccountKeyId, cursor, kind }
  * opts  = { excludeKeys?:Set } 本请求内瞬时故障账号直接排除（强制轮换不粘滞）
- * → { keyId|null, nextCursor, clearSelected, reason }
+ * -> { keyId|null, nextCursor, clearSelected, reason }
  *   reason: 'selected' | 'sticky' | 'rotate' | null
  *   clearSelected=true 表示锁定账号「永久失效」需清锁并持久化（临时冻结保留锁定）。
  */

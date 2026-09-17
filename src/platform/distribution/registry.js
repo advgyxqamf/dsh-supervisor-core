@@ -1,10 +1,8 @@
 'use strict';
 
-// 镜像源选择与探测（IO）：消费壳投放的镜像契约（registry.json），
-// 维护内核的 registry 配置 / 选择结果，并做可达性探测。
-//
-// 状态由 DistributionManager 门面持有，本文件函数**显式收参**（state），不碰 this（DF-4/DF-6）；
-// 可独立 require 后传假 state 单测。
+// 镜像源选择与探测（IO）：消费壳投放的镜像契约（registry.json），维护内核的 registry
+// 配置/选择结果并做可达性探测。状态由 DistributionManager 门面持有，本文件函数显式收参
+// （state），不碰跨文件 this，可独立 require 后传假 state 单测。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -15,18 +13,14 @@ const policies = require('./policies');
 /** 壳投放契约的重载 TTL（ms）：壳会在运行中重写 registry.json，内核必须能看到。 */
 const CONTRACT_TTL_MS = 60 * 1000;
 
-/** 内核平台标签（用于展开契约的 pathTemplate）。
- *
- *  平台知识收口到 src/platform/contract/matrix.js；错误文案由 matrix.npmTag 原样抛出 ——
- *  它是既有对外契约（test/arch-validation-test.js 断言其内容），不得改动。 */
+/** 内核平台标签（用于展开契约的 pathTemplate）。平台知识收口到 platform/contract/matrix.js；
+ *  matrix.npmTag 的抛错文案是既有对外契约（被 arch-validation 门禁断言），不得改动。 */
 function platformTag() {
   return matrix.npmTag();
 }
 
-/** 若距上次载入超过 CONTRACT_TTL_MS 则重载壳投放的镜像契约。
- *
- *  为什么是 TTL 而非 fs.watch：契约读取在多个函数入口被调用，TTL 实现简单、无句柄泄漏、
- *  跨平台一致；60s 对「镜像选择」这种低频事实足够新。 */
+/** 距上次载入超过 CONTRACT_TTL_MS 则重载壳投放的镜像契约。用 TTL 而非 fs.watch：契约读取
+ *  在多个函数入口被调用，TTL 实现简单、无句柄泄漏、跨平台一致，60s 对低频的镜像选择足够新。 */
 function reloadContractIfStale(state) {
   const now = Date.now();
   if (state._contractLoadedAt && (now - state._contractLoadedAt) < CONTRACT_TTL_MS) return;
@@ -34,12 +28,10 @@ function reloadContractIfStale(state) {
   state._contractLoadedAt = now;
 }
 
-/** 载入镜像配置与壳投放的契约。
- *
- *  优先级（高 → 低）：① 用户手动固定 mode=manual；② 契约 catalog；③ 构造参数；④ 最小兜底。
- *  契约不可用时**不阻断**：记录 reason 供诊断，选择路径自动回退（不变量 C2）。 */
+/** 载入镜像配置与壳投放的契约。优先级（高到低）：1) 用户手动固定 mode=manual；2) 契约 catalog；
+ *  3) 构造参数；4) 最小兜底。契约不可用时不阻断：记录 reason 供诊断，选择路径自动回退（不变量 C2）。 */
 function loadRegistryConfig(state) {
-  // ① 先读契约（即使下面是 manual，也要拿到 probe 规格用于复测）
+  // 1) 先读契约（即使下面是 manual，也要拿到 probe 规格用于复测）
   state.contract = registryContract.read(state.registryFile);
   if (!state.contract.ok) {
     state.logger.warn && state.logger.warn(
@@ -54,7 +46,7 @@ function loadRegistryConfig(state) {
       } catch { /* 事件失败不阻断 */ }
     }
   }
-  // ② 旧字段（mode/manualOrigin/origins）保留读取，兼容 v1 与「内核自己写过的配置」
+  // 2) 旧字段（mode/manualOrigin/origins）保留读取，兼容 v1 与「内核自己写过的配置」
   if (!state.registryFile) return;
   try {
     if (!fs.existsSync(state.registryFile)) return;
@@ -66,10 +58,9 @@ function loadRegistryConfig(state) {
   }
 }
 
-/** 落盘 registry 配置。
- *
- *  ⚠ 该文件的**所有者是桌面壳**（壳写入 v2 字段 catalog/probe/selected）；内核必须保留壳字段，
- *  只覆盖本内核拥有的三项（mode/origins/manualOrigin）——否则一次保存就抹掉壳的镜像解析依据。 */
+/** 落盘 registry 配置。该文件的所有者是桌面壳（壳写入 v2 字段 catalog/probe/selected）：
+ *  内核必须保留壳字段，只覆盖自己拥有的 mode/origins/manualOrigin，
+ *  否则一次保存就抹掉壳的镜像解析依据。 */
 function saveRegistryConfig(state) {
   if (!state.registryFile) return;
   try {
@@ -81,7 +72,7 @@ function saveRegistryConfig(state) {
   }
 }
 
-/** 读回原文档（保留壳字段与任何未来新增字段）→ 只覆盖内核拥有的三键 → 原子写回。 */
+/** 读回原文档（保留壳字段与未来新增字段），只覆盖内核拥有的三键，原子写回。 */
 function writeRegistryDoc(state) {
   const f = state.registryFile;
   const tmp = f + '.tmp';
@@ -112,10 +103,8 @@ async function probeRegistry(state, origin) {
   }
 }
 
-/** 探测**单个** origin 的可达性与延迟（供面板「测试」按钮的同源调用）。
- *
- *  关键：复用 probeRegistry，即与内核选源使用**完全相同的探测规格** ——
- *  否则「测试按钮说可达」与「实际选源结果」会再次分叉。 */
+/** 探测单个 origin 的可达性与延迟（供面板「测试」按钮同源调用）。复用 probeRegistry，
+ *  即与内核选源使用完全相同的探测规格，否则「测试按钮说可达」与「实际选源结果」会再次分叉。 */
 async function probeOrigin(state, origin) {
   const o = policies.normalizeOrigin(origin);
   if (!policies.isValidOrigin(o)) return { origin: o, ok: false, latencyMs: null, error: '非法 origin' };
@@ -130,8 +119,8 @@ function registryOrigins(state) {
 
 /** 选一个可达且最快的 registry。mode=manual 时锁定 manualOrigin。TTL 缓存 30min。返回 origin。 */
 async function selectRegistry(state, force) {
-  // ⚠ P1 修复：契约必须能重载。壳会在运行中重写 registry.json（catalog/probe/selected/mode）——
-  //   内核进程生命周期内若只看启动瞬间的契约，会出现「两侧选源不一致」与「手动设了不生效」。
+  // 契约必须能重载：壳会在运行中重写 registry.json（catalog/probe/selected/mode）。内核进程若
+  //   只看启动瞬间的契约，会出现「两侧选源不一致」与「手动设了不生效」。
   reloadContractIfStale(state);
   const rc = state.registryConfig || {};
   if (rc.mode === 'manual' && rc.manualOrigin) {
@@ -144,8 +133,8 @@ async function selectRegistry(state, force) {
       && (now - state.selectedRegistry.checkedAt) < 30 * 60 * 1000) {
     return state.selectedRegistry.origin;
   }
-  // ★ 优先采用**壳投放的选择结果**（壳已完成同轮测速，且用同一探测规格）：
-  //   正常路径零重复网络；仅当契约过期（超 TTL）或 force 时才自己复测。
+  // 优先采用壳投放的选择结果（壳已完成同轮测速，且用同一探测规格）：正常路径零重复网络；
+  //   仅当契约过期（超 TTL）或 force 时才自己复测。
   const c = state.contract;
   if (!force && c && c.ok && c.selected) {
     const age = Math.floor(Date.now() / 1000) - c.selected.checkedAt;

@@ -1,17 +1,10 @@
 'use strict';
 
-// 原生 DeepSeek Harness（原生 DSH）生命周期门面 —— 组合 + 委托，无业务实现。
-//
-// 职责切分（DF-1..DF-9）：
-//   ops.js       安装 / 卸载 / 状态 / 更新检查编排（host-first 自由函数）
-//   upgrade.js   升级 / 回滚编排（先停后装、健康验证、失败回滚）
-//   npm.js       npm 调用（探测 / 镜像 / 安装执行）
-//   manifest.js  安装清单读写 + 数据认领（原子写）
-//   probe.js     真实安装检测 / 版本读取 / 端口健康
-//   policies.js  纯策略（忙 / 视图 / 合法性 / 回滚判定）
-//
-// 公共导出面（NativeManager）逐字保持：消费方 src/supervisor.js、api/domains/native.js、
-// app/assembly/compose.js、app/settings/versions.js，以及 native-* / precheck / upgrade 等测试。
+// 原生 DeepSeek Harness（原生 DSH）生命周期门面——组合 + 委托，无业务实现。
+// 职责拆分：ops.js 安装/卸载/状态/更新检查；upgrade.js 升级/回滚；npm.js npm 调用；
+//   manifest.js 清单读写；probe.js 安装检测/版本/端口健康；policies.js 纯策略。
+// 公共导出面（NativeManager）：消费方 src/supervisor.js、api/domains/native.js、
+//   app/assembly/compose.js、app/settings/versions.js，以及 native-* / precheck / upgrade 等测试。
 
 const path = require('node:path');
 const os = require('node:os');
@@ -33,8 +26,7 @@ class NativeManager {
     this.dshHome = path.join(os.homedir(), '.dsh'); // DSH 数据目录（与守卫状态目录分开）
     this.npmRoot = opts.npmRoot || null;    // npm 全局根（测试可注入隔离目录）
     // npm 可执行的解析入口（构造期依赖注入，默认经跨平台解析）。
-    // 事故 P1-C：解构 require 是值绑定，patch 无效 —— 测试曾因此执行真实 npm。
-    // 故做成构造期可注入，结构上保证测试不触碰真实 npm。
+    // 解构 require 是值绑定、patch 无效，故做成构造期可注入，结构上保证测试不触碰真实 npm。
     this._npmBin = opts.npmBin || null;
     this._npmBinArgs = opts.npmBinArgs || null; // 前置参数（仅测试：以 node 执行包内 JS）
     this.hooks = opts.hooks || {};          // 守卫生命周期钩子（升级停/起 DSH 时回调）

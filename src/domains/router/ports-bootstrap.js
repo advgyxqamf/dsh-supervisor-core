@@ -3,9 +3,8 @@
 const { shared: portsShared } = require('../../platform/service/ports');
 const { OWNER_PREFIXES } = require('./port-segments');
 
-// router 域端口迁移 + 按 providers 重建端口绑定（C2/C8 侧，拆自旧 daemon.js:85-121）。
-// IO 编排、幂等合并；**必须在 RouterService 构造之前调用**——否则构造时 configureFile
-// 加载不到完整文件，内存空表会覆盖历史绑定（真实数据丢失教训）。
+// router 域端口迁移 + 按 providers 重建端口绑定。IO 编排、幂等合并；必须在 RouterService
+// 构造之前调用，否则构造时 configureFile 加载不到完整文件，内存空表覆盖历史绑定（真实数据丢失教训）。
 
 const path = require('node:path');
 const fs = require('node:fs');

@@ -1,12 +1,10 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/assembly/compose/domains.js —— 组装第二步：各业务域/基础设施域构造 + 端口注册。
-//
-// 从 app/assembly/compose.js 拆出（R3 严值 DF-2：单文件 ≤300）。以 host 显式入参，零 this。
-// 包含：端口池配置 → RouterService / InstanceManager / ManagedRegistry（+adapter 挂接）→
-//   Lan 占位 → PluginMarket/PluginManager → Lifecycle/Health/HostService/NativeManager → 固定端口登记。
-// ═══════════════════════════════════════════════════════════════════════════
+// 以 host 显式入参，零 this。
+// 包含：端口池配置 -> RouterService / InstanceManager / ManagedRegistry（+adapter 挂接）
+//   -> Lan 占位 -> PluginMarket/PluginManager -> Lifecycle/Health/HostService/NativeManager
+//   -> 固定端口登记。
 
 const path = require('node:path');
 const os = require('node:os');
@@ -35,12 +33,12 @@ function composeDomains(host) {
       dist: host.dist,
       tasks: host.tasks,
     });
-    // 端口注册表持久化与守卫状态同域（默认 <产品状态根>/supervisor/ports.json；自定义 stateFile 时跟随），
-    // 测试可经自定义 stateFile 天然隔离，绝不污染生产记录。
+    // 端口注册表持久化与守卫状态同域（默认 <产品状态根>/supervisor/ports.json；自定义
+    // stateFile 时跟随），测试可经自定义 stateFile 天然隔离，绝不污染生产记录。
     try { ports.configureFile(path.join(path.dirname(host.config.stateFile), 'ports.json')); } catch (e) { host.logger.warn && host.logger.warn('ports configure: ' + e.message); }
-    // 端口池规模可配置（工业标准：范围是配置项而非编译期常量）：config.portPools 覆盖默认池。
+    // 端口池规模可配置：范围是配置项而非编译期常量，config.portPools 覆盖默认池。
     try { if (host.config.portPools) ports.configurePools(host.config.portPools); } catch (e) { host.logger.warn && host.logger.warn('ports pools configure: ' + (e && e.message)); }
-    // 原生 DSH 检测 → 绑定（**必须先于任何消费者**：InstanceManager/PluginManager/spawn）。
+    // 原生 DSH 检测 -> 绑定（必须先于任何消费者：InstanceManager/PluginManager/spawn）。
     host._bindNativeDshCommand();
     host.instances = new InstanceManager({
       dir: path.dirname(host.config.stateFile),
@@ -52,15 +50,15 @@ function composeDomains(host) {
       dshBin: host.config.command && host.config.command[1] ? host.config.command[1] : 'dsh',
     });
     host.instances.load();
-    // 概念清分迁移：instances.json 含历史 main 记录 → 元数据迁入 dsh-main.json（守卫核心存储）并剔除
+    // 概念清分迁移：instances.json 含历史 main 记录时，元数据迁入 dsh-main.json（守卫核心存储）并剔除。
     host._migrateMainRecord();
-    // ── 控制平面 v3 R1：管家注册机（声明目录）──
-    // 记录「管家直接负责」的受管对象(应然+所有权)；本阶段为影子(不驱动任何循环)，随 add/remove 实时申报。
+    // 控制平面 v3 R1：管家注册机（声明目录）。
+    // 记录「管家直接负责」的受管对象（应然+所有权）；本阶段为影子（不驱动任何循环），随 add/remove 实时申报。
     try {
-      // 目录持久化文件按守卫状态文件派生（C3-3b G4 修测试隔离）：
-      // 生产默认 stateFile=state.json → <dir>/managed-objects.json（与部署/文档一致）；
-      // 测试用自定义 stateFile(如 state-3900.json) → <dir>/state-3900.managed-objects.json——
-      // 同一 TMP 目录多守卫（smoke/upgrade 链）不再互相污染 desired/phase（G4 起目录为权威存储）。
+      // 目录持久化文件按守卫状态文件派生（修测试隔离）：
+      // 生产默认 stateFile=state.json 时 <dir>/managed-objects.json（与部署/文档一致）；
+      // 测试用自定义 stateFile(如 state-3900.json) 时 <dir>/state-3900.managed-objects.json，
+      // 同一 TMP 目录多守卫（smoke/upgrade 链）不再互相污染 desired/phase。
       host.managedObjects = new ManagedRegistry({
         file: path.join(path.dirname(host.config.stateFile), host._registryFileName()),
         logger: host.logger,
@@ -68,26 +66,23 @@ function composeDomains(host) {
         ports: ports,
       });
       host._syncManagedRegistry();
-      // daemon 监督 adapter（v3 R3 C3-2）：heartbeat 驱动；节流 6 拍≈30s（原 L3 监督 tick 语义）
+      // daemon 监督 adapter：heartbeat 驱动；节流 6 拍≈30s。
       if (host.managedObjects && typeof host.managedObjects.registerAdapter === 'function') {
         host.managedObjects.registerAdapter('router-daemon', { supervise: () => host._daemonSuperviseOnce('router'), tickEvery: 6, derivePhase: true });
         host.managedObjects.registerAdapter('lan-daemon', { supervise: () => host._daemonSuperviseOnce('lan'), tickEvery: 6, derivePhase: true });
-        // main(dsh) adapter（C3-3a observe → C3-3b G1 supervise）：heartbeat 把 main 实然写入目录
-        // (lastObserved)——不驱动（G3 前 tick 仍是唯一驱动）。supervise 内做影子对比（纯计算+日志），
-        // 实然与 tick 同源(monitor.probe → lastProbeOk)。影子连续零 diff 后由 G3 切换接管。
+        // main(dsh) adapter：heartbeat 把 main 实然写入目录（lastObserved），不驱动；
+        // supervise 内做影子对比（纯计算+日志），实然与 tick 同源（monitor.probe -> lastProbeOk）。
         host.managedObjects.registerAdapter('dsh', { supervise: () => host._dshSuperviseOnce(), tickEvery: 1 });
-        // sandbox-instance adapter（C3-4a observe → C3-4b supervise 接管）：heartbeat 逐实例监督
-        // （InstanceManager.supervise 单实例收敛 + 目录应然/相位同步）——InstanceManager.startTimer 停。
-        // 域业务（CRUD/安装/装配/systemd/持久化）仍在 InstanceManager。
+        // sandbox-instance adapter：heartbeat 逐实例监督（InstanceManager.supervise 单实例收敛 +
+        // 目录应然/相位同步）；域业务（CRUD/安装/装配/systemd/持久化）仍在 InstanceManager。
         host.managedObjects.registerAdapter('sandbox-instance', { supervise: (entry) => host._sandboxSuperviseOnce(entry), tickEvery: 1 });
       }
     } catch (e) { host.logger && host.logger.warn && host.logger.warn('managed registry init: ' + (e && e.message)); }
-    // 远程控制子系统（relay + frpc）：2026-09 架构单写——daemon 模式下守卫【不创建】本地 LanManager
-    //（relay 唯一由独立 lan-daemon 承载，注册表 ports-lan 独占）。仅非 daemon 模式（config.lanDaemon
-    // 未启用）才经 get lan() 惰性创建本地实例。曾无条件 new → 守卫进程内始终存在完整 relay 能力，
-    // 任何漏网调用即写 relay 到 ports.json（漂移族 ghost 根因，见 lanApi/996c8c3）。
+    // 远程控制子系统（relay + frpc）：daemon 模式下守卫不创建本地 LanManager（relay 唯一由独立
+    // lan-daemon 承载，注册表 ports-lan 独占）。仅非 daemon 模式（config.lanDaemon 未启用）才经
+    // get lan() 惰性创建本地实例；曾无条件 new，任何漏网调用即写 relay 到 ports.json。
     host._lan = null;
-    host.pluginMarket = new PluginMarket({ // 步骤8a：pluginmarket.js 改名 market.js
+    host.pluginMarket = new PluginMarket({
       stateFile: host.config.stateFile,
       logger: host.logger,
     });
@@ -108,12 +103,12 @@ function composeDomains(host) {
         catch (e) { host.logger.warn && host.logger.warn('plugin change → native restart: ' + e.message); return { ok: false, error: e.message }; }
       },
     });
-    // 版本管理：单一版本源（package.json），交给 platform/service/version
+    // 版本管理：单一版本源（package.json），交给 platform/service/version。
     host.guardVersion = guardVersion();
     // 守卫自身生命周期 + 健康 + 遥测 + 主机服务对接（infra：与实例生命周期完全分离）
     host.lifecycle = new Lifecycle();
-    // 统一生命周期管理器（2026-09 归一化架构）：全部模块生命周期的唯一注册表与统一启停入口。
-    // 守卫持监测权——start/stop/状态统一经此；模块各自独立生命周期，守卫重启不停被管模块。
+    // 统一生命周期管理器：全部模块生命周期的唯一注册表与统一启停入口。
+    // 守卫持监测权，start/stop/状态统一经此；模块各自独立生命周期，守卫重启不停被管模块。
     host.lifecycleManager = new LifecycleManager({ logger: host.logger, events: host.events });
     host.health = new Health(host.lifecycle);
     host.hostService = new HostService({ logger: host.logger, events: host.events });
@@ -138,11 +133,9 @@ function composeDomains(host) {
         notify: (t, b) => host.notify(t, b),
       },
     });
-    // 概念清分（2026-09-06）：原生 DSH 是主干，软件本体由 NativeManager 独立管理（/native/* + /lifecycle/dsh/*）；
-    // 沙箱实例由 InstanceManager 管理（/instances/*）。原生不挂进沙箱实例出口——不注入任何句柄/委托。
-    // （EventHub 汇聚已由 LogCore.init 统一装配）；
-    //  host.eventHub = logCore.hub，聚合文件按 stateFile 派生唯一。）
-    // 系统级端口登记：固定端口统一注册，冲突启动即 fail-fast，杜绝各子系统各管各的端口
+    // 概念清分：原生 DSH 是主干，软件本体由 NativeManager 独立管理（/native/* + /lifecycle/dsh/*）；
+    // 沙箱实例由 InstanceManager 管理（/instances/*）。原生不挂进沙箱实例出口，不注入任何句柄/委托。
+    // 系统级端口登记：固定端口统一注册，冲突启动即 fail-fast，杜绝各子系统各管各的端口。
     host._registerFixedPorts();
 }
 

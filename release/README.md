@@ -76,7 +76,7 @@
 ### 铁律一：平台知识只允许存在于 `src/platform/**`
 
 `process.platform` / `process.arch` / `os.platform()` / `os.arch()`
-**只允许出现在 `src/platform/**`**。业务域（`domains/`、`guard/`、`api/` …）必须经：
+**只允许出现在 `src/platform/**`**。业务域（`domains/`、`app/`、`api/` …）必须经：
 
 | 需求 | 唯一入口 |
 |---|---|
@@ -237,12 +237,11 @@ release/
 > `shell-release/`（壳的 npm 打包工具）、9 份 `SHELL-*.md`（壳设计文档）、`export-shell.sh`、
 > 以及 `bump.sh --shell` / `verify-versions.js --shell` 均已迁至壳仓：
 > 壳工具 → `shell-release/`、`scripts/bump-shell.sh`、`scripts/verify-shell-versions.js`；
-> 壳文档 → `docs/`。本仓仅保留**内核侧**的壳对接代码（`src/domains/shell/`、`src/api/shell.js`
+> 壳文档 → `docs/`。本仓仅保留**内核侧**的壳对接代码（`src/domains/shell/`、`src/api/domains/shell.js`
 > —— 内核需要展示桌面版本并观测壳健康，属内核职责）。
 
-## 内核构建模式（2026-09-13 硬标准改版）
+## 内核构建模式（硬标准）
 
-> **本节原为「全平台本地构建」，2026-09-13 硬标准落地后整节废弃。**
 > 现行唯一流程见 `RELEASE-STANDARD.md`。
 
 | 项 | 现行（硬标准）|

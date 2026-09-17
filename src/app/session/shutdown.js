@@ -1,18 +1,10 @@
 'use strict';
 
-// ⚠ 步骤7 收尾：shutdownAll 用 platform.service() 停 systemd 单元；该依赖原在 supervisor.js 顶部，机械下沉时未随之携带。
 const platform = require('../../platform/os/index');
 
 const { registerAll } = require('../../app/control/adapters');
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/session/shutdown.js —— 关停编排
-//
-// 职责：停被管对象 → 会话置 stopped → 回执（绝不自行停止守卫）。
-//
-// 步骤 7（2026-09-16）：从 src/supervisor.js（组装根）下沉 —— 使 root 只剩组装与启动，
-//   满足 DIRECTORY-STRUCTURE-DESIGN §5.2 DS-G7（supervisor.js ≤200 行）。
-// ═══════════════════════════════════════════════════════════════════════════
+// app/session/shutdown.js —— 关停编排：停被管对象、会话置 stopped、回执（绝不自行停止守卫）。
 
 
 
@@ -35,18 +27,16 @@ function shutdown(host) {
         host.api.close();
       } catch {}
     }
-    // ── 统一生命周期停止（2026-09 归一化架构）──
-    // 过渡态：进程解耦（L3）完成前，router/lan 仍驻守卫进程——shutdown 必须停它们防孤儿
-    // （反代实例进程、relay/frpc、动态端口残留）。解耦后此段改为「只停观测，不停进程」：
-    // 守卫重启不应影响任何被管模块（它们独立生命周期，由 systemd/自身 supervisor 维持）。
-    // 统一经 lifecycleManager 出口（而非直调模块对象），保证启停路径收敛到一处。
-    // ⚠ 2026-09-12（P1）：`stopAll` 是 async —— 必须 **await**，否则调用方 exit 会截断它。
-    //   返回的 Promise 存到 `_shutdownPromise`，使重复调用拿到同一个（幂等）。
+    // 统一生命周期停止
+    // router/lan 仍驻守卫进程（进程解耦完成前）时 shutdown 必须停它们防孤儿
+    // （反代实例进程、relay/frpc、动态端口残留）。统一经 lifecycleManager 出口，保证启停路径收敛到一处。
+    // stopAll 是 async，必须 await，否则调用方 exit 会截断它；
+    // 返回的 Promise 存到 _shutdownPromise，使重复调用拿到同一个（幂等）。
     host._shutdownPromise = (async () => {
       try {
         if (host.lifecycleManager) {
-          // L3 解耦：router 若为独立 daemon（detached）→ 守卫退出不停它（daemon 独立生命周期继续服务）；
-          // 仅内嵌 router/lan（仍驻守卫进程的）需停防孤儿。实现：先把 daemon 型 router 项从 stopAll 豁免。
+          // router 若为独立 daemon（detached），守卫退出不停它（其生命周期继续服务）；
+          // 仅内嵌 router/lan 需停防孤儿：先把 daemon 型 router 项从 stopAll 豁免。
           try {
             const rlc = host.lifecycleManager.get('router');
             if (rlc && host._routerDaemonActive()) {
@@ -66,7 +56,7 @@ function shutdown(host) {
 }
 
 async function shutdownAll(host) {
-    // 幂等：已进入退出流程 → 直接回执当前态（壳可安全重试/轮询）
+    // 幂等：已进入退出流程则直接回执当前态（壳可安全重试/轮询）
     if (host._sessionHalting()) return { ok: true, already: true, sessionState: host._sessionState };
     host._setSessionState('stopping'); // 抑制一切自动拉起（INV-S1）
     host.logger.info('[session] 退出流程开始：停止全部被管对象…');
@@ -76,9 +66,8 @@ async function shutdownAll(host) {
     // 2) 停全部沙箱（按实际单元名——glob 不经 shell 不展开，V5 修复）
     await host._stopAllSandboxes();
     // 3) 停路由/远程 daemon（独立进程；DaemonLifecycle.stop 串行换代语义）
-    // ⚠ 2026-09-12（P2-2 配套）：`stop()` 现在**会如实返回 ok:false**（进程未在超时内退出时）。
-    //   此前该返回值被直接丢弃 → 孤儿 daemon 会被静默放过（与「已全部停止」的回执矛盾）。
-    //   现：失败即记事件 + warn，让面板/日志可见（仍继续后续步骤，不阻断关停流程）。
+    // stop() 会如实返回 ok:false（进程未在超时内退出时）：失败即记事件 + warn，
+    //   让面板/日志可见（仍继续后续步骤，不阻断关停流程）。
     const stopDaemon = async (kind) => {
       try {
         const lc = host._daemonLifecycle(kind);
@@ -103,24 +92,32 @@ async function shutdownAll(host) {
 
 function _stopMainDsh(host) {
     try {
-      // 退出会话 ≠ 改变用户运行意图（契约 §6：desired 仅在用户显式启停时改变）。
-      // 「停后不再拉起」由 sessionState=stopping 抑制（INV-S1）；不再靠翻 desired——旧架构翻 desired
-      // 是为防 systemd Restart=always 重拉 DSH，新架构由壳主动 stop 守卫，该理由已消失。
-      // 保留 desired=running 使「下次打开壳」可恢复运行（契约 §5 启动时序）。
+      // 退出会话不等于改变用户运行意图（契约 §6：desired 仅在用户显式启停时改变）。
+      // 「停后不再拉起」由 sessionState=stopping 抑制（INV-S1）；保留 desired=running
+      // 使下次打开壳可恢复运行（契约 §5 启动时序）。
       if (host._mChild() || host._mAdoptPid()) { host.stopProcess('session_stop'); }
     } catch (e) { host.logger.warn && host.logger.warn('shutdownAll stop main: ' + e.message); }
 }
 
 async function _stopAllSandboxes(host) {
-    // V5 修复：`systemctl stop dsh-web@*` 经 execFileSync 不走 shell，`*` 不会被展开（systemd 会把
-    // 它当字面单元名）→ 沙箱根本停不掉。改为遍历本守卫登记的沙箱实例，按【实际单元名】逐个停。
+    // systemctl stop dsh-web@* 经 execFileSync 不走 shell，`*` 不会被展开（被当字面单元名），
+    // 沙箱停不掉。故遍历本守卫登记的沙箱实例，按实际单元名逐个停。
     const insts = host.instances ? host.instances.all() : [];
     const sandboxes = insts.filter((i) => i.domain === 'sandbox' && i.id !== 'main');
     for (const inst of sandboxes) {
+      let stopped = false;
       try {
         // 服务管理器抽象（跨平台审计 §7.1）：编排层不直接调用 systemctl。
-        platform.service.current().stopUnit('dsh-web@' + inst.id, { timeoutMs: 20000 });
-      } catch (e) { host.logger.warn && host.logger.warn('shutdownAll stop sandbox ' + inst.id + ': ' + e.message); }
+        // 仅当 stopUnit 明确返回成功才认为单元已停：Linux 停止失败返回 false，
+        // 非 Linux（无用户单元）抛 CapabilityError；两条路径都不得把实例谎报为 STOPPED。
+        stopped = platform.service.current().stopUnit('dsh-web@' + inst.id, { timeoutMs: 20000 }) === true;
+      } catch (e) { host.logger.warn && host.logger.warn('shutdownAll stop sandbox ' + inst.id + ': ' + (e && e.message)); }
+      if (!stopped) {
+        // 未确认停止：保留原 phase，不落 STOPPED（否则下次按错误相位决策形成 ghost）。
+        host.logger.warn && host.logger.warn('shutdownAll stop sandbox ' + inst.id + ' 未确认停止，保留原 phase');
+        host.events && host.events.append('shutdown_sandbox_stop_incomplete', { id: inst.id });
+        continue;
+      }
       try { if (inst.state) inst.state.phase = 'STOPPED'; } catch {}
     }
     if (sandboxes.length) { try { host.instances.save(); } catch {} }

@@ -1,13 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// app/state/field-tables.js —— main entry/process 字段表（**纯数据，零依赖**）。
-//
-// 从 state/fields.js:38-64 拆出（DF-3：纯数据与有状态读写/IO 分离）。
-// fields.js 仍 re-export 同名常量（ENTRY_FIELDS/PROC_FIELDS），故
-// buildFieldHelpers 生成的 46 个 helper 与 9 个访问器的**形态逐字不变**。
-// 可 require 后独立单测（DF-6）。
-// ═══════════════════════════════════════════════════════════════════════════
+// app/state/field-tables.js —— main entry/process 字段表（纯数据，零依赖）。
+// fields.js 仍 re-export 同名常量（ENTRY_FIELDS/PROC_FIELDS），buildFieldHelpers 生成的
+// helper 与访问器形态据此保持稳定；可独立 require 单测。
 
 const ENTRY_FIELDS = [
   // [读写 helper 后缀, entry 字段]

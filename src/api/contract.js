@@ -1,33 +1,19 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// API 契约面（单一事实源）—— P3 断点修复；步骤 9 由 surface.js 改名为 contract.js。
-//
-// 为什么改名：本文件是"对外接口契约"的元数据，与传输/安全实现无关；
-//   `contract.js` 直述其性质（DIRECTORY-STRUCTURE-DESIGN §3 定版）。
-//   改名是**纯结构搬家**——SURFACE/PREFIXES/CATEGORIES/summary 导出与语义逐字不变，
-//   旧消费者（test/api-surface-test.js 等）只改路径，不改判据。
-//
-// 背景（功能断点审计 D1）：仓库长期**无受强制的 API 契约**，表现为：
-//   1) README 的 API 清单已过期（仍文档化 R3 已删除的 POST /start|/stop|/restart，
-//      却遗漏 /lifecycle、/session、/ports、/metrics、/logs、/env/status 等大半真实路由）；
-//   2) 「端点是否有消费者」只能靠一次性 grep 审计，无法作为**常驻不变量**防回归。
-//
-// 本模块把「每个路由属于哪一类、谁在消费」显式声明；test/api-surface-test.js 断言
-// 源码里出现的每个路由都在此处登记（双向一致）。新增路由若不登记 → 测试失败。
+// API 契约面（单一事实源）：显式声明每个路由的分类与消费者；test/api-surface-test.js
+// 断言源码里出现的每个路由都在此处登记（双向一致），新增路由不登记即测试失败。
 //
 // 分类语义：
 //   public      一方客户端消费（前端 UI / CLI / 桌面壳）
-//   operational 运维/监控/审计面（外部工具消费，一方 UI 不调用——工业标准的可观测接口）
+//   operational 运维/监控/审计面（外部工具消费，一方 UI 不调用，即可观测接口）
 //   internal    守卫自身内部消费（不对外承诺稳定性）
-//   deprecated  兼容保留（明确移除条件，避免静默删除破坏旧客户端）
-// ═══════════════════════════════════════════════════════════════════════════
+//   deprecated  兼容保留（必须写明移除条件/替代，避免静默删除破坏旧客户端）
 
 const CATEGORIES = ['public', 'operational', 'internal', 'deprecated'];
 
 /** 精确路由（pathname ===）。methods 为实际支持的方法。 */
 const SURFACE = [
-  // ── 生命周期域（lifecycle.js）──
+  // 生命周期域（lifecycle.js）
   { path: '/status',         methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(polling)', 'CLI(status)'], note: '状态摘要' },
   { path: '/events',         methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI(timeline)'], note: '增量事件' },
   { path: '/healthz',        methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['壳(握手探针)'], note: '存活探针' },
@@ -40,7 +26,7 @@ const SURFACE = [
   { path: '/lifecycle',      methods: ['GET'],  domain: 'lifecycle', category: 'public',      consumers: ['UI'], note: '模块生命周期一览（=/lifecycle/status）' },
   { path: '/lifecycle/status', methods: ['GET'], domain: 'lifecycle', category: 'public',     consumers: ['UI'], note: '同上（显式别名）' },
 
-  // ── 守卫/设置域（guard.js）──
+  // 守卫/设置域（guard.js）
   { path: '/changelog',            methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: 'DSH 更新日志（text/plain）' },
   { path: '/guard/changelog',      methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '管家更新日志（CHANGELOG.md）' },
   { path: '/guard/version',        methods: ['GET'],  domain: 'guard', category: 'public',      consumers: ['UI(AboutCard)'], note: '本地版本（无网络 I/O）' },
@@ -58,7 +44,7 @@ const SURFACE = [
   { path: '/self-update/apply',    methods: ['POST'], domain: 'guard', category: 'deprecated',  consumers: ['无（已下架）'], note: '已下架（单写入者=壳）：返回 410 KERNEL_UPDATE_SINGLE_WRITER；替代 = 桌面壳 kernel_update_apply' },
   { path: '/self-update/restart-guard', methods: ['POST'], domain: 'guard', category: 'deprecated', consumers: ['无（已下架）'], note: '已下架（守卫不自重启）：返回 410；替代 = 壳在安装后经服务管理器重启守卫' },
 
-  // ── 原生 DSH（native.js）──
+  // 原生 DSH（native.js）
   { path: '/native/status',       methods: ['GET'],  domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI(status)'], note: '安装状态 + 版本 + 升级状态机' },
   { path: '/native/check-update', methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)'], note: '触发版本检查' },
   { path: '/native/install',      methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI'], note: '异步安装（202）' },
@@ -66,19 +52,19 @@ const SURFACE = [
   { path: '/native/upgrade',      methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage)', 'CLI(upgrade)'], note: '一键升级（失败回滚）' },
   { path: '/native/settings',     methods: ['POST'], domain: 'native', category: 'public', consumers: ['UI(OverviewPage/LanPage)'], note: 'main 元数据补丁（guardian/remote/frp）' },
 
-  // ── 沙箱实例（instances.js）──
+  // 沙箱实例（instances.js）
   { path: '/instances',           methods: ['GET'],  domain: 'instances', category: 'public', consumers: ['UI(InstancesPage)'], note: '实例列表（+ POST /instances/{action}）' },
   // /open 是 open-web 的**落地跳转**：由系统浏览器直接访问（非 UI fetch），凭一次性码换取
   // dsh-auth cookie 后 303 到 DSH 页面 —— 消费者即本机浏览器（open-web 签发码）。
   { path: '/open',                methods: ['GET'],  domain: 'instances', category: 'public', consumers: ['UI(open-web → 本机系统浏览器一次性码跳转)'], note: '一次性码换取 dsh-auth cookie 并回跳实例 DSH 页面（令牌不进 URL/argv，TK-G6）' },
 
-  // ── 插件（plugins.js）──
+  // 插件（plugins.js）
   { path: '/plugins/market',         methods: ['GET'], domain: 'plugins', category: 'public', consumers: ['UI(PluginsPage)'], note: '市场索引（TTL 缓存）' },
   { path: '/plugins/installed',      methods: ['GET'], domain: 'plugins', category: 'public', consumers: ['UI(PluginsPage)'], note: '已装第三方插件' },
   { path: '/plugins/check-updates',  methods: ['GET'], domain: 'plugins', category: 'public', consumers: ['UI(PluginsPage)'], note: '已装插件更新检测' },
   { path: '/plugins/install-status', methods: ['GET'], domain: 'plugins', category: 'public', consumers: ['UI(PluginsPage, job 轮询)'], note: '插件任务进度（A2 接线）' },
 
-  // ── 智能路由（router.js）──
+  // 智能路由（router.js）
   { path: '/router/status',          methods: ['GET'],  domain: 'router', category: 'public',   consumers: ['UI(RouterPage)'], note: '中转状态 + 用量' },
   { path: '/router/providers',       methods: ['GET'],  domain: 'router', category: 'public',   consumers: ['UI(RouterPage)'], note: '供应商 + 账号 + 实例视图' },
   { path: '/router/ports',           methods: ['GET'],  domain: 'router', category: 'internal', consumers: ['p2p-api 契约测试（域分离验证）'], note: 'router 自治段端口视图（daemon 模式物理分离）' },
@@ -100,32 +86,30 @@ const SURFACE = [
   { path: '/router/proxy/update/check',   methods: ['POST'], domain: 'router', category: 'public', consumers: ['UI(RouterPage)'], note: '反代版本检测' },
   { path: '/router/proxy/update/status',  methods: ['GET'],  domain: 'router', category: 'public', consumers: ['UI(RouterPage, job 轮询)'], note: '反代更新进度（A3 接线）' },
 
-  // ── 镜像源（dist.js）──
+  // 镜像源（dist.js）
   { path: '/dist/registry',         methods: ['GET'],  domain: 'dist', category: 'public', consumers: ['UI(RegistryCard)'], note: '镜像源状态' },
   { path: '/dist/registry/refresh', methods: ['POST'], domain: 'dist', category: 'public', consumers: ['UI(RegistryCard)'], note: '镜像源测速刷新' },
   { path: '/dist/registry/set',     methods: ['POST'], domain: 'dist', category: 'public', consumers: ['UI(RegistryCard)'], note: '镜像源手动固定' },
-  // 同源单源探活：页面带 CSP connect-src 'self'，浏览器直连镜像必被拦截 →
-  // 「测试」按钮必须经本端点由服务端探测（并复用内核选源的同一探测规格）。
+  // 同源单源探活：页面带 CSP connect-src 'self'，浏览器直连镜像会被拦截，
+  // 「测试」按钮必须经本端点由服务端探测（复用内核选源的同一探测规格）。
   { path: '/dist/registry/probe',   methods: ['POST'], domain: 'dist', category: 'public', consumers: ['UI(RegistryCard 测试按钮)'], note: '同源单源探活（服务端，不受页面 CSP 限制）' },
 
-  // ── 局域网/公网（relay.js）──
+  // 局域网/公网（relay.js）
   { path: '/lan-access', methods: ['GET'], domain: 'relay', category: 'public', consumers: ['UI(LanPage)'], note: '远程代理列表' },
   { path: '/lan/frp',    methods: ['GET'], domain: 'relay', category: 'public', consumers: ['UI(LanPage)'], note: 'FRP 状态（+ POST /lan/frp/{action}）' },
 
-  // ── 任务（tasks.js）──
+  // 任务（tasks.js）
   { path: '/tasks', methods: ['GET'], domain: 'tasks', category: 'public', consumers: ['UI(TasksPage)'], note: '统一任务列表（+ /tasks/{id}）' },
 
-  // ── 桌面壳更新安全网（shell.js）──
-  // 定位：内核**不是**壳的更新源（壳直连 npm CDN 自更新）；本域只做观察/审计
-  // （2026-09-16 校正：原写「预取/备份」，该机制已移除 —— 见 domains/shell/journal.js）。
+  // 桌面壳更新安全网（shell.js）
+  // 内核不是壳的更新源（壳直连 npm CDN 自更新），本域只做观察/审计；
   // 壳不受监督（崩溃无人拉起），内核是唯一能救它的角色。
-  // 更新策略：壳与内核同一套升级逻辑 —— 有新版必须强制更新，**不得跳过、不得隐式回退**；
+  // 更新策略：壳与内核同一套升级逻辑，有新版必须强制更新，不得跳过、不得隐式回退；
   // 紧急回退由发布通道契约的 `rollback` dist-tag 显式触发（RELEASE-CHANNEL-CONTRACT.md）。
   { path: '/shell/status',         methods: ['GET'],  domain: 'shell', category: 'public',      consumers: ['UI(壳状态卡)', 'CLI'], note: '壳身份 + 更新账本 + 判定结论' },
-  // ⚠ 2026-09-12（审计 P0）：以下两个端点的 `consumers` 曾声明为「壳」——**与事实不符**。
-  //   实测壳仓（Tauri）**从不 POST 它们**（grep 零命中）；壳只写 identity.json，更新阶段
-  //   经本地命令 `shell_set_phase` 上报。声明成「壳在用」会让读者以为该安全网已闭环。
-  //   现按真实情况标注为「无人消费（待接线）」，并保留端点（运维/未来接线可用）。
+  // 以下两个端点的 `consumers` 曾声明为「壳」，与事实不符：壳仓从不 POST 它们（grep 零命中），
+  // 壳只写 identity.json，更新阶段经本地命令 `shell_set_phase` 上报。现按真实情况标注为
+  // 「无人消费（待接线）」，并保留端点（运维/未来接线可用）。
   { path: '/shell/health',         methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工上报壳阶段（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：phase=ready 即更新确认信号，供排障手工驱动安全网；当前 evaluate() 因缺输入恒 idle' },
   { path: '/shell/update-pending', methods: ['POST'], domain: 'shell', category: 'operational', consumers: ['运维：排障时手工建立更新账本（壳未接线；原声明为壳，实测零调用）'], note: '诊断用途：建立更新账本（待重启确认），供排障手工驱动内核侧安全网' },
   { path: '/shell/check-update',   methods: ['POST'], domain: 'shell', category: 'public',      consumers: ['UI(关于卡)'], note: '壳版本检测（与内核自更新同源：npm registry + 镜像回退）' },

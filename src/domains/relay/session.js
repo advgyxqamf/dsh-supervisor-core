@@ -1,8 +1,8 @@
 'use strict';
 
-// DSH 浏览器会话桥（IO 层）：按需从令牌池取 dshToken → 换取 dsh-auth-* cookie
-// → 缓存**派生结果**并注入 HTTP/WS；上游 401/403 时清 cookie 自愈。
-// TK-4：本模块**不缓存 DSH 令牌值**（令牌池是唯一存储），只保留派生 cookie 与在途 Promise。
+// DSH 浏览器会话桥（IO 层）：按需从令牌池取 dshToken，换取 dsh-auth-* cookie，缓存派生结果并注入
+// HTTP/WS；上游 401/403 时清 cookie 自愈。TK-4：本模块不缓存 DSH 令牌值（令牌池是唯一存储），
+// 只保留派生 cookie 与在途 Promise。
 
 const { cookieByName } = require('./core');
 // 换取 dsh-auth cookie 的实现已上收到令牌组件；协议知识只有一份。

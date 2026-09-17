@@ -173,7 +173,7 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
   //   由壳仓测试负责（src-tauri/src/update.rs::t5 与壳仓反回归测试）。
   //   内核**不读壳仓源码** —— 两仓按账号/仓库隔离（见 RELEASE-STANDARD.md §0）。
   //   本组锁定两件事：
-  //     R10-a 内核侧回退机构不得复活（shell 域 + api/shell.js + surface 登记）
+  //     R10-a 内核侧回退机构不得复活（shell 域 + api/domains/shell.js + contract 登记）
   //     R10-c identity.json 的护栏字段只由壳写（内核不得成为第二写入方）
   console.log('== R10 反回归：回退机构不得复活 ==');
   {
@@ -196,7 +196,7 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
     check('R10-a 内核 shell 域无 pinnedVersions', !/pinnedVersions/.test(shellSrcCode), '无');
     check('R10-a 内核 shell 域无 should-rollback', !/should-rollback/.test(shellSrcCode), '无');
     check('R10-a api/domains/shell.js 无 /shell/rollback 分支', !/\/shell\/rollback/.test(apiShellCode), '无');
-    check('R10-a api/shell.js 不调用 shell.rollback', !/shell\.rollback/.test(apiShellCode), '无');
+    check('R10-a api/domains/shell.js 不调用 shell.rollback', !/shell\.rollback/.test(apiShellCode), '无');
     check('R10-a surface 无 /shell/rollback 登记', !/\/shell\/rollback/.test(surfaceCode), '无');
     check('R10-a surface 前缀清单不含 rollback', !/update-pending\|rollback/.test(surfaceCode), '无');
 

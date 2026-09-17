@@ -1,19 +1,13 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════
-// 源形态 → kind 推断（**纯**；DS-G4 反转法）。
-// 平台不硬编码任何业务 kind 名或单元前缀；推断规则由 app/ 装配期经
-// configureKindInference 注入（app/settings/token-kinds.js）。
-// 未注入时无任何推断映射——未登记的源不会被猜测成某个域 kind（TK-3）。
-//   byId       id → kind 直接命中
-//   unitPrefix [前缀, kind] 列表（单元名以该前缀开头即命中）
-//   unitKind   任意非空单元的兜底 kind
-//   fileKind   本地恢复文件源的 kind
-// ═══════════════════════════════════════════════════════════════
+// 源形态到 kind 推断（纯函数，DS-G4 反转法）。
+// 平台不硬编码业务 kind 名或单元前缀；规则由 app/ 装配期经 configureKindInference 注入。
+// 未注入时无任何推断映射，未登记的源不会被猜测成某个域 kind（TK-3）。
+// 字段：byId 为 id 直接命中；unitPrefix 为 [前缀, kind] 列表；unitKind 为任意非空单元的兜底；fileKind 为恢复文件源的 kind。
 
 let _infer = { byId: null, unitPrefix: [], unitKind: null, fileKind: null };
 
-/** 注入「源形态 → kind」推断表（整体替换，幂等）。 */
+/** 注入“源形态到 kind”推断表（整体替换，幂等）。 */
 function configureKindInference(table) {
   const t = (table && typeof table === 'object') ? table : {};
   _infer = {
@@ -34,7 +28,7 @@ function kindInference() {
   };
 }
 
-/** 由「源形态」反推 kind；显式 kind 永远优先（本函数仅在缺少 kind 时调用）。 */
+/** 由“源形态”反推 kind；显式 kind 永远优先（本函数仅在缺少 kind 时调用）。 */
 function inferKind(id, src) {
   if (_infer.byId && _infer.byId[id]) return _infer.byId[id];
   const unit = src && src.unit ? String(src.unit) : '';

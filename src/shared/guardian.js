@@ -1,20 +1,13 @@
 'use strict';
 
-// 领域：守护（guardian）——开了 monitor(进程守护) 开关且目标挂了 → 决定自动拉起。
-// 统一对原生与沙箱实例适用；默认关：实例未开「进程守护」开关，则绝不自动拉起。
-// 本模块只做「决策/策略计算」，不触碰任何进程/实例/系统服务——守卫与实例生命周期彻底分离。
-// 纯函数：输入观测/状态 → 输出决策。
+// 守护决策（纯函数，不触碰进程/实例/系统服务）。默认关：仅 guardian===true 才自动拉起。
 
-/** 该目标是否开启「进程守护」开关（默认关：未显式 guardian===true 则绝不拉起）。 */
+/** 该目标是否开启进程守护开关（默认关）。 */
 function shouldGuard(inst) {
   return !!(inst && inst.guardian === true);
 }
 
-/** 崩溃窗口 + 退避决策。
- *  @param cw  { start:number|null, restarts:number }
- *  @param now number
- *  @param cfg { crashWindowMs, crashBurst, backoff:number[], backoffLevel:number }
- *  @returns { start, restarts, backoffLevel, backoffUntil, backoffEntered } */
+/** 崩溃窗口 + 退避：窗口内累计到 crashBurst 次则升一级退避并给出 backoffUntil。 */
 function bumpCrashWindow(cw, now, cfg) {
   let start = cw.start;
   let restarts = cw.restarts;
@@ -31,10 +24,7 @@ function bumpCrashWindow(cw, now, cfg) {
   return { start, restarts, backoffLevel: cfg.backoffLevel || 0, backoffUntil: null, backoffEntered: false };
 }
 
-/** 实例重启等待决策（简单线性退避）。
- *  @param state { lastFailAt?:number, backoffLevel?:number }
- *  @param now number
- *  @returns { waitMs:number, nextBackoffLevel:number } */
+/** 实例重启等待决策：60s 内失败过则线性退避（上限 60s），否则立即重试。 */
 function instanceRestartDecision(state, now) {
   const crashesQuickly = !!(state.lastFailAt && now - state.lastFailAt < 60000);
   return {

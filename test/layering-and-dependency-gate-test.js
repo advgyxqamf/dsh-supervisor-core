@@ -11,11 +11,12 @@
 //
 // ## 分层（内核，src/）
 //
+//   shared/    ← L0 纯函数（version/ip/guardian）；出度恒为 0
 //   platform/  ← 最底层：平台抽象、配置、执行器、日志、矩阵。**不得依赖任何上层**
-//   domains/   ← 业务域（router/relay/instance/plugin/dist/shell）
-//   guard/     ← 守护与监督（supervisor / lifecycle / monitor / native / guardian）
+//   domains/   ← 业务域（router/relay/instance/plugin/shell）
+//   app/       ← 编排层（组装根与业务主体；原 guard/ 并入）
 //   api/       ← HTTP/WS 契约面
-//   root       ← src/supervisor.js 组装根、src/core.cjs 打包入口
+//   root       ← src/supervisor.js 进程入口薄壳、src/core.cjs 打包入口
 //
 // ## 两条规则
 //
@@ -27,10 +28,10 @@
 //     · `domains → shared/ip`（原 `domains → api/identity`）：relay 复用回环/RFC1918 判定，
 //       **不得重写第二份**（由 test/relay-source-gate-test.js S-a 主动要求）；
 //       步骤 1/2 拆分后该反向边已归零，现为 domains→shared 的合法依赖。
-//     · `domains → guard/lifecycle/ports`（9 处）：ports.js 自称"**系统级**统一端口管理"，
+//     · `domains → platform/service`（端口）：ports.js 自称"**系统级**统一端口管理"，
 //       instance/router/relay 都靠它登记端口。这是**有意的共享基础设施**。
-//     · `root → platform/distribution`：组装根实例化分发能力（步骤3 后 DistributionManager
-//       已从 domains/dist 上移 platform/distribution，guard→domains 反向边随之消失）。
+//     · `app → platform/distribution`：装配期由 app/assembly/compose 实例化 DistributionManager
+//       （原在 domains/dist，步骤 3 上移 platform/distribution）。
 //     · `api → platform`、`root → 全部`：正常向下组装。
 //     把这些写成"禁止"，门禁会在第一次运行就红，然后被人加白名单绕过 —— 那就成了摆设。
 //     **登记 + 理由 + 变更可见**才是能长期活下去的形态。

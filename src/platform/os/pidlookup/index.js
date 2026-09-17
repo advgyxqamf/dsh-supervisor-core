@@ -1,9 +1,7 @@
 'use strict';
 
-// pidlookup/index.js —— 门面：平台分派 + 导出面（≤150 行）。
-//
-// 三端同一接口 findListeningPid(port) → number|null；另导出进程存活/命令行/标记匹配
-// 与平台输出纯解析器（parse*）。平台差异全部下沉 probe.js（IO）/ norm.js（纯）。
+// pidlookup 门面：平台分派 + 导出面。三端同一接口 findListeningPid(port) 返回 number|null；
+// 平台差异全部下沉 probe.js（IO）/ norm.js（纯）。
 
 const {
   parseProcNetTcpInodes, parseLsofPid, parseNetstatPid, parseSsPid,

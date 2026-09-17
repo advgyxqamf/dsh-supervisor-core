@@ -1,14 +1,10 @@
 'use strict';
 
 // 在途计数 + 错误计数（纯状态：无 IO、无 this，可独立单测）。
-// 从 forward-core.js:410-427,:519 抽出。
-//
-// ★ 真缺陷修复（行为变更）：旧实现有**两条**结束路径且 effect 不一致——
-//   · writeThrough.decInflight（流式成功）只补 _retryPendingStop；
-//   · _endInflight（错误/中断）两件事都做。
-//   → 2xx 流式成功路径**永不补做**「在途期间被延后的实例重启」。
-// 本模块提供**单一 end()**：归零时返回**显式 effects 描述**，调用方
-// （handlers/forward.js#endInflight）对两条路径执行**同一组** effects。
+// 真缺陷修复（行为变更）：旧实现有两条结束路径且 effect 不一致——流式成功只补
+// _retryPendingStop，错误/中断两件事都做，导致 2xx 流式成功路径永不补做「在途期间被延后的
+// 实例重启」。本模块提供单一 end()：归零时返回显式 effects 描述，调用方
+// （handlers/forward.js#endInflight）对两条路径执行同一组 effects。
 
 function createInflight() {
   let begun = 0;

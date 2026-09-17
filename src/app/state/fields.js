@@ -1,14 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
 // app/state/fields.js —— 状态字段口工厂（真 ctor 注入；phase/desired 真身）。
-//
-// 级 2：createFields(deps) 自己持有 phase/desired/字段读写实现，不再转发 host._mPhase。
-//   const fields = createFields({ record, mainStore, getManagedObjects, getLogger });
-// 可只 require 本模块 + 假 deps 直测（DF-6）。
-//
-// 纯映射/字段表已下沉 phase.js / field-tables.js（DF-3）。
-// ═══════════════════════════════════════════════════════════════════════════
+// createFields(deps) 自己持有 phase/desired/字段读写实现，不再转发 host._mPhase，可独立直测。
+// 纯映射/字段表在 phase.js / field-tables.js。
 
 const { ENTRY_FIELDS, PROC_FIELDS } = require('./field-tables');
 const { legacyToEntryPhase, entryToLegacyPhase } = require('./phase');
@@ -20,9 +14,9 @@ function createFields(deps) {
   const reg = () => (typeof g.getManagedObjects === 'function' ? g.getManagedObjects() : null);
   const logger = () => (typeof g.getLogger === 'function' ? g.getLogger() : null);
 
-  /** 守卫 legacy 大写 phase → 目录唯一词表。 */
+  /** 守卫 legacy 大写 phase -> 目录唯一词表。 */
   function toEntry(ph) { return legacyToEntryPhase(ph); }
-  /** 目录小写 phase → 守卫 legacy 大写。 */
+  /** 目录小写 phase -> 守卫 legacy 大写。 */
   function toLegacy(ph) { return entryToLegacyPhase(ph); }
 
   /** 读守卫视角 phase（大写；OBSERVED 按 observedOnly+adopted 合成）。守卫内唯一 phase 读口。 */
@@ -34,7 +28,7 @@ function createFields(deps) {
     return upper;
   }
 
-  /** 写守卫视角 phase（大写→目录 canonical 经 registry.setPhase）。 */
+  /** 写守卫视角 phase（大写经 registry.setPhase 转目录 canonical）。 */
   function setPhase(upper) {
     const e = record.storeOf();
     const ph = legacyToEntryPhase(upper);

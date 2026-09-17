@@ -1,6 +1,6 @@
 'use strict';
 
-// 端口探测与旧代进程回收（纯 IO）：TCP 连接探测 / bind 探测 / 听着 pid 反查 / cmdline 回收。
+// 端口探测与旧代进程回收（纯 IO）：TCP 连接探测 / bind 探测 / 监听 pid 反查 / cmdline 回收。
 
 const net = require('node:net');
 const probe = require('../../util/probe');
@@ -9,7 +9,7 @@ const pidlookup = require('../../os/pidlookup');
 /** TCP connect 探测：能连接即视为有进程在监听。 */
 function portListening(port) { return probe.portListening('127.0.0.1', Number(port), 300); }
 
-/** bind 探测：能在 127.0.0.1 绑定 → 可分配；任何 bind 错误（EADDRINUSE 等）→ 不可分配。 */
+/** bind 探测：能在 127.0.0.1 绑定即可分配；任何 bind 错误（EADDRINUSE 等）即不可分配。 */
 function bindable(port) {
   return new Promise((resolve) => {
     let done = false;

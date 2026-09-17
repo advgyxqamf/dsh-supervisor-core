@@ -6,11 +6,8 @@
 //
 // ## 修复的缺陷（失效模式 c：声明了但零调用点 / 门禁存在却不跑）
 //
-// 内核的 `scripts.test` 是**硬编码的 && 串联名单**（94 条），而 `test/` 下有 104 个文件。
-// 实测有三个**真实测试从未进入 CI**：
-//   · test/api-contract-test.js         （14 断言，能通过）
-//   · test/native-test.js               （10 断言，能通过）
-//   · test/plugin-change-restart-test.js（52 断言，能通过）
+// 内核的 `scripts.test` 是**硬编码的 && 串联名单**，`test/` 下曾有真实测试
+// 因未登记而从未进入 CI（api-contract / native / plugin-change-restart 三个即由此发现）。
 // 它们各有独立 npm script（test:api-contract 等），但**没人跑** → CI 里永不执行。
 //
 // 这与本轮在**壳仓**修过的是同一类缺陷：壳仓 CI 硬编码 `--test` 名单，
@@ -24,6 +21,7 @@
 //   N-d  反向：判据能识别"未入链的测试"（门禁非空转）
 //   N-e  scripts.test 长度 < 8000（Windows cmd.exe 命令行 8191 上限；
 //        实测只有 windows-latest 会因此失败，Linux/macOS 不受限）
+//   N-f  链中每个条目都真实存在（防链引用已删除文件，运行到该条才炸）
 // ═══════════════════════════════════════════════════════════════════════════
 
 const fs = require('node:fs');
@@ -125,6 +123,15 @@ function isTestFile(name) {
   // 反向：判据非空转（构造超长样本必须被检出）
   const longSample = 'x'.repeat(9000);
   check('N-e 反向：超长样本被检出', !(longSample.length < LIMIT), 'hit');
+}
+
+// ── N-f：链条目的存在性（N-a 只保证测试文件有归属，不保证链指向真实文件）──
+{
+  const inChain = chainFiles();
+  const missingFiles = inChain.filter((f) => !fs.existsSync(path.join(ROOT, f)));
+  check('N-f scripts.test 链中每个文件都真实存在',
+    missingFiles.length === 0,
+    missingFiles.length ? ('链中死引用: ' + missingFiles.join(', ')) : (inChain.length + ' 条全部存在'));
 }
 
 const failed = results.filter((r) => !r);

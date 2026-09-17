@@ -1,15 +1,11 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件市场 —— HTTP JSON/文本原语（域：plugin / market-net）
-//
-// getJson / getText：体积上限 + 非 2xx 直接失败 + 重定向最多 5 跳 + 目标协议校验。
-//   ⚠ P1-3（2026-09-12）：重定向目标**必须校验协议**。直接把 location 递归传回时，
-//     若它是 file://…，http/https 模块的 get() 会**同步抛 ERR_INVALID_PROTOCOL**，
-//     而此处位于响应回调内 → 逃逸为进程级 uncaughtException。
-//     触发面：registry 可配任意 https，或其 302 可达第三方镜像。
-//    test/round8-fixes-test.js J-g 按 market-net.js 源码断言本文件保留两条协议校验。
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件市场 HTTP JSON/文本原语（market-net）。
+// 体积上限 + 非 2xx 直接失败 + 重定向最多 5 跳 + 目标协议校验。
+// 重定向必须校验协议：file:// 会让 http.get 同步抛 ERR_INVALID_PROTOCOL，且此处
+// 位于响应回调内，会逃逸为进程级 uncaughtException（registry 可配任意 https 或
+// 302 可达第三方镜像）。
+// 注意：test/round8-fixes-test.js J-g 按源码断言本文件保留两条协议校验。
 
 const http = require('node:http');
 const https = require('node:https');
@@ -59,7 +55,7 @@ function getText(url, timeoutMs = 8000, redirectsLeft = 5) {
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (redirectsLeft <= 0) return reject(new Error('too many redirects from ' + url));
-        // P1-3：同上 —— 重定向目标必须校验协议（file:// 会让 http.get 同步抛）。
+        // 同上：重定向目标必须校验协议（file:// 会让 http.get 同步抛）。
         const next = String(res.headers.location);
         if (!/^https?:\/\//i.test(next)) return reject(new Error('重定向到不支持的协议: ' + next.slice(0, 64)));
         return getText(next, timeoutMs, redirectsLeft - 1).then(resolve, reject);

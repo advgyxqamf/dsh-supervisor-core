@@ -1,9 +1,8 @@
 'use strict';
 
-// 多实例管理器 —— 编排（域：instance / ops）
-// 「一次操作的顺序」：实例 CRUD 编排 + 兜底定时器 + 外部钩子外发。
-// 持久化/沙箱目录/端口登记经 store/sandbox/ports，启停与监督经 deps.lifecycle；
-// 版本/作业视图经 deps.upgrade（组装根注入）。本模块无隐式 this。
+// 编排：实例 CRUD 顺序 + 兜底定时器 + 外部钩子外发。
+// 持久化/沙箱目录/端口登记经 store/sandbox/ports，启停与监督经 deps.lifecycle，
+// 版本/作业视图经 deps.upgrade（组装根注入）。无隐式 this。
 
 const fs = require('node:fs');
 const ports = require('../../platform/service/ports').shared;
@@ -14,7 +13,7 @@ function createOps(deps) {
   const { store, lifecycle, upgrade, service, logger, events, tokens, tasks, hooks, instancesRoot } = deps;
   let timer = null;
 
-  /** 单实例 → 前端契约行（IO 结果由 upgrade/lifecycle 解析后传入纯 model.viewRow）。 */
+  /** 单实例映射到前端契约行（IO 结果由 upgrade/lifecycle 解析后传入纯 model.viewRow）。 */
   function list() {
     return store.instances.map((inst) => {
       const info = upgrade.versionInfo(inst);
@@ -33,13 +32,13 @@ function createOps(deps) {
     if (!Number.isInteger(port) || port <= 0 || port > 65535) return { ok: false, error: '无效端口' };
     if (store.instances.some((i) => i.port === port)) return { ok: false, error: '端口 ' + port + ' 已被实例占用' };
     const id = 'inst-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-    // ⚠ P3 修复（2026-09-12）：**新增时探测端口是否真的被占用**（注册表 ∪ 本机实际监听）。
-    //   原实现只查实例重名与注册表，从不探测本机监听 → 建到被占端口后 bind 失败 → BACKOFF 反复重试。
+    // 新增时必须探测端口是否真的被占用（注册表 ∪ 本机实际监听）：只查实例重名与注册表，
+    // 会建到被占端口后 bind 失败并陷入 BACKOFF 反复重试。
     try {
       if (await ports.isTaken(port)) {
         return { ok: false, error: '端口 ' + port + ' 已被占用（本机已有进程在监听，或已被系统服务登记）' };
       }
-    } catch { /* 探测失败不阻断创建（既有行为：交给启动期如实报错） */ }
+    } catch { /* 探测失败不阻断创建：交给启动期如实报错 */ }
     // 端口登记入口严格校验（同步）：实例端口必须避开全部系统端口与动态池。
     try { ports.registerUser(port, 'inst:' + id); } catch (e) { return { ok: false, error: '端口 ' + port + ' 与系统服务端口冲突（' + (e.message || e) + '）' }; }
     const inst = model.createRecord(payload, id);
@@ -53,8 +52,8 @@ function createOps(deps) {
 
   function removeInstance(id) {
     const inst = store.instances.find((i) => i.id === id);
-    // ⚠ P1 修复（2026-09-13）：**删除必须与「进行中的安装/升级作业」互斥**，否则 npm install 会把
-    //   已删实例的 install/ 重建 → 守卫内存已无该实例 → 孤儿永久占盘。检查必须在任何状态变更**之前**。
+    // 删除必须与进行中的安装/升级作业互斥，否则 npm install 会重建已删实例的 install/，
+    // 而守卫内存已无该实例，孤儿永久占盘。检查必须在任何状态变更之前。
     if (tasks && tasks.isBusy('instance', id)) {
       return { ok: false, error: '该实例有进行中的安装/升级作业，请等待其完成后再删除' };
     }
@@ -64,15 +63,23 @@ function createOps(deps) {
     store.replace(kept); // 原地替换：外部持有的 instances 数组引用身份保持不变
     store.save();
     if (tokens) tokens.detach(inst.id); // 唯一令牌节点：删除实例即注销其源与令牌
-    // 端口释放：按 owner 精确释放（⚠ 不得用不带 ownerId 的 release——那会删掉他人登记）。
+    // 端口释放：按 owner 精确释放（不得用不带 ownerId 的 release，那会删掉他人登记）。
     if (inst) { try { ports.unregister('inst:' + id); } catch {} }
-    // ⚠ P1-2 修复：**删数据目录前必须确认单元真的停了**（stopUnit 失败只 return false 不抛）。
-    //   ⚠ P1 修复（2026-09-13）：stopUnit 在不支持用户单元的平台上会抛 CapabilityError——
-    //   「平台不支持用户单元」= 无单元可停 = 非失败，不得让删除整体崩溃。
+    // 删数据目录前必须确认单元真的停了。stopUnit 已按契约区分成败（失败返回 false 不抛）；
+    // 在不支持用户单元的平台上会抛 CapabilityError，那等于无单元可停、非失败，不得让删除整体崩溃。
+    // 放行条件 = 停止成功；停止失败（含 is-active 查询因 dbus 挂起超时而失败）一律按未停止处理，
+    // 保守保留数据，绝不因「查询失败被当成不活跃」而删除可能仍在运行的实例数据。
     const unit = 'dsh-web@' + id;
-    try { service.stopUnit(unit); } catch { /* 平台不支持用户单元：无单元可停，非失败 */ }
-    let stillActive = false;
-    try { stillActive = service.isUnitActive(unit) === true; } catch { stillActive = true; }
+    let stopOk;
+    try { stopOk = service.stopUnit(unit) !== false; } catch { stopOk = true; }
+    let stillActive = !stopOk;
+    if (stopOk) {
+      try {
+        // 停止已确认后二次复核：仅显式 false 视为已停；true / null / undefined（查询失败）一律按活跃处理。
+        const active = service.isUnitActive(unit);
+        stillActive = active !== false;
+      } catch { stillActive = true; }
+    }
     if (inst && inst.domain === 'sandbox' && inst.id !== 'main' && !stillActive) {
       const root = sandbox.root(instancesRoot, inst);
       setImmediate(() => {
@@ -87,7 +94,7 @@ function createOps(deps) {
     if (hooks.onRemove) hooks.onRemove(id, store.instances);
     if (hooks.onDestroy) { try { hooks.onDestroy(id); } catch (e) { logger.warn && logger.warn('onDestroy(' + id + '): ' + (e && e.message)); } }
     if (events) events.append('inst_removed', { id });
-    // ⚠ P3 修复：安全结果必须对用户可见（删除确认框承诺「彻底删除」，实际数据可能被保留）。
+    // 安全结果必须对用户可见：删除确认框承诺「彻底删除」，实际数据可能被保留。
     return stillActive ? { ok: true, dataPreserved: true, preserveReason: 'unit-still-active' } : { ok: true };
   }
 

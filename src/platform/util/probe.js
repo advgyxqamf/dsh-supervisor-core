@@ -4,10 +4,7 @@ const net = require('node:net');
 const http = require('node:http');
 const https = require('node:https');
 
-/**
- * 端口监听检查（L1 层）：能建立 TCP 连接即视为有进程在监听。
- * 说明：这是「在线」判定基础，不做 HTTP 语义。
- */
+/** 端口监听检查：能建立 TCP 连接即视为有进程监听（只判在线，不做 HTTP 语义）。 */
 function portListening(host, port, timeoutMs = 1000) {
   return new Promise((resolve) => {
     const socket = net.connect({ host, port });
@@ -26,12 +23,8 @@ function portListening(host, port, timeoutMs = 1000) {
   });
 }
 
-/**
- * HTTP 探活（L2 层）：GET healthUrl，服务在线即健康（2xx 或 401/403 认证响应）。
- * 假死识别（事件循环卡死但端口仍在监听）依赖此层：
- * 进程在、端口在、HTTP 不响应 → 判不健康。
- * 任何异常（超时/拒绝/非 2xx/URL 非法）都 resolve(false)，绝不 reject。
- */
+/** HTTP 探活：GET healthUrl，2xx 或 401/403 认证响应视为在线；任何异常都 resolve(false)，绝不 reject。
+ *  假死识别（事件循环卡死但端口仍监听）依赖此层：进程在、端口在、HTTP 不响应则判不健康。 */
 function httpProbe(url, timeoutMs = 3000) {
   return new Promise((resolve) => {
     let done = false;

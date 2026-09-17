@@ -49,7 +49,7 @@ const apiSources = [
   read('src/supervisor.js'),
   read('src/app/assembly/api-rebind.js'),
 ].join('\n');
-check('D-2 supervisor-api 写入 ports.json', /ports\.register\('supervisor-api'/.test(apiSources), 'ok');
+check('D-2 supervisor-api 写入 ports.json', /ports(?:Shared)?\.register\('supervisor-api'/.test(apiSources), 'ok');
 
 // ── D-3：healthz ──
 const apiSrc = ['src/api/index.js', 'src/api/domains/lifecycle.js'].map((f) => { try { return read(f); } catch { return ''; } }).join('\n');
@@ -77,10 +77,10 @@ check('D-5 acquireLock + 退出非零', /function acquireLock/.test(cli) && /已
 // 释放登记的实现形态为 require('.../ports').shared.release(prev, 'system:supervisor-api')
 // （owner 字符串必须一致），故匹配点从 `ports.release(` 收窄到调用本身 `.release(prev, ...)`——
 // 仍是「顺延时以同一 owner 释放旧登记」这一不变量，未放宽。
-check('D-6 listen 回调登记实际端口', /ports\.register\('supervisor-api', port\)/.test(apiSources), 'ok');
+check('D-6 listen 回调登记实际端口', /ports(?:Shared)?\.register\('supervisor-api', port\)/.test(apiSources), 'ok');
 check('D-6 端口顺延时释放旧登记', /\.release\(prev, 'system:supervisor-api'\)/.test(apiSources), 'ok');
 // 反向：只登记配置端口（不登记实际端口）的旧形态必须判为未落实
-const registersActual = (src) => /ports\.register\('supervisor-api', port\)/.test(src);
+const registersActual = (src) => /ports(?:Shared)?\.register\('supervisor-api', port\)/.test(src);
 check('D-6 反向：只登记配置端口的旧形态被识别', !registersActual("ports.register('supervisor-api', this.config.apiPort);"), 'ok');
 check('D-6 反向：当前实现被判为已落实', registersActual(apiSources), 'ok');
 

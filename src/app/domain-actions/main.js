@@ -1,15 +1,9 @@
 'use strict';
 
-// app/domain-actions/main.js —— 原生 DSH(main) 域**写动作**（R7/R8：facade 只读，写动作下沉）。
-//
-// 来源：src/app/facade/main.js#patchDshMain（搬迁）。
-//
-// 本批两处归一化（对应 R7 的"消除重复闸 / 消除跨域直读"）：
-//   ① **公网暴露安全闸单一事实源**：不再内联一份与 relay 重复的校验，改调用
-//      domains/relay/core.validateFrpExposure —— app 侧 patchDshMain 与 relay 侧 setFrp 同规。
-//   ② **实例冲突清单改为注入**：不再直读 this.instances.instances（跨域内部数组穿透），
-//      改经宿主注入的只读投影 host.exposurePeers()（装配点 app/assembly/compose.js 接线）。
-//
+// app/domain-actions/main.js —— 原生 DSH(main) 域写动作（facade 只读，写动作下沉至此）。
+// 公网暴露安全闸单一事实源：调用 domains/relay/core.validateFrpExposure，使 app 侧
+// patchDshMain 与 relay 侧 setFrp 同规。实例冲突清单经宿主注入的只读投影
+// host.exposurePeers()，不直读 this.instances.instances（消除跨域内部数组穿透）。
 // 无 Node 内建依赖：仅用 relay/core 的纯判定 + 宿主注入。
 
 const { validateFrpExposure } = require('../../domains/relay/core');
@@ -26,24 +20,25 @@ const methods = {
     if (p.frpEnabled !== undefined) meta.frpEnabled = !!p.frpEnabled;
     if (p.frpRemotePort !== undefined) meta.frpRemotePort = p.frpRemotePort ? Number(p.frpRemotePort) : null;
     if (p.wanPort !== undefined) meta.wanPort = p.wanPort ? Number(p.wanPort) : null;
-    // ⚠ P1 修复（2026-09-13，失效模式 g + b）：**公网暴露安全闸必须与 setFrp 同规**。
-    //   缺陷：relay/ops.js 的 setFrp() 设了「开启公网暴露前必须已设 remoteToken」的安全闸
-    //     （外加端口合法性 + 端口占用校验），而本函数**同样能开启 frpEnabled**却没有该闸 ——
-    //     /native/settings 把 body **原样透传**到 patchDshMain（api/domains/native.js），于是
-    //     POST /native/settings { frpEnabled:true, frpRemotePort:7001 }
-    //     即可**绕过令牌闸**打开公网暴露。
-    //   为什么后果严重：frpc 以 127.0.0.1 回环身份连 relay，来源闸对回环放行；
-    //     而 relay 的 token 为空时 tokenGate 恒放行 —— 公网流量即**零认证**触达
-    //     DSH 特权方法面（settings/credentials/host.*）。这正是 setFrp 那道闸要防的事。
-    //   修法：调用 relay/core 的**同一份**校验（令牌 + 端口合法性 + 端口占用），单一事实源。
-    //     校验必须发生在 _writeDshMain **之前**（否则已落盘半改状态）。
-    //     注意：remoteToken 若在同一次 patch 里提供，视为已设置（用户一次提交两字段是合法的）。
-    if (p.frpEnabled === true) {
-      const effToken = (p.remoteToken !== undefined) ? String(p.remoteToken || '') : String(meta.remoteToken || '');
+    // 公网暴露安全闸必须与 relay/ops.js 的 setFrp() 同规：setFrp 要求「开启前必须已设
+    // remoteToken」并校验端口合法性与占用，而本函数同样能开启 frpEnabled；若缺此闸，
+    // /native/settings 把 body 原样透传到 patchDshMain（api/domains/native.js），
+    // POST /native/settings { frpEnabled:true, frpRemotePort:7001 } 即可绕过令牌闸。
+    // 后果：frpc 以 127.0.0.1 回环身份连 relay，来源闸对回环放行；relay 的 token 为空时
+    // tokenGate 恒放行，公网流量零认证触达 DSH 特权方法面（settings/credentials/host.*）。
+    // 修法：调用 relay/core 同一份校验（令牌 + 端口合法性 + 端口占用），单一事实源；
+    // 校验必须发生在 state.writeMainMeta 之前，否则已落盘半改状态。
+    // remoteToken 若在同一次 patch 里提供，视为已设置（一次提交两字段合法）。
+    // 按「写入生效后的状态」判闸，不按原始入参类型：frpEnabled=1/"true" 等真值经上面的
+    // !! 归一会落盘 true，而旧实现用 p.frpEnabled === true 判闸会跳过校验；已开启后单改
+    // remoteToken='' / frpRemotePort（此时 p.frpEnabled 为 undefined）同样绕过。两者都会
+    // 让空 token 落盘：relay 的 tokenGate 对空 token 恒放行 -> 公网零认证触达特权 API。
+    // 只要生效后 frp 仍开启（含本次开启、或已开启而本次改令牌/端口），就必须过 validateFrpExposure。
+    if (!!meta.frpEnabled) {
       const v = validateFrpExposure({
         enabled: true,
-        remoteToken: effToken,
-        frpRemotePort: (p.frpRemotePort !== undefined) ? p.frpRemotePort : meta.frpRemotePort,
+        remoteToken: String(meta.remoteToken || ''),
+        frpRemotePort: meta.frpRemotePort,
         peers: this.views.exposurePeers(), // 注入的只读投影（不直读 this.instances.instances）
         selfId: 'main',
       });
@@ -52,7 +47,7 @@ const methods = {
     }
     this.state.writeMainMeta(meta);
     if (this.daemons.enabled()) { try { this.daemons.syncLanState(); } catch {} }
-    // 开关变更事件（2026-09 收敛：所有 main 开关记录进事件日志，可审计回放）
+    // 开关变更事件：所有 main 开关记录进事件日志，可审计回放
     try {
       if (p.guardian !== undefined && prev.guardian !== meta.guardian) {
         this.events.append('dsh_guardian_changed', { id: 'main', name: '原生 DSH', enabled: meta.guardian === true });

@@ -115,6 +115,7 @@ async function install(host, version) {
 function startInstall(host, version) {
   if (host.installing) return { ok: false, error: '安装已在进行中' };
   if (host.uninstalling) return { ok: false, error: '卸载进行中，请稍后再装' };
+  if (policies.busy(host)) return { ok: false, error: '升级进行中，请稍后再装（state=' + host.upgradeState + '）' };
   if (!policies.isValidVersion(version)) return { ok: false, error: '非法版本号: ' + version };
   const env = host.checkEnvironment();
   if (!env.ok) return { ok: false, error: '环境检查失败: ' + env.errors.join('; ') };
@@ -148,8 +149,8 @@ function startUninstall(host) {
   return { ok: true, started: true };
 }
 
-/** 卸载：npm uninstall（spawn，不阻塞事件循环）→ 按 manifest 清理数据路径。
- *  超时看门狗：npm 挂起 → 杀进程树 → 以明确的「超时」收尾（而非无限等待）。
+/** 卸载：npm uninstall（spawn，不阻塞事件循环），按 manifest 清理数据路径。
+ *  超时看门狗：npm 挂起则杀进程树，以明确的「超时」收尾（而非无限等待）。
  *  锁释放由 finally 结构保证（含异常路径）。 */
 async function uninstall(host) {
   if (host.tasks && host.tasks.isBusy('native', 'main')) return { ok: false, error: '已有任务在进行中' };
@@ -157,27 +158,28 @@ async function uninstall(host) {
   if (host.uninstalling) return { ok: false, error: '卸载已在进行中' };
   if (policies.busy(host)) return { ok: false, error: '升级进行中，无法卸载（state=' + host.upgradeState + '）' };
 
-  // 先停运行中的 DSH：运行进程中直接删包/数据文件会懒加载崩溃。
-  if (host.hooks && host.hooks.isDshActive && host.hooks.isDshActive()) {
-    host._appendUpgradeLog('停止运行中的 DeepSeek Harness…');
-    if (host.hooks.stopForUpgrade) await host.hooks.stopForUpgrade();
-  }
-  const m = host._manifest();
-  const removed = [];
-  const rm = (p) => {
-    if (!p) return;
-    try { fs.rmSync(p, { recursive: true, force: true }); removed.push(p); }
-    catch (e) { host.logger.warn && host.logger.warn('uninstall 清理失败: ' + p + ' - ' + e.message); }
-  };
-  let task = null;
-  if (host.tasks) {
-    task = host.tasks.begin('native', 'uninstall', { id: 'main', name: '原生 DeepSeek Harness' }, { from: host.installedVersion(), createdBy: 'user' });
-    host.tasks.start(task.id);
-    host.tasks.log(task.id, '卸载 ' + (host.config.packageName || PKG_DEFAULT));
-  }
+  // 并发锁必须在任何 await 之前置位（否则并发 POST 会在 await 间隙同时通过检查）。
   host.uninstalling = true;
-  if (host.events) host.events.append('native_uninstall_started', {});
   try {
+    if (host.events) host.events.append('native_uninstall_started', {});
+    // 先停运行中的 DSH：运行进程中直接删包/数据文件会懒加载崩溃。
+    if (host.hooks && host.hooks.isDshActive && host.hooks.isDshActive()) {
+      host._appendUpgradeLog('停止运行中的 DeepSeek Harness…');
+      if (host.hooks.stopForUpgrade) await host.hooks.stopForUpgrade();
+    }
+    const m = host._manifest();
+    const removed = [];
+    const rm = (p) => {
+      if (!p) return;
+      try { fs.rmSync(p, { recursive: true, force: true }); removed.push(p); }
+      catch (e) { host.logger.warn && host.logger.warn('uninstall 清理失败: ' + p + ' - ' + e.message); }
+    };
+    let task = null;
+    if (host.tasks) {
+      task = host.tasks.begin('native', 'uninstall', { id: 'main', name: '原生 DeepSeek Harness' }, { from: host.installedVersion(), createdBy: 'user' });
+      host.tasks.start(task.id);
+      host.tasks.log(task.id, '卸载 ' + (host.config.packageName || PKG_DEFAULT));
+    }
     const pkg = host.config.packageName || PKG_DEFAULT;
     const uninstallArgs = ['uninstall', '-g'];
     if (host.npmRoot) uninstallArgs.push('--prefix', host.npmRoot);

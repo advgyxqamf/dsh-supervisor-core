@@ -1,9 +1,7 @@
 'use strict';
 
-// 实例池策略（B12）—— 纯决策：HOT/WARM 上限、常驻账号、备胎、期望运行集。
-// 从 proxy.js 抽出（原 _quotaPercent/residentAccount/_limits/_switchBudgetMs/_stateCounts/
-// _needSpare/desiredRunningAccounts/isDesiredAccount）。IO（启停/对账）由 proxy/restart 编排。
-// 状态一律显式入参（账号数组、在用指向、上限），不读 this。
+// 实例池策略（B12）：纯决策，覆盖 HOT/WARM 上限、常驻账号、备胎、期望运行集。IO（启停/对账）
+// 由 proxy/restart 编排；状态一律显式入参（账号数组、在用指向、上限），不读 this。
 
 const { quotaPercent } = require('./policies/quota');
 
@@ -36,7 +34,7 @@ function stateCounts(instances) {
   return c;
 }
 
-/** 常驻账号（应保活实例）——服务跟随 + sticky 兜底。
+/** 常驻账号（应保活实例）：服务跟随 + sticky 兜底。
  *  @returns {resident, residentKeyId}（调用方决定是否落 sticky） */
 function residentAccount(state) {
   const s = state || {};

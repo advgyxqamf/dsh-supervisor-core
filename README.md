@@ -9,7 +9,7 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 
 | 文档 | 性质 | 说明 |
 |---|---|---|
-| **`RELEASE-STANDARD.md`** | **规范（唯一事实源）** | **发布/构建流程**：硬标准（构建/发布一律经 CI）、8 阶段、平台矩阵、CI 放行、验证、回滚、红线。由 `test/release-spec-consistency-test.js` 机器校验 |
+| **`RELEASE-STANDARD.md`** | **规范（唯一事实源）** | **发布/构建流程**：硬标准（构建/发布一律经 CI）、9 阶段（S0–S8）、平台矩阵、CI 放行、验证、回滚、红线。由 `test/release-spec-consistency-test.js` 机器校验 |
 | **`CREDENTIALS-STANDARD.md`** | **规范（唯一事实源）** | **凭据管理**：规范库、四铁律、轮换步骤。由 `test/credential-hygiene-test.js` 校验 |
 | **`DEVELOPMENT-TRACK.md`** | **规范（唯一事实源）** | **改代码规则**：分层边界、跨层依赖登记、测试补齐、注入验证、不可逆操作纪律 |
 | [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md) | 规范（契约） | 阶段 0 契约：会话生命周期 · 所有权矩阵 · 状态机 · 时序 |
@@ -18,8 +18,9 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 | [DSH-TOKEN-CONTRACT.md](DSH-TOKEN-CONTRACT.md) | 规范（契约） | **令牌唯一事实源**：7 类令牌各自策略；令牌是基础组件非域；令牌恒存在、不驱动生命周期（TK-1..8 + 门禁） |
 | [RELEASE-CHANNEL-CONTRACT.md](RELEASE-CHANNEL-CONTRACT.md) | **规范（唯一事实源）** | **发布通道与选版唯一事实源**：canary/beta/rc/latest/rollback 五通道；选版算法冻结；紧急回退用显式 rollback 标签（RC-1..6 + 门禁）。由 `test/release-channel-gate-test.js` 机器校验（RC-G3/G4/G5；RC-G1/G2 在壳仓） |
 | [DIRECTORY-STRUCTURE-DESIGN.md](DIRECTORY-STRUCTURE-DESIGN.md) | **规范（唯一事实源）** | **目录结构与分层唯一事实源**：五层（shared/platform/domains/app/api）+ 依赖矩阵 + 完整目录树 + 12 条不变量（DS-1..DS-12）+ 门禁升级（DS-G1..G8）+ 10 步迁移计划 + 10 项决策记录。由四路审计 + 三路设计交叉验证后定版 |
-| [DOMAIN-STRUCTURE-DESIGN.md](DOMAIN-STRUCTURE-DESIGN.md) | **规范（唯一事实源）** | **域内结构唯一事实源**（与上一份互补）：域内分层判据 DF-1..DF-7（门面 ≤150 / 单文件 ≤400 / 零隐式 this / DAG）+ 三消解手法 + 五域与 app 的**逐文件目标结构** + R1..R12 裁决 + 10 批迁移计划 + DG-1..DG-14 门禁 + **迁移时须同步改的 10 处门禁**。由 12 份设计文档（design-notes/，6085 行）合并定版。**状态：执行中（2026-09-17 起，12+ 子代理并行施工，批 0–10）** |
+| [DOMAIN-STRUCTURE-DESIGN.md](DOMAIN-STRUCTURE-DESIGN.md) | **规范（唯一事实源）** | **域内结构唯一事实源**（与上一份互补）：域内分层判据 DF-1..DF-7（门面 ≤150 / 单文件 ≤400 / 零隐式 this / DAG）+ 三消解手法 + 五域与 app 的**逐文件目标结构** + R1..R12 裁决 + 10 批迁移计划 + DG-1..DG-16 门禁 + **迁移时须同步改的 10 处门禁**。由 12 份设计文档（design-notes/，6085 行）合并定版。**状态：执行中（2026-09-17 起，12+ 子代理并行施工，批 0–10）** |
 | [ACCEPTANCE-STANDARD.md](ACCEPTANCE-STANDARD.md) | **规范（唯一事实源）** | **验收与测试唯一事实源**：`硬标准` —— **所有测试不得在本机执行，验收只能由推送后的 CI 四平台矩阵裁决**；本机不得产生发布产物。含 CI 实际执行步骤、四平台矩阵、“逻辑门禁与原生行为的边界”、禁止/允许事项、违规判定。由 test/acceptance-standard-gate-test.js 机器校验 |
+| [HANDOFF.md](HANDOFF.md) | 过程文档（交接） | **会话交接文档**：现状、未完成清单（提交与 CI / 注释精简 / 死代码普查 / 规范收敛 / 第三波缺陷）、硬约束、已知陷阱、建议接手顺序。**新会话接手先读此文件** |
 | [ARCHITECTURE-ACCEPTANCE.md](ARCHITECTURE-ACCEPTANCE.md) | **终验收报告** | **三轮架构归一化改造的终验收记录**：全部门禁严格模式结果 + 物理结构终态（最大单文件 298 / 门面 ≤150 / 原型挂载 0 / 内核零依赖）+ DF-1..DF-9 逐条达成 + 全量回归（125 条，唯一失败为既存环境项）+ 最根部拆解清单。**数字均为实跑结果** |
 | [EXECUTION-CONTRACT.md](EXECUTION-CONTRACT.md) | 执行契约（并行施工接口冻结书） | **域结构改造的执行契约**：DF-1..DF-7 判据 + 硬约束（禁 daemon / 公共导出面冻结 / 禁新跨层边）+ 冻结的内部接口契约（router 域逐文件导出面与依赖）+ 迁移纪律 + 子代理派生授权。所有执行子代理必须逐条遵守；权威依据仍是 `DOMAIN-STRUCTURE-DESIGN.md`（SSOT）与 `design-notes/*.md` |
 | [PROVIDER-GATEWAY-ARCHITECTURE.md](PROVIDER-GATEWAY-ARCHITECTURE.md) | **规范（唯一事实源）** | **供应商网关（原智能路由）架构唯一事实源**：正名与定位（不做跨供应商路由）、两类供应商本质不对称、四层职责、**有进程侧深度设计**（实例四态 / 热备池 maxHot·maxWarm / 双预算切换 / 预热规范化）、能力契约与 ctl 白名单（A1–A7 + B1–B7 决策记录）。由 `test/provider-gateway-gate-test.js` 机器校验（PG-1..PG-8）|
@@ -86,7 +87,7 @@ xdg-open http://127.0.0.1:36360/   # 浏览器直接开面板（默认端口；�
   本仓库为内核（私有，`advgyxqamf/dsh-supervisor-core`）。两仓**完全独立**——
   本仓不持有任何壳资产（无 `src-tauri/`、无片面的壳打包工具/设计文档），
   壳相关工具与文档均在壳仓自身。
-- **跨仓协作方式**：内核侧仅保留**对接代码**（`src/domains/shell/`、`src/api/shell.js` ——
+- **跨仓协作方式**：内核侧仅保留**对接代码**（`src/domains/shell/`、`src/api/domains/shell.js` ——
   内核需展示桌面版本并观测壳健康，属内核职责）；壳的构建、签名、发布、测试全部由壳仓自持。
 - **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/ci-core.sh` 产线核心 + `release/runbooks/` 操作手册 + `release/README.md` 索引）。**流程唯一事实源见 `RELEASE-STANDARD.md`**；**构建与发布一律经 GitHub CI**（本地不得产生发布产物）。
 
@@ -146,9 +147,9 @@ dsh-supervisor uninstall   # 卸载（守卫退出，DSH 不受影响）
 
 ## 本地 API（默认 127.0.0.1:36360）
 
-> **权威清单**：`src/api/surface.js`（机器可校验的单一事实源——每个路由的分类/方法/消费者/用途），
+> **权威清单**：`src/api/contract.js`（机器可校验的单一事实源——每个路由的分类/方法/消费者/用途），
 > 由 `test/api-surface-test.js` 强制「源码 ↔ 清单」双向一致：**新增路由不登记即测试失败**。
-> 下表为分类速览；完整字段以 surface.js 为准。
+> 下表为分类速览；完整字段以 contract.js 为准。
 
 ```
 # 核心状态与生命周期
@@ -314,7 +315,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 - 守卫只提供**只读**状态：`GET /self-update/status`；写端点 `POST /self-update/apply`、`POST /self-update/restart-guard`
   已下架（`410 KERNEL_UPDATE_SINGLE_WRITER`）。守卫重启（应用新内核）由壳经服务管理器完成（守卫从不重启自己）。
 - 旧 manifest 通道（`selfUpdateManifestUrl`/`selfUpdateDir` + `src/domains/dist/self-update.js`）**已删除**。
-- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）；推荐一键：`CI（tag 触发）` / `CI（tag 触发，四平台各自 ci-core.sh --publish）`。
+- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）。发布由 tag 触发 CI：`build` 矩阵四平台各自执行 `ci-core.sh --publish`。
 - 环境状态：`GET /env/status`（node/npm/git 探针 + 壳写入的 runtime.json）、`GET /env/dsh`（DSH 本体安装/纳管判定）。
 
 ### 跨平台打包（**已移至壳仓**）

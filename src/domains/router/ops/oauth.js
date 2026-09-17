@@ -2,9 +2,8 @@
 
 const fs = require('node:fs');
 
-// Command Code OAuth 一键登录（IO + 状态）。从 router-ops.js:134-270 抽出。
-// 状态收敛于本工厂闭包（不再散在 RouterService 的 this 上）；端口登记沿用
-// platform/service/ports（分配即登记 / 配对释放）。
+// Command Code OAuth 一键登录（IO + 状态）。状态收敛于本工厂闭包（不再散在 RouterService 的
+// this 上）；端口登记沿用 platform/service/ports（分配即登记 / 配对释放）。
 
 const crypto = require('node:crypto');
 const { createServer } = require('node:http');
@@ -120,7 +119,7 @@ function createOAuthOps(deps) {
     } catch (e) {
       if (st._ccLogin && st._ccLogin.server) { const s = st._ccLogin.state; try { st._ccLogin.server.close(); } catch {} if (s) { try { ports.unregister('oauth:' + s); } catch {} } st._ccLogin = null; }
       st._ccLoginPromise = null;
-      // P2-6：失败分支也必须清 resolve/reject（防上一轮残留 reject 误杀下一次登录）。
+      // 失败分支也必须清 resolve/reject（防上一轮残留 reject 误杀下一次登录）。
       st._ccLoginResolve = st._ccLoginReject = null;
       return { ok: false, error: e.message };
     } finally {

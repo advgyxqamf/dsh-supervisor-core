@@ -3,18 +3,16 @@
 const zlib = require('node:zlib');
 
 // frp 安装：平台标签 / 镜像 URL / 下载 / sha256 完整性校验 / 纯 JS 解压。
-// 与进程托管（frp.js）按副作用生命周期切开，便于独立单测（桩掉网络层断言拒绝/放行语义）。
-//
-// 信任根设计：校验和从**官方 GitHub 主机直连**取得（frp_<ver>_checksums.txt），不经镜像前缀 ——
-// 于是「只控制镜像的攻击者」无法同时伪造校验和。取不到校验和时降级放行但记 warn；
-// 一旦取得校验和，不匹配即拒绝该镜像并尝试下一个。
+// 与进程托管（frp.js）按副作用生命周期切开，便于独立单测。
+// 信任根：校验和从官方 GitHub 主机直连取得（frp_<ver>_checksums.txt），不经镜像前缀，
+// 于是只控制镜像的攻击者无法同时伪造校验和。取不到时降级放行并记 warn；取得后不匹配即拒绝该镜像。
 
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const https = require('node:https');
 const crypto = require('node:crypto');
-// 平台知识唯一事实源：os/arch→标签映射只在 src/platform/contract/matrix.js。
+// 平台知识唯一事实源：os/arch 到标签的映射只在 src/platform/contract/matrix.js。
 const matrix = require('../../platform/contract/matrix');
 
 const FRP_VERSION = '0.61.1';
@@ -116,7 +114,7 @@ async function extractFrpc(tgzBuf, { destDir, binPath, frpTag }) {
   if (!fs.existsSync(binPath)) throw new Error('frpc not found in archive (' + (frpTag ? frpTag.tag : 'unsupported') + ')');
 }
 
-/** 安装 frpc：镜像回退下载 → 完整性校验 → 解压 → chmod。 */
+/** 安装 frpc：镜像回退下载，完整性校验，解压，chmod。 */
 async function installFrpc(ctx, onProgress) {
   const report = (msg) => { if (onProgress) try { onProgress(msg); } catch {} };
   fs.mkdirSync(ctx.binDir, { recursive: true });
@@ -156,12 +154,8 @@ async function installFrpc(ctx, onProgress) {
 }
 
 module.exports = {
-  FRP_VERSION,
-  MIRROR_PREFIXES,
   frpPlatformTag,
   downloadUrls,
   download,
-  expectedSha256,
-  extractFrpc,
   installFrpc,
 };

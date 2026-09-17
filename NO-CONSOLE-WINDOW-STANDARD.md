@@ -24,6 +24,8 @@
 
 **最严重的三处**（`detached:true` + 无 `windowsHide`，Windows 上必弹新控制台）：
 
+> 以下路径为**诊断时位置**；`guard/` 等目录其后已重构为 `app/`，当前实现以 §4 门禁的实际扫描为准。
+
 - `src/guard/supervisor/main-process.js:46` —— **主 DSH 进程**（用户看到的终端窗口就是它）；
 - `src/guard/proc/daemon-lifecycle.js:224` —— router/lan daemon；
 - `src/domains/router/providers/proxy.js:272` —— 反代实例。

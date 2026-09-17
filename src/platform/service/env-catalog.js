@@ -2,13 +2,13 @@
 
 const runtime = require('../contract/runtime');
 
-// EnvCatalog：声明式环境目录（Phase2 收口）。
-// 每条目 = { id, label, required, probe() → ok?detail }；状态机 ok/outdated/missing/configured/unconfigured。
-// 消费方：supervisor.envStatus/dshenvStatus/面板环境卡；壳负责 Node 前置安装，catalog 负责陈述+判定。
+// EnvCatalog：声明式环境目录。每条目 = { id, label, required, probe() -> ok?detail }；
+// 状态机 ok/outdated/missing/configured/unconfigured。消费方：supervisor.envStatus、面板环境卡；
+// 壳负责 Node 前置安装，catalog 负责陈述+判定。
 
 const ex = require('../util/exec');
 
-/** 探测某二进制版本；不可执行返回 null。 */
+/** 探测某二进制版本；不可执行返回 null（经统一执行器）。 */
 function whichVersion(bin) {
   // 经统一执行器（默认有界；失败返回 null）。
   const v = ex.runOut(bin, ['--version'], { timeoutMs: 3000 });
@@ -16,7 +16,7 @@ function whichVersion(bin) {
 }
 
 // 版本探测结果缓存（TTL 10s）：envStatus 的 probe + summary 会在单次 API 调用内重复探测 3+ 次，
-// 每次都是同步 execFileSync（node/npm/git）——磁盘/进程占用且阻塞事件循环（2026-09 审计修复）。
+// 每次都是同步 execFileSync（node/npm/git），既占进程/磁盘又阻塞事件循环。
 const _verCache = new Map();
 const CACHE_TTL = 10000;
 function cachedWhichVersion(bin) {
@@ -33,16 +33,12 @@ function cachedWhichVersion(bin) {
   return v;
 }
 
-/**
- * Node 最低版本门槛的**默认值**（契约不可用时使用）。
- *
- * ⚠ 必须与壳的 `node.rs MIN_NODE` 一致 —— 否则会出现最糟的用户体验：
- *   **面板说「环境就绪 ✅」，而壳因门槛不满足拒绝启动内核。**
- * 真实取值由壳经 `<产品状态根>/supervisor/runtime.json` 的 `minNode` 字段投放（见 runtimeMeta 与 state-root.js）。
- */
+/** Node 最低版本门槛的默认值（契约不可用时使用）。必须与壳的 node.rs MIN_NODE 一致，否则会出现
+ *  最糟的用户体验：面板说环境就绪，而壳因门槛不满足拒绝启动内核。真实取值由壳经
+ *  <产品状态根>/supervisor/runtime.json 的 minNode 投放（见 runtimeMeta）。 */
 const MIN_NODE_DEFAULT = 'v22.12.0';
 
-/** 读取壳投放的运行时元数据（`<产品状态根>/supervisor/runtime.json`，**壳写内核读**）。 */
+/** 读取壳投放的运行时元数据（<产品状态根>/supervisor/runtime.json，壳写内核读）。 */
 let _runtimeMetaCache = null;
 let _runtimeMetaAt = 0;
 function runtimeMeta() {
@@ -56,12 +52,12 @@ function runtimeMeta() {
   return meta;
 }
 
-/** 解析形如 `v22.12.0` / `22.12.0` 的版本为数字数组（非数字段记 0）。 */
+/** 解析形如 v22.12.0 / 22.12.0 的版本为数字数组（非数字段记 0）。 */
 function parseVer(v) {
   return String(v).replace(/^v/i, '').split('-')[0].split('.').map((x) => parseInt(x, 10) || 0);
 }
 
-/** a >= b ? true : false（段数不同时缺位补 0）。 */
+/** a >= b（段数不同时缺位补 0）。 */
 function verAtLeast(a, b) {
   const A = parseVer(a); const B = parseVer(b);
   const n = Math.max(A.length, B.length);
@@ -72,13 +68,9 @@ function verAtLeast(a, b) {
   return true;
 }
 
-/** Node 探测：**不仅要能执行，还要达到最低门槛**。
- *
- * 旧实现只判 `which node` 是否成功 → 装了 v18 也报 ok，
- * 而壳的引导会因门槛不满足拒绝启动内核。现判据与壳对齐。
- *
- * @returns {{version:string, min:string, meets:boolean}|null}
- */
+/** Node 探测：不仅要能执行，还要达到最低门槛（旧实现只判 which node 是否成功，装了 v18 也报 ok，
+ *  而壳的引导会因门槛不满足拒绝启动内核）。
+ *  @returns {{version:string, min:string, meets:boolean}|null} */
 function probeNode() {
   const v = cachedWhichVersion('node');
   if (!v) return null;
@@ -89,9 +81,8 @@ function probeNode() {
   return { version: 'v' + ver, min, meets: verAtLeast(ver, min) };
 }
 
-/** npm 探测：**契约优先**（壳投放的解析结果 = 单一事实源），退回 PATH。
- *  旧实现用裸 `'npm'` —— Windows 上 npm 实际是 `npm.cmd`，且 Node 的 spawn 不做 PATHEXT
- *  解析 → 裸名 ENOENT → 明明装了也误报 missing（与壳侧「只查 node」合成「环境就绪但装不上」）。 */
+/** npm 探测：契约优先（壳投放的解析结果 = 单一事实源），退回 PATH。旧实现用裸 npm，Windows 上
+ *  npm 实际是 npm.cmd 且 Node 的 spawn 不做 PATHEXT 解析，明明装了也误报 missing。 */
 function probeNpm() {
   try {
     const c = runtime.read();
@@ -104,7 +95,7 @@ function probeNpm() {
   return cachedWhichVersion('npm');
 }
 
-/** 系统环境条目（必要前置：Node/npm 为 DSH 与反代更新的执行器；git 可选）。 */
+/** 系统环境条目（Node/npm 为 DSH 与反代更新的执行器；git 可选）。 */
 const SYSTEM_ENTRIES = {
   node: { label: 'Node.js', required: true, probe: probeNode },
   npm:  { label: 'npm',     required: true, probe: probeNpm },
@@ -114,17 +105,10 @@ const SYSTEM_ENTRIES = {
 class EnvCatalog {
   constructor(config) { this.config = config || {}; }
 
-  /**
-   * 系统二进制条目探测：`{id:{label,required,state,detail}}`。
-   *
-   * `state` 三态：
-   *   · `ok`       —— 存在且**满足门槛**（Node 需 >= 壳投放的 minNode）；
-   *   · `outdated` —— 存在但低于门槛（**旧实现会误报 ok → 面板谎报「环境就绪」**）；
-   *   · `missing`  —— 不存在。
-   *
-   * ⚠ 兼容：`detail` 保持字符串（既有消费方按字符串用），
-   *   新增字段放 `detail` 之外（`version` / `min` / `meets`），不破坏既有契约。
-   */
+/** 系统二进制条目探测：{ id: { label, required, state, detail } }。
+ *  state 三态：ok = 存在且满足门槛（Node 需 >= 壳投放的 minNode）；outdated = 存在但低于门槛
+ *  （旧实现会误报 ok，面板谎报环境就绪）；missing = 不存在。
+ *  兼容：detail 保持字符串，新增字段放 detail 之外（version/min/meets），不破坏既有契约。 */
   probe() {
     const out = {};
     for (const [id, e] of Object.entries(SYSTEM_ENTRIES)) {
@@ -144,13 +128,9 @@ class EnvCatalog {
     return out;
   }
 
-  /** 内核更新依赖条目（单写入者契约：安装/重启归桌面壳）。
-   *
-   *  2026-09-15（A 方案）：守卫**不再自更新**，`corePackageName` 只用于查询内核版本状态；
-   *  安装/升级由桌面壳执行（见 RELEASE-AND-UPDATE-MECHANISM.md §6）。
-   *  本条目因此只报告「壳执行内核更新所需的包名」是否就位 —— 不再暗示守卫能自己装。
-   *  id 仍为 `selfUpdate` 以兼容既有 `/env/status` 消费方。
-   */
+/** 内核更新依赖条目（单写入者契约：安装/重启归桌面壳）。守卫不再自更新，corePackageName 只用于
+ *  查询内核版本状态，本条目只报告壳执行内核更新所需的包名是否就位。id 仍为 selfUpdate 以兼容
+ *  既有 /env/status 消费方。 */
   selfUpdateEntry() {
     const pkg = this.config.corePackageName;
     if (!pkg) {
@@ -174,10 +154,10 @@ class EnvCatalog {
     };
   }
 
-  /** 汇总：全部必填项状态（供面板/守卫快速判定「环境就绪」）。
-   *  @param extra 附加条目（dsh/selfUpdate）
-   *  @param sys 可选：已探测的系统条目（避免调用方已 probe 后又重 probe——2026-09 审计修复）
-   *  无 sys 时探测一次（探测结果有 10s TTL 缓存）。 */
+/** 汇总：全部必填项状态（供面板/守卫快速判定环境就绪）。
+ *  @param extra 附加条目（dsh/selfUpdate）
+ *  @param sys 可选：已探测的系统条目（避免调用方已 probe 后又重 probe）
+ *  无 sys 时探测一次（有 10s TTL 缓存）。 */
   summary(extra, sys) {
     const s = sys || this.probe();
     const items = { ...s, ...(extra || {}) };

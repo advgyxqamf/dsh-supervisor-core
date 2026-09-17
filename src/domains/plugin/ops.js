@@ -1,17 +1,13 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 安装/卸载编排 + 已装清单入口（域：plugin / ops，IO 编排）
-//
-// F9：逐目标串行推进作业：解析 → 加锁 → CLI → 清理 bundles → scrub → 生效。
-// F12 入口：listInstalled 解析 targets 后转交 store（不再反向依赖）。
-//   ctx（装配根）经参数显式传入；作业服务/补丁层服务/CLI 全部经 ctx 具名调用。
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域安装/卸载编排 + 已装清单入口（IO 编排）。
+// 逐目标串行推进作业：解析 -> 加锁 -> CLI -> 清理 bundles -> scrub -> 生效；
+// listInstalled 解析 targets 后转交 store（不反向依赖）。ctx 经参数显式传入。
 
 const { isProtectedName } = require('./policies');
 const store = require('./store');
 
-/** 安装：逐目标串行（加锁 → CLI add）；不自动重启（用户确认后手动重启）。 */
+/** 安装：逐目标串行（加锁 -> CLI add）；不自动重启（用户确认后手动重启）。 */
 async function install(ctx, spec, opts) {
   if (!spec) return { ok: false, error: 'missing spec' };
   const r = ctx.resolveTargets(opts && opts.target);
@@ -52,7 +48,7 @@ async function install(ctx, spec, opts) {
   return { ok: true, jobId: job.id, target: job.target };
 }
 
-/** 卸载：逐目标串行（加锁 → CLI remove → bundles 清理 → scrub → 生效）。 */
+/** 卸载：逐目标串行（加锁 -> CLI remove -> bundles 清理 -> scrub -> 生效）。 */
 async function uninstall(ctx, name, targetStr) {
   if (isProtectedName(name)) return { ok: false, error: '内置组件不可卸载' };
   if (!name) return { ok: false, error: 'missing plugin name' };
@@ -84,9 +80,9 @@ async function uninstall(ctx, name, targetStr) {
       let res;
       try { res = await ctx._runCli(target, ['remove', name], { onLine: (l) => { jt.log.push(l); if (jt.log.length > 30) jt.log.shift(); } }); }
       catch (e) { res = { ok: false, error: (e && e.message) || String(e) }; }
-      // ── bundle 型插件清理：dsh plugin remove 只移除 dependencies，
-      //   reconcile 对带 dsh.bundle 声明的插件会保留在 dsh.profile.bundles → DSH 仍加载。
-      //   这里直接从 profile 的 bundles 数组移除，确保卸载彻底生效。
+      // bundle 型插件清理：dsh plugin remove 只移除 dependencies，reconcile 对带
+      // dsh.bundle 声明的插件会保留在 dsh.profile.bundles，DSH 仍加载；故直接从
+      // profile 的 bundles 数组移除，确保卸载彻底生效。
       let bundlesCleaned = false;
       try {
         bundlesCleaned = ctx._removeFromProfileBundles(target, name);
@@ -95,8 +91,8 @@ async function uninstall(ctx, name, targetStr) {
         jt.log.push('bundles 清理失败: ' + e.message);
         if (res.ok) res = { ok: false, error: 'bundles 清理失败: ' + e.message };
       }
-      // 判定成功：pnpm remove 成功，或（bundles 已清理 + pnpm 报「依赖已不存在」——
-      // 说明 dependencies 此前已被移除，插件实际已不装）。
+      // 判定成功：pnpm remove 成功，或 bundles 已清理且 pnpm 报依赖已不存在
+      //（说明此前已移除，插件实际已不装）。
       if (!res.ok && bundlesCleaned && /no such dependency|no dependencies of any kind|CANNOT_REMOVE_MISSING|already removed|not a dependency/i.test(String(res.error || ''))) {
         res = { ok: true, error: null };
         jt.log.push('依赖已清空，bundles 已移除（卸载完成）');
@@ -111,8 +107,8 @@ async function uninstall(ctx, name, targetStr) {
         jt.scrub = scrub;
         if (scrub.warnings.length) jt.log.push('⚠ 残留提示：' + scrub.warnings.join('；'));
       }
-      // 卸载生效：运行中的目标若不重启，DSH 仍按启动时清单加载已删插件（client.js 404
-      // → 浏览器 Failed to load plugins）。这里对实际变更的目标重启，卸载才真正「完整」。
+      // 运行中的目标不重启会继续按启动清单加载已删插件（client.js 404 ->
+      // 浏览器加载失败）；故对实际变更的目标重启，卸载才完整。
       const changed = !!(res.ok || bundlesCleaned);
       if (changed) await ctx._applyPluginChange(target, 'uninstall', (m) => jt.log.push(m));
     }).then(() => { idx++; next(); });

@@ -1,12 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 多实例管理器 —— 运行状态机（域：instance / state-machine）
-//
-// 纯：相位转移 + 退避决策。落盘/发事件/令牌经 deps **显式入参**（非隐式 this）：
-//   deps = { events, logger, save, tokens }
-// 副作用由调用方（lifecycle 监督拍）执行；本模块只读写 inst.state 并调用 deps 回调。
-// ═══════════════════════════════════════════════════════════════════════════
+// 运行状态机：相位转移 + 退避决策。纯函数；落盘/发事件/令牌经 deps 显式入参（非隐式 this），
+// deps = { events, logger, save, tokens }。副作用由调用方（lifecycle 监督拍）执行，
+// 本模块只读写 inst.state 并调用 deps 回调。
 
 const guardian = require('../../shared/guardian');
 
@@ -15,9 +11,8 @@ function setRunning(deps, inst, st, now) {
   const state = inst.state;
   state.phase = 'RUNNING';
   state.lastError = null;
-  // 稳定运行后重置崩溃计数（时间窗语义）：距上次失败 >5 分钟视为已恢复稳定，
-  // 清零 restartCount/backoffLevel——否则偶发重启（间隔数天/数小时）会跨时间无限累计
-  // 到 20 次上限触发永久 FAILED（2026-09 审计修复：restartCount 永不归零缺陷）。
+  // 稳定运行后重置崩溃计数（时间窗语义）：距上次失败 >5 分钟视为已恢复稳定，清零
+  // restartCount/backoffLevel；否则偶发重启会跨时间无限累计到 20 次上限触发永久 FAILED。
   if ((state.lastFailAt || 0) && now - state.lastFailAt > 5 * 60 * 1000) {
     if ((state.restartCount || 0) > 0 || (state.backoffLevel || 0) > 0) {
       state.restartCount = 0;
@@ -59,7 +54,7 @@ function fail(deps, inst, reason) {
 function restart(deps, inst, reason) {
   const state = inst.state;
   const attempts = (state.restartCount || 0) + 1;
-  if (attempts > 20) { // 超过 20 次仍起不来 → 判定失败，交给用户处理
+  if (attempts > 20) { // 超过 20 次仍起不来则判定失败，交给用户处理
     state.restartCount = attempts;
     fail(deps, inst, '重试超限(' + reason + ')');
     return;

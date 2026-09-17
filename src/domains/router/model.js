@@ -1,30 +1,24 @@
 'use strict';
 
-// 反代实例模型（I1，原 instances/proxy-instance.js 上移）：一个账号（key）= 一个实例（硬规则）。
-//
-// ★ 实例态（PROVIDER-GATEWAY-ARCHITECTURE §4.1 / PG-3）按**服务能力**分四态——
-//     COLD  未启动（无进程）          资源 0
-//     WARM  启动中（有进程，未就绪）  资源 1，不可服务
-//     HOT   就绪（有进程，探活通过）  资源 1，可立即服务
-//     DEAD  异常（进程在但不健康）    资源 1，待回收
-//   ⚠ 账号级冻结（frozen）不在实例态里——冻结是**账号**语义（base.applyDetection 管理）。
-//
-// 实例记录与进程解耦；进程态(pid)不落盘，但 port 持久化——端口与实例绑死：
-// 分配一次永久绑定，重启/停止复用，仅删除账号才释放。
+// 反代实例模型（原 instances/proxy-instance.js 上移）：一个账号（key）= 一个实例（硬规则）。
+// 实例态按服务能力分四态：COLD 未启动（资源 0）、WARM 启动中（有进程未就绪，资源 1，不可服务）、
+// HOT 就绪（可立即服务）、DEAD 异常（进程在但不健康，资源 1，待回收）。注意：账号级冻结（frozen）
+// 不在实例态里，冻结是账号语义（base.applyDetection 管理）。实例记录与进程解耦：pid 不落盘，
+// port 持久化并与实例绑死，仅删除账号才释放。
 
-/** **实例四态**（本域唯一实例态词表，冻结）。 */
+/** 实例四态（本域唯一实例态词表，冻结）。 */
 const INSTANCE_STATES = Object.freeze({
   COLD: 'COLD', WARM: 'WARM', HOT: 'HOT', DEAD: 'DEAD',
 });
 
-// ── 纯谓词（手法 C：参数显式化）——实例方法的唯一事实源，供无实例句柄的纯代码复用 ──
+// 纯谓词（参数显式化）：实例方法的唯一事实源，供无实例句柄的纯代码复用。
 
-/** 实例是否可**立即服务**：态为 HOT 且 pid 在（pid 是运行期事实，不落盘）。 */
+/** 实例是否可立即服务：态为 HOT 且 pid 在（pid 是运行期事实，不落盘）。 */
 function isServable(inst) {
   return !!inst && inst.status === INSTANCE_STATES.HOT && !!inst.pid;
 }
 
-/** 实例是否占用资源（WARM/HOT/DEAD 都有进程）。资源治理据此计数（§4.2 maxHot/maxWarm）。 */
+/** 实例是否占用资源（WARM/HOT/DEAD 都有进程）。资源治理据此计数（maxHot/maxWarm）。 */
 function occupiesSlot(inst) {
   return !!inst && (inst.status === INSTANCE_STATES.WARM
     || inst.status === INSTANCE_STATES.HOT || inst.status === INSTANCE_STATES.DEAD);
@@ -72,13 +66,13 @@ class ProxyInstance {
 
   toJSON() { return serializeInstance(this); }
 
-  /** 实例是否可**立即服务**（切换策略唯一需要问的问题，见 §4.3 双预算切换）。 */
+  /** 实例是否可立即服务（切换策略唯一需要问的问题，见双预算切换）。 */
   isServable() { return isServable(this); }
 
   /** 实例是否占用资源（WARM/HOT/DEAD 都有进程）。 */
   occupiesSlot() { return occupiesSlot(this); }
 
-  /** 反序列化：进程态(pid)不落盘 → 一律回到 COLD，由 reconcile 按期望集重新拉起。 */
+  /** 反序列化：进程态(pid)不落盘 -> 一律回到 COLD，由 reconcile 按期望集重新拉起。 */
   static fromJSON(o) { return deserializeInstance(o); }
 }
 
@@ -94,10 +88,9 @@ function deserializeInstance(o) {
   return i;
 }
 
-/** 状态容器工厂（§3.2 冻结导出名）：新建/包装一个实例状态容器。 */
+/** 状态容器工厂（冻结导出名）：新建/包装一个实例状态容器。 */
 function stateContainer(opts) { return new ProxyInstance(opts || {}); }
 
-// ⚠ 2026-09-16 Phase 4 清理：已删除 _set()/freeze()/unfreeze()（未接线死代码；
-//   冻结的真实语义在**账号级**，实例态只经 provider 直接赋值）。
+// 已删除 _set()/freeze()/unfreeze()（未接线死代码；冻结的真实语义在账号级，实例态只经 provider 直接赋值）。
 
 module.exports = { ProxyInstance, INSTANCE_STATES, isServable, occupiesSlot, stateContainer, serializeInstance, deserializeInstance };

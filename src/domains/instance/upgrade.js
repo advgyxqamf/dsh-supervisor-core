@@ -1,8 +1,7 @@
 'use strict';
-// 多实例管理器 —— 沙箱 DSH 安装/检测/升级（域：instance / upgrade）
-// 首次安装与升级走**同一条** npm install --prefix 路径（都写实例独立 install 目录、都取全局镜像源、
-// 都经 TaskRegistry 作业承载），故归为同一职责：沙箱实例的 DSH 版本生命周期。
-// 协作方（store/lifecycle/dist/tasks）经 deps 显式注入；本模块无隐式 this。
+// 沙箱 DSH 安装/检测/升级。首次安装与升级走同一条 npm install --prefix 路径（都写实例独立 install
+// 目录、都取全局镜像源、都经 TaskRegistry 作业承载），故归为同一职责：DSH 版本生命周期。
+// 协作方（store/lifecycle/dist/tasks）经 deps 显式注入；无隐式 this。
 const { semverCompare } = require('../../shared/version');
 const sandbox = require('./sandbox');
 const model = require('./model');
@@ -23,10 +22,8 @@ function createUpgrade(deps) {
   const _updCache = {};                 // id -> { latest, checkedAt, error }
   const _updJobs = {};                  // id -> { state, startedAt, finishedAt, step, errors, error }
   const _updTTL = 6 * 3600 * 1000;      // 缓存 6h（手动「检查更新」随时强制刷新）
-  let _latestDshVer = null;
-  let _latestDshVerAt = 0;
-  /** 升级作业收尾清理（P1-4）：完成后保留 60s 供前端轮询，随后删除 _updJobs 与 _updCache
-   *  （_updCache 此前只写不删，长寿命守卫下内存单调增长）。定时器 **unref**（不拖住进程退出）。 */
+  /** 升级作业收尾清理：完成后保留 60s 供前端轮询，随后删除 _updJobs 与 _updCache，
+   *  否则长寿命守卫下 _updCache 只写不删、内存单调增长。定时器 unref（不拖住进程退出）。 */
   function _scheduleJobCleanup(id) {
     const t = setTimeout(() => {
       try { if (_updJobs[id] && _updJobs[id].state !== 'running') delete _updJobs[id]; } catch {}
@@ -34,7 +31,7 @@ function createUpgrade(deps) {
     }, 60000);
     if (t.unref) t.unref();
   }
-  // 安装/版本叶子（DF-7：upgrade 编排 → ops 叶子；单向）
+  // 安装/版本叶子（DF-7：upgrade 编排到 ops 叶子；单向）
   const install = dshInstall.createDshInstall({ store, dist, tasks, logger, instancesRoot });
 
   function installSandbox(inst) { return install.installSandbox(inst); }
@@ -82,7 +79,7 @@ function createUpgrade(deps) {
     if (events) events.append('inst_update_check', { id, installed, latest, updateAvailable });
     return { ok: true, installed, latest, updateAvailable, error: _updCache[id].error };
   }
-  /** 升级沙箱实例的 DSH：stop(若在跑) → 安装 → 重启并验证 → succeeded/failed；失败自动回滚。
+  /** 升级沙箱实例 DSH：stop(若在跑)，安装，重启并验证，succeeded/failed；失败自动回滚。
    *  同一实例升级中重复调用返回 already。 */
   async function upgradeInstance(id) {
     const inst = store.instances.find((i) => i.id === id);
@@ -134,11 +131,19 @@ function createUpgrade(deps) {
           if (!res.ok) { nj.errors++; nj.error = res.error || 'npm install 失败'; if (task) tasks.log(task.id, res.error || 'npm install 失败'); }
         }
       }
-      // ⚠ P1-1 修复：三条失败路径（npm 安装失败 / 重启失败 / 端口未就绪）必须**共用同一个回滚**，
-      //   否则一次失败升级 = 实例停机 + 版本不确定（guardian 也不自愈，只能人工处理）。
+      // 三条失败路径（npm 安装失败/重启失败/端口未就绪）必须共用同一个回滚，否则一次失败升级
+      // 等于实例停机加版本不确定（guardian 也不自愈，只能人工处理）。
       const rollback = async (why) => {
         if (!oldVersion) { if (task) tasks.log(task.id, '无旧版本可回滚，保持失败态'); return false; }
         if (task) { tasks.log(task.id, '自动回滚到 ' + oldVersion + '…'); }
+        // 回滚前先停新版本单元：失败路径 3（新版本已启动但健康验证未过）里进程可能仍监听端口，
+        // 不停则旧版重启会被 _systemdStart 的「端口已被占用」拒绝，磁盘回旧版而内存仍跑新版。
+        try {
+          const rs = await lifecycle.stop(id);
+          if (rs && rs.ok === false && task) tasks.log(task.id, '回滚前停止失败（继续回装旧版）：' + (rs.error || ''));
+        } catch (e) {
+          if (task) tasks.log(task.id, '回滚前停止异常（继续回装旧版）：' + ((e && e.message) || e));
+        }
         const rbOpts = {
           pkg: '@deepseek-ai/dsh', version: oldVersion, prefix: installDir, registry: reg,
           onLine: taskLogger(task, tasks),
@@ -160,7 +165,7 @@ function createUpgrade(deps) {
       if (nj.errors) { nj.state = 'failed'; await rollback(nj.error); }
       else {
         nj.step = 'restarting';
-        // 3) 读新版本 → 拉回实例并验证可启动（防止"显示成功但实例起不来"）。无论升级前是否在跑都验证：
+        // 3) 读新版本，拉回实例并验证可启动（防止显示成功但实例起不来）。无论升级前是否在跑都验证：
         //    DSH 可能先监听端口后因插件兼容崩溃，只探测端口会误判成功，必须同时检查 systemd 单元仍 active。
         inst.state.version = readInstalledVersion(inst);
         if (task) { const s = tasks.step(task.id, '重启实例并验证'); tasks.stepState(task.id, tasks.get(task.id).steps.indexOf(s), 'running'); }

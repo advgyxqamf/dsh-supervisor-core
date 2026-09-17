@@ -1,6 +1,6 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// 
 // 管家注册机（ManagedRegistry）—— 控制平面 v3 的声明目录（2026-09-06 定稿）。
 //
 // 定位：守卫核心层 = 大管家。本目录记录「管家直接负责」的受管对象的应然声明与所有权：
@@ -14,7 +14,7 @@
 //   2) 注册即存在、注销即不存在（限管家直接负责的对象）；域自治对象不入簿（经 ctl 摘要）；
 //   3) 目录不是第二状态源：phase 由调谐循环驱动（R3 挂接），业务不得直接改目录 phase；
 //   4) 路径由 root 派生，不登记路径清单；端口只登记所有权引用（联动统一端口注册表）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -26,12 +26,12 @@ const { DESIRED, MANAGED_KINDS, kindMeta, registerKind: registerManagedKind, isD
  *  升级/卸载态在 TaskRegistry，不在 phase。 */
 const PHASES = ['stopped', 'installing', 'starting', 'running', 'draining', 'backoff', 'failed', 'restarting'];
 
-// ── 纯模型（DESIRED/MANAGED_KINDS/kindMeta/registerKind/DOMAIN_A_KINDS/isDomainA/
+//  纯模型（DESIRED/MANAGED_KINDS/kindMeta/registerKind/DOMAIN_A_KINDS/isDomainA/
 //    createEntry/normalizeOwnership）已拆到 control/managed-object.js（DF-2/DF-3）。
 //    本文件仍定义 PHASES（K3-d：唯一源）并 re-export 上述名字（公开导出面不变）。
-// ── 心跳与调度（ADAPTER_TIMEOUT_TICKS / 单对象超时包装 / heartbeat 循环）已拆到
+//  心跳与调度（ADAPTER_TIMEOUT_TICKS / 单对象超时包装 / heartbeat 循环）已拆到
 //    control/heartbeat.js（DF-2/DF-3：目录 CRUD+持久化 vs IO 调度分离）。
-//    公开方法 heartbeat 签名与语义不变（薄委托）。──
+//    公开方法 heartbeat 签名与语义不变（薄委托）。
 const { runHeartbeat } = require('./heartbeat');
 
 /** 类型适配器：observe/apply 实现（类型模块注册；不进持久化）。 */
@@ -49,8 +49,8 @@ class ManagedRegistry {
     this._adapters = {};          // kind -> { observe, apply }
     this._loaded = false;
     // 是否「从既有磁盘文件加载」（阶段 2 状态单源迁移判定）：
-    //   true  = 历史库已有权威目录 → 以目录 desired 为准，state.json 不回灌（纯投影）；
-    //   false = 目录文件原不存在（首启/老库迁移）→ 允许 state.json 的 desired 作一次性种子。
+    //   true  = 历史库已有权威目录 -> 以目录 desired 为准，state.json 不回灌（纯投影）；
+    //   false = 目录文件原不存在（首启/老库迁移）-> 允许 state.json 的 desired 作一次性种子。
     // 注意：必须记录「构造前是否存在」，而非 _save 之后——构造函数随后会创建文件（否则判定失真）。
     this._loadedFromDisk = false;
     if (this.file) {
@@ -59,27 +59,32 @@ class ManagedRegistry {
     }
   }
 
-  /* ── 持久化（应然+所有权；实然与适配器不入册） ── */
+  /*  持久化（应然+所有权；实然与适配器不入册）  */
   _load() {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
       const arr = (raw && Array.isArray(raw.objects)) ? raw.objects : [];
       for (const o of arr) {
-        if (!o || !kindMeta(o.kind)) continue; // 未知类型/损坏条目：跳过（不阻断启动）
-        // guardian 只在域 A 传：域 B 的**旧残留**（早期版本曾写 true）由此被自然丢弃——
-        //   配合 _save 不写该字段，升级后首次落盘即完成归一（无需一次性迁移脚本）。
-        const e = createEntry({ kind: o.kind, id: o.id, name: o.name, desired: o.desired, guardian: isDomainA(o.kind) ? o.guardian : undefined, ownership: o.ownership });
-        // 恢复持久化的受管阶段(仅合法值;观测不恢复)
-        if (PHASES.includes(o.phase)) e.phase = o.phase;
-        if (Number.isInteger(o.backoffLevel)) e.backoffLevel = o.backoffLevel;
-        if (typeof o.backoffUntil === 'number' && o.backoffUntil > Date.now()) e.backoffUntil = o.backoffUntil;
-        // 崩溃窗/重启计数随目录持久化（B2 归一：与 state.json 不再双副本——main 崩溃保护跨重启保持）。
-        if (Number.isInteger(o.restartCount) && o.restartCount >= 0) e.restartCount = o.restartCount;
-        if (o.crashWindowStart === null || typeof o.crashWindowStart === 'number') e.crashWindowStart = o.crashWindowStart;
-        if (Number.isInteger(o.crashWindowRestarts) && o.crashWindowRestarts >= 0) e.crashWindowRestarts = o.crashWindowRestarts;
-        if (typeof o.startedAt === 'string') e.startedAt = o.startedAt;
-        e.lastTransitionAt = null;
-        this._index(e);
+        // 逐条容错：单条坏 entry（缺 id/字段异常）不得中断整份加载，否则其后合法条目全部静默丢失。
+        try {
+          if (!o || !kindMeta(o.kind)) continue; // 未知类型/损坏条目：跳过（不阻断启动）
+          // guardian 只在域 A 传：域 B 的**旧残留**（早期版本曾写 true）由此被自然丢弃——
+          //   配合 _save 不写该字段，升级后首次落盘即完成归一（无需一次性迁移脚本）。
+          const e = createEntry({ kind: o.kind, id: o.id, name: o.name, desired: o.desired, guardian: isDomainA(o.kind) ? o.guardian : undefined, ownership: o.ownership });
+          // 恢复持久化的受管阶段(仅合法值;观测不恢复)
+          if (PHASES.includes(o.phase)) e.phase = o.phase;
+          if (Number.isInteger(o.backoffLevel)) e.backoffLevel = o.backoffLevel;
+          if (typeof o.backoffUntil === 'number' && o.backoffUntil > Date.now()) e.backoffUntil = o.backoffUntil;
+          // 崩溃窗/重启计数随目录持久化（B2 归一：与 state.json 不再双副本——main 崩溃保护跨重启保持）。
+          if (Number.isInteger(o.restartCount) && o.restartCount >= 0) e.restartCount = o.restartCount;
+          if (o.crashWindowStart === null || typeof o.crashWindowStart === 'number') e.crashWindowStart = o.crashWindowStart;
+          if (Number.isInteger(o.crashWindowRestarts) && o.crashWindowRestarts >= 0) e.crashWindowRestarts = o.crashWindowRestarts;
+          if (typeof o.startedAt === 'string') e.startedAt = o.startedAt;
+          e.lastTransitionAt = null;
+          this._index(e);
+        } catch (err) {
+          this._log('warn', 'managed-objects 条目损坏已跳过(' + ((o && o.kind) || '?') + ':' + ((o && o.id) || '?') + '): ' + ((err && err.message) || err));
+        }
       }
       this._loaded = true;
     } catch { /* 首次启动/文件缺失：空目录 */ }
@@ -130,7 +135,7 @@ class ManagedRegistry {
     if (this.events && this.events.append) { try { this.events.append(type, data || {}); } catch {} }
   }
 
-  /* ── 目录操作 ── */
+  /*  目录操作  */
   _index(e) { this._byId.set(e.id, e); this._objects.push(e); }
   _drop(e) {
     this._byId.delete(e.id);
@@ -193,12 +198,12 @@ class ManagedRegistry {
     return { ok: true, object: e };
   }
 
-  /** 注销（销毁时调用）。级联：按所有权释放端口（owner 语义）→ 移出目录 → 持久化。 */
+  /** 注销（销毁时调用）。级联：按所有权释放端口（owner 语义）-> 移出目录 -> 持久化。 */
   unregister(id, opts) {
     const e = this.get(id);
     if (!e) return { ok: false, error: '未注册: ' + id };
     const o = opts || {};
-    // ⚠ P3 修复（2026-09-13）：**清掉节流游标**。
+    // 注意 P3 修复（2026-09-13）：**清掉节流游标**。
     //   _nextTickAt 原先只写不读其它、且**没有任何清除路径**（全仓仅 heartbeat 内一处读写）。
     //   对象注销后若同 id 重新注册，旧游标不会跟着新对象走（新对象是新 entry，天然无游标），
     //   故注销本身影响有限；真正的缺口是「守卫重启才自然丢失」——
@@ -216,7 +221,7 @@ class ManagedRegistry {
 
   /** 释放本对象持有的端口（按 owner）。
    *
-   *  ⚠ 2026-09-12（P2-2 配套）：`PortRegistry.release()` 现已**真正支持** `ownerId` 校验
+   *  注意 2026-09-12（P2-2 配套）：`PortRegistry.release()` 现已**真正支持** `ownerId` 校验
    *    （此前第二参被静默忽略，故这里曾有 `catch { release(port) }` 的回退）。
    *    回退现已删除 —— 保留它会绕过 owner 判定，正是 P2-2 要堵的「误删他人端口登记」。
    *    记录返回值仅用于日志（不匹配即 no-op 是期望行为，不是错误）。
@@ -236,7 +241,7 @@ class ManagedRegistry {
     }
   }
 
-  /* ── 查询（唯一全系统视图入口） ── */
+  /*  查询（唯一全系统视图入口）  */
   list() { return this._objects.slice(); }
   get(id) { return this._byId.get(id) || null; }
   byKind(kind) { return this._objects.filter((o) => o.kind === kind); }

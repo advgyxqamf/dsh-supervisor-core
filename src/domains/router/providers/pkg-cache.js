@@ -34,7 +34,7 @@ function cachedPkgBin(pkg) {
   return null;
 }
 
-/** 下载预取：缓存未命中 → npx --yes 预下载（首次安装）。 */
+/** 下载预取：缓存未命中 -> npx --yes 预下载（首次安装）。 */
 async function ensurePkgCached(provider, app) {
   if (!app || !app.pkg) return { ok: true };
   if (cachedPkgBin(app.pkg)) return { ok: true, cached: true };

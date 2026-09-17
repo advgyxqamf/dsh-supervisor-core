@@ -1,19 +1,9 @@
 'use strict';
 
-// platform/os/capability-profile —— 平台静态能力档位（纯数据 + 每平台一份；DF-1 拆分）。
-//
-// 为什么单列：index.js 是平台门面（DS-9 门面 ≤150 行）；能力档位是**纯数据**，与
-//   运行时分派/工具探测无关。index.js#capabilityProfile 只保留「按平台选择档位」的分派
-//   （cross-platform-architecture-gate CP-3 要求门面显式列出 linux/darwin/win32 分支），
-//   档位本体在此。取值与拆分前逐字一致（capability-profile-test、
-//   four-platform-behavior-matrix P-4/P-5、cross-platform-architecture-gate 依赖）。
-//
-// 工具类字段（multiInstance/desktopNotify/autostart/win processTreeKill）在此返回
-// 平台期望值（工具存在时），index.js#capabilities() 用 hasTool 实测覆写（缺失才降 false）。
-// 字段语义（2026-09-11 跨平台能力完整性审计补齐）：
-//   guardAutostart / guardSelfHeal / shellAutostart / shellSelfHeal 为服务链自愈/自启声明；
-//   此前这些没有能力字段，消费者无从得知，补字段 + 审计测试后声明与实现绑定。
-//   （实现要点见 index.js 头注 + autostart.js 文件头的所有权矩阵。）
+// 平台静态能力档位（纯数据；DF-1 拆分）。index.js#capabilityProfile 只做按平台选择的分派
+// （cross-platform-architecture-gate CP-3 要求门面显式列出三平台分支），档位本体在此。
+// 工具类字段在此返回平台期望值，index.js#capabilities 用 hasTool 实测覆写（缺失才降 false）。
+// guardAutostart/guardSelfHeal/shellAutostart/shellSelfHeal 为服务链自愈/自启声明。
 
 /** Linux 档位：期望 systemd（systemd-run/systemctl/notify-send 实测覆写）。 */
 const linux = {
@@ -41,21 +31,18 @@ const darwin = {
   hostService: 'launchd',
   guardAutostart: true,  // LaunchAgent RunAtLoad + KeepAlive
   guardSelfHeal: true,   // KeepAlive
-  // ✅ 2026-09-11 补齐：独立 LaunchAgent com.dsh.supervisor.gui（RunAtLoad）。
-  //   守卫的 plist（com.dsh.supervisor）仍归**桌面壳**建立，内核只 enable/disable —— 见
-  //   platform/os/autostart.js 文件头的所有权矩阵。
+  // 独立 LaunchAgent com.dsh.supervisor.gui（RunAtLoad）；守卫 plist 归桌面壳建立，
+  // 内核只 enable/disable（见 autostart.js 头注的所有权矩阵）。
   shellAutostart: true,
-  shellSelfHeal: true,   // 守卫看护（2026-09-11 新增，此前 macOS 完全没有壳自愈）
+  shellSelfHeal: true,   // 守卫看护（三平台一套机制）
 };
 
 /** win32 档位：期望 schtasks/powershell/taskkill 实测覆写。 */
 const win32 = {
   multiInstance: false, // 沙箱 systemd-run 不可用（Phase 3 迁移计划任务/NSSM 后置 true）
   pidAdoption: true,    // netstat
-  // P1-G 修复（2026-09-12）：该声明此前**没有实现产物** —— `killTree` 虽已导出，
-  //   但停止路径只用 `signalProcess`（Windows 上仅单进程）。
-  //   现已接入 `_killTree`（supervisor 的 SIGKILL 升级路径 + 接管实例路径），
-  //   声明与实现一致。回归：test/process-tree-kill-test.js。
+  // processTreeKill 已接入 _killTree（supervisor 的 SIGKILL 升级路径 + 接管实例路径），
+  // 声明与实现一致（回归 test/process-tree-kill-test.js）。
   processTreeKill: true, // taskkill /PID /T（由 hasTool 覆写；使用点见 main-process._killTree）
   desktopNotify: true,   // 期望 powershell（实测覆写）
   autostart: true,       // 期望 schtasks（实测覆写）
@@ -64,10 +51,8 @@ const win32 = {
   guardAutostart: true,  // schtasks DSH-Supervisor（ONLOGON）
   guardSelfHeal: true,   // schtasks DSH-Supervisor-Watchdog 每 5 分钟
   shellAutostart: true,  // schtasks DSH-Supervisor-GUI（ONLOGON，由 setAutostart 建立）
-  // ✅ 2026-09-11 修复：watchdog 的壳检查已移出 `if (-not $up)` ——
-  //   旧实现只在「守卫也挂了」时才检查壳，而「壳崩、守卫活」正是唯一需要它的场景。
-  //   前置条件：登录自启已启用（watchdog 任务由 setAutostart 建立），
-  //   与 guardSelfHeal 的同一前提一致。
+  // watchdog 的壳检查不再限定在守卫也挂的块内 —— 壳崩而守卫活正是唯一需要它的场景。
+  // 前置条件：登录自启已启用（watchdog 任务由 setAutostart 建立），与 guardSelfHeal 同前提。
   shellSelfHeal: true,
 };
 

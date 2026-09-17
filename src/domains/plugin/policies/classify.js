@@ -1,7 +1,6 @@
 'use strict';
 
-// 插件市场 —— 分类与作者启发（纯，无 IO）。
-// 从 market.js 抽出：关键词分类表 + classify + pickAuthor，均无状态。
+// 插件市场分类与作者启发（纯，无 IO）：关键词分类表 + classify + pickAuthor。
 
 // 分类关键词启发
 const CATEGORIES = {
@@ -35,4 +34,4 @@ function pickAuthor(meta) {
   return a.name || null;
 }
 
-module.exports = { CATEGORIES, classify, pickAuthor };
+module.exports = { classify, pickAuthor };

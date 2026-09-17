@@ -1,19 +1,11 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// instance 域契约声明（DOMAIN-STRUCTURE-DESIGN §10 / design-notes/domain-contract-and-gates.md B.1）
-//
-// **纯数据，零 require、零副作用**（DF-3：本文件本身即纯）。
-// 数据来源全部为实测（不照抄设计稿）：
-//   · exports    ← src/domains/instance/index.js 的 module.exports 字面量键（DG-9 双向一致）
-//   · PUBLIC_API ← 全仓消费点汇总（app/**、api/**、其它域）+ 本域对外契约面（DG-10 消费 ⊆ API）
-//   · classApi   ← index.js 的 InstanceManager 公开方法/访问器（文档；供后续 ctor/端口校验）
-//   · deps       ← index.js constructor(opts) 的 opts.* 读取集 + 出站 hooks（DG-4b 豁免出处）
-//   · pure       ← 逐文件判定「零 IO require」的纯文件（DG-3；DG-4 的纯/IO 分离）
-//
-// deps.hooks 是 DG-4b 的**豁免出处**：门禁 CONTRACT_HOOKS.instance 的 6 个回调
-// 必须能在此处找到声明，否则 DG-4b FAIL（防豁免表腐化，照 L-2b 纪律）。
-// ═══════════════════════════════════════════════════════════════════════════
+// instance 域契约声明（DOMAIN-STRUCTURE-DESIGN §10 / design-notes/domain-contract-and-gates.md B.1）。
+// **纯数据，零 require、零副作用**（DF-3），数据来源均为实测：exports 取自 index.js 的 module.exports
+// 字面量键（DG-9 双向一致）；PUBLIC_API 为全仓消费点与对外契约面（DG-10）；classApi 为 InstanceManager
+// 公开方法/访问器；deps 为 ctor 的 opts.* 读取集与出站 hooks；pure 为零 IO require 的纯文件（DG-3）。
+// deps.hooks 是 DG-4b 的豁免出处：门禁 CONTRACT_HOOKS.instance 的 6 个回调必须能在此找到声明，
+// 否则 DG-4b FAIL（防豁免表腐化，照 L-2b 纪律）。
 
 module.exports = {
   domain: 'instance',
@@ -80,8 +72,8 @@ module.exports = {
   },
 
   // 纯文件（域相对路径；DG-3 零 IO require 判定）
-  // ⚠ 用 src 相对全路径：门禁 pureViolations 以 `e.rel`（src 相对）查表；
-  //   若写域相对名会查不到而被静默跳过 → DG-3 空转（判据要求声明真实文件）。
+  // 用 src 相对全路径：门禁 pureViolations 以 `e.rel`（src 相对）查表；
+  //   若写域相对名会查不到而被静默跳过，DG-3 空转（判据要求声明真实文件）。
   pure: [
     'domains/instance/model.js',        // 记录形状/迁移/视图行（唯一 require shared/version）
     'domains/instance/sandbox.js',      // 沙箱路径/命令/systemd 属性纯推导

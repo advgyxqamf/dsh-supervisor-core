@@ -9,7 +9,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
-const assert = require('node:assert');
 const ROOT = path.join(__dirname, '..');
 
 const results = [];
@@ -83,7 +82,6 @@ const { decideFailure, headerRetryMs, bodyResetMs } = require(path.join(ROOT, 's
   }
   // 反向：判据非空转
   check('反向：window 无 Retry-After/体时间 → retryMs=0（上层走默认）', decideFailure('window', { status: 429, key: 'k' }).retryMs === 0, '');
-  assert.ok(true);
 }
 
 const failed = results.filter((r) => !r);

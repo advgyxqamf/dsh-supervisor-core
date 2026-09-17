@@ -1,13 +1,8 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// relay 域契约声明（DOMAIN-STRUCTURE-DESIGN §10；纯数据，零 require）
-//
-// exports    ← src/domains/relay/index.js 的 module.exports 字面量键（DG-9）
-// PUBLIC_API ← 全仓消费点（app/assembly、app/facade/lan.js、app/session/shutdown.js、relay 内部）+ 对外契约面（DG-10）
-// deps.hooks ← DG-4b 豁免出处（persist / mainOf / tokenOf）
-// pure       ← 零 IO require 的纯文件（DG-3）：core.js（判定/构造，无副作用）
-// ═══════════════════════════════════════════════════════════════════════════
+// relay 域契约声明（DOMAIN-STRUCTURE-DESIGN §10；纯数据，零 require）。
+// exports 取自 index.js 的 module.exports 字面量键（DG-9）；PUBLIC_API 为全仓消费点与对外契约面（DG-10）；
+// deps.hooks 为 DG-4b 豁免出处（persist/mainOf/tokenOf）；pure 为零 IO require 的纯文件（DG-3），仅 core.js。
 
 module.exports = {
   domain: 'relay',
@@ -40,7 +35,7 @@ module.exports = {
     events: '事件账本',
     configPath: 'relay 配置路径',
     stateDir: 'relay 状态目录',
-    instances: 'InstanceSource（★ 后续端口化；现为整个 InstanceManager）',
+    instances: 'InstanceSource（后续端口化；现为整个 InstanceManager）',
     hooks: {
       persist: '持久化回调（daemon.js 的 noop 是本端口的另一实现）',
       mainOf: '取主实例视图',

@@ -1,24 +1,17 @@
 'use strict';
 
-// api/transport/server —— 本地 HTTP 网关本体（步骤 9 / DF-1：从 ../index.js 平移）。
-//
-// 为什么单列 transport/：
-//   网关本体（createServer + 请求级异常兜底 safeFail）是**传输层原语**，与 ./body.js
-//   （有界 body 读取）同层；且 api 契约面扫描（test/api-surface-test.js）只扫 api 顶层
-//   + api/domains/ —— 网关里的静态资源路由字面量（/、/index.html、/supervisor.html）
-//   不属于 API 契约面，下沉到 transport/ 后契约面扫描口径保持不变。
-//
-// 职责单一：http.createServer + 身份门卫 + OPTIONS/CORS + 域分派 + 异常边界。
-// 安全判定 → ../security.js；静态托管 → ../static.js；body 读取 → ./body.js；
-// 域注册表 → ../router-table.js；契约面 → ../contract.js；每域依赖 → ../deps.js。
+// api/transport/server —— 本地 HTTP 网关本体（传输层原语，与 ./body.js 同层）。
+// 安全判定见 ../security.js；静态托管见 ../static.js；body 读取 ./body.js；
+// 域注册表 ../router-table.js；契约面 ../contract.js；每域依赖 ../deps.js。
+// 注：api 契约面扫描只扫 api 顶层 + api/domains/，网关里的静态资源路由字面量不属于契约面。
 //
 // 安全边界（三层，职责单一）：
-//  1. 身份层（../identity.js，socket 事实）：回环/私有网段判定——token 下发、access-key
+//  1. 身份层（../identity.js，socket 事实）：回环/私有网段判定，token 下发、access-key
 //     豁免只消费该层；公网来源连不上（远端地址非 RFC1918/回环）。
-//  2. CSRF 深化层（security.originAllowed）：带 Origin 的写请求须与本服务同源——防"用户浏览器
+//  2. CSRF 深化层（security.originAllowed）：带 Origin 的写请求须与本服务同源，防"用户浏览器
 //     里的恶意网页"驱动 API；身份层不覆盖该威胁（浏览器发起的请求源 IP 是合法的）。
 //  3. 访问密钥层（apiAccessKey，可选）：非回环请求须携带 Bearer/?access_key=。
-//  不返回 CORS 头（面板同源托管 + 壳源白名单）→ 其他网站浏览器读不到响应。
+// 不返回 CORS 头（面板同源托管 + 壳源白名单），其他网站浏览器读不到响应。
 
 const http = require('node:http');
 
@@ -43,12 +36,12 @@ function safeFail(res, err, where) {
 }
 
 /**
- *   GET  /status              → 状态摘要
- *   GET  /events?after=&limit=→ 增量事件
- *   GET  /lifecycle/{id}      → 统一生命周期视图（main 启停：/lifecycle/dsh/{start|stop|restart}）
- *   GET  /native/status       → 原生 DSH 版本/升级状态
- *   POST /native/upgrade      → 一键升级（先停后装，失败自动回滚）
- *   GET  /                    → 控制面板首页（React UI：ui-react 或 ui/dist 的 supervisor.html）
+ *   GET  /status             状态摘要
+ *   GET  /events?after=&limit= 增量事件
+ *   GET  /lifecycle/{id}     统一生命周期视图（main 启停：/lifecycle/dsh/{start|stop|restart}）
+ *   GET  /native/status      原生 DSH 版本/升级状态
+ *   POST /native/upgrade     一键升级（先停后装，失败自动回滚）
+ *   GET  /                   控制面板首页（React UI：ui-react 或 ui/dist 的 supervisor.html）
  *   （旧 /start|/stop|/restart|/version|/upgrade 路由已删除，见 lifecycle.js 头注。）
  */
 function createServer(sup) {
@@ -77,17 +70,17 @@ function createServer(sup) {
 
     // 每实例的 DSH 访问令牌（随实例重启轮换）只有一个权威来源：唯一令牌节点
     // DshTokenService（原生与沙箱共用同一套获取/分发，见 src/platform/service/token/）。生成直连认证 URL
-    // 时按目标查取，绝不跨实例借用（主实例令牌套到沙箱实例 → 401 "dsh web authentication required"）。
+    // 时按目标查取，绝不跨实例借用（主实例令牌套到沙箱实例会 401 "dsh web authentication required"）。
     const tokOf = (id) => {
       try { if (sup.tokenService && typeof sup.tokenService.get === 'function') return sup.tokenService.get(id) || ''; } catch {}
       return '';
     };
 
-    // ── 访问者身份（第一层，socket 事实）：唯一判定入口见 ../identity.js ──
+    // 访问者身份（第一层，socket 事实）：唯一判定入口见 ../identity.js
     // token 下发 / access-key 豁免一律消费 identity.loopback——绝不从请求头推断来源。
     const identity = identify(req);
 
-    // ── 访问密钥门卫（第三层，apiAccessKey 可选配置）──
+    // 访问密钥门卫（第三层，apiAccessKey 可选配置）
     // 非回环请求（0.0.0.0 局域网 / FRP 通道）必须携带 Authorization: Bearer <key>
     // 或 ?access_key=<key>；回环豁免——CLI/同机面板语义必需。
     // OPTIONS 预检豁免（浏览器跨源探测不发自定义头，给 204 而非 401）。
@@ -120,7 +113,7 @@ function createServer(sup) {
     }
 
 
-    // 路径段安全解码（单点）：畸形百分号编码 → 400。域 handler 只拿已解码的
+    // 路径段安全解码（单点）：畸形百分号编码返回 400。域 handler 只拿已解码的
     // 干净字符串，任何域不得自行 decodeURIComponent（异常边界唯一化的组成部分）。
     let decodedPathname;
     try {

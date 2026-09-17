@@ -7,7 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const ex = require('../../util/exec');
 
-/** XDG 自启条目模板（**内嵌**，不依赖外置 desktop/ 目录——launcher 发行态不携带它）。
+/** XDG 自启条目模板（内嵌，不依赖外置 desktop/ 目录，launcher 发行态不携带它）。
  *  @HOME@ 与 Exec/Icon 行在写入前按实际安装路径重写（见 setGuiAutostart）。 */
 const GUI_AUTOSTART_TEMPLATE = [
   '[Desktop Entry]',
@@ -53,14 +53,14 @@ function setGuiAutostart(on, deps) {
     const file = guiFile();
     if (on) {
       let entry = GUI_AUTOSTART_TEMPLATE;
-      // Exec 必须指向**解析出的真实路径**：deb/rpm 把可执行装在 /usr/bin，
-      //   模板写死的 ~/.local/bin 会让「用安装包」的用户登录时 Exec 指向不存在的文件。
+      // Exec 必须指向解析出的真实路径：deb/rpm 把可执行装在 /usr/bin，模板写死的 ~/.local/bin
+      // 会让用安装包的用户登录时 Exec 指向不存在的文件。
       entry = entry.split('@HOME@').join(os.homedir());
       const guiBin = deps.guiCommand();
       const oldExec = os.homedir() + '/.local/bin/dsh-supervisor-gui';
       if (entry.includes(oldExec)) entry = entry.split(oldExec).join(guiBin);
-      // Desktop Entry 规范的 Exec 是**空格分词**的——路径含空格时必须引号界定；
-      //   值内双引号/反斜杠要转义，且**字面 % 必须写成 %%**（否则被当字段码，自启静默失效）。
+      // Desktop Entry 规范的 Exec 是空格分词的：路径含空格时必须引号界定；值内双引号/反斜杠要转义，
+      // 且字面 % 必须写成 %%（否则被当字段码，自启静默失效）。
       const execQuote = (p) => '"' + String(p)
         .replace(/\\/g, '\\\\')
         .replace(/"/g, '\\"')

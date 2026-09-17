@@ -1,8 +1,7 @@
 'use strict';
 
-// 账号 ↔ 实例生命周期（域：router / providers 叶子；从 proxy.js 抽出）。
-// 有状态协作经 provider 显式入参（与 probe.js/restart.js 同形），无隐式 this。
-// 覆盖：停止仲裁/停止补刀、健康等待、可用性判定、加账号。
+// 账号与实例生命周期（providers 叶子）。有状态协作经 provider 显式入参（与 probe.js/restart.js
+// 同形），无隐式 this。覆盖：停止仲裁/停止补刀、健康等待、可用性判定、加账号。
 
 const { INSTANCE_STATES } = require('../model');
 const pidlook = require('../../../platform/os/pidlookup');
@@ -18,7 +17,7 @@ function canStopInstance(provider, acc) {
   return true;
 }
 
-/** 实例停止（幂等）：在途/在用 → 标记待停（请求结束补刀/reconcile 补停）；force 跳过仲裁。 */
+/** 实例停止（幂等）：在途/在用 -> 标记待停（请求结束补刀/reconcile 补停）；force 跳过仲裁。 */
 function stopInstance(provider, inst, force) {
   if (!inst) return;
   const acc = provider.accounts.find((a) => a.keyId === inst.keyId) || null;
@@ -54,7 +53,7 @@ function stopInstance(provider, inst, force) {
   provider._persist();
 }
 
-/** 请求结束补刀：待停且已无在途 → 立即停（取代旧一次性 timer 的泄漏根因）。 */
+/** 请求结束补刀：待停且已无在途 -> 立即停（取代旧一次性 timer 的泄漏根因）。 */
 function retryPendingStop(provider, acc) {
   if (!acc || !acc._stopPendingUntilIdle) return;
   if ((acc.inflight || 0) > 0) return;
@@ -91,7 +90,7 @@ function isAccountUsable(provider, acc, opts) {
   return !provider._windowExhausted(acc);
 }
 
-/** 加账号：建实例 → 启动 → 探活 → 配额检测 → 统一 applyDetection 入库。 */
+/** 加账号：建实例、启动、探活、配额检测，最后经统一 applyDetection 入库。 */
 async function addAccount(provider, key, extra) {
   const existing = provider.accounts.find((a) => a.key === key);
   if (existing) return { ok: true, account: existing, already: true };
@@ -124,7 +123,7 @@ async function addAccount(provider, key, extra) {
   acc.quota = det.quota || null;
   inst.quota = det.quota || null;
   const summary = provider.accountQuotaSummary(acc);
-  // 统一入库：与 base 同一 applyDetection 状态机（受限 → frozen + limit + recovery；正常 → ready）
+  // 统一入库：与 base 同一 applyDetection 状态机（受限则 frozen + limit + recovery，正常则 ready）
   provider.applyDetection(acc, { ok: true, quota: det.quota || null });
   if (acc.status === 'frozen' && acc.instance && acc.instance.pid) { try { stopInstance(provider, acc.instance); } catch {} }
   if (acc.status === 'ready' && provider.events) provider.events.append('account_ready', { provider: provider.name, key: acc.maskedKey });

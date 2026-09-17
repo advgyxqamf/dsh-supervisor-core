@@ -1,25 +1,20 @@
 'use strict';
 
-// 局域网反向代理 server 本体：在 0.0.0.0:<wanPort> 监听，把 LAN 流量转发到
-// 127.0.0.1:<dshPort>，做回环呈现 + HTML polyfill 注入 + 断线保持；并暴露
-// setToken/setDshToken/hasToken/status 热更新与诊断面。
-// 设计要点：
-//  - DSH 本体保持只监听 127.0.0.1，不改动其任何源码/配置/插件（硬边界）；
-//  - 回环呈现：把 /api 与 WebSocket 升级请求的 Origin/Referer 改写为回环权威，
-//    使 DSH 的浏览器信任围栏将其视为本机流量；访问控制（令牌/来源闸）留在反代层；
-//  - 可选令牌门卫：配置 remoteToken 后，所有请求须携带 ?token= 或 Cookie（首次种 HttpOnly Cookie）；
-//  - DSH 会话桥：由 session.js 换取 dsh-auth-* 并注入 HTTP + WS，令牌轮换热更新。
+// 局域网反向代理 server 本体：在 0.0.0.0:<wanPort> 监听，把 LAN 流量转发到 127.0.0.1:<dshPort>，
+// 做回环呈现 + HTML polyfill 注入 + 断线保持，并暴露 setToken/setDshToken/hasToken/status 热更新面。
+// 硬边界：DSH 本体保持只监听 127.0.0.1，不改动其源码/配置/插件；把 Origin/Referer 改写为回环权威，
+// 使 DSH 信任围栏视为本机流量，访问控制（令牌/来源闸）留在反代层；session.js 换 dsh-auth-* 注入 HTTP/WS。
 
 const http = require('node:http');
 const { isTrustedSource, tokenGateDecision, POLYFILL_SCRIPT } = require('./core');
 const { createSession } = require('./session');
 const { createTunnelHandler } = require('./tunnel');
 
-/** 流式转发 + 断线保持（2026-09 修复：远程浏览器断开不应导致 DSH 取消 agent）。
+/** 流式转发 + 断线保持。
  *
- *  浏览器(res)断开时：不 destroy 上游(ur)——改为继续读丢弃，保持 DSH 侧连接存活：
- *  DSH 前端认为客户端仍在接收 → agent 不被取消；agent 完成后消息存 DSH 会话，
- *  浏览器重连拉历史即可见完整结果。保持模式**不设时限**，只等上游自然结束。
+ *  浏览器(res)断开时不 destroy 上游(ur)，改为继续读丢弃，保持 DSH 侧连接存活：DSH 前端认为客户端
+ *  仍在接收，agent 不被取消；agent 完成后消息存 DSH 会话，浏览器重连拉历史可见完整结果。
+ *  保持模式不设时限，只等上游自然结束。
  */
 function pipeWithHold(ur, res, clientReqPath, logger) {
   let clientGone = false;
@@ -105,7 +100,7 @@ function handleUpstream(ur, res, clientReqPath, onStatus, logger) {
  */
 function createRelay(targetHost, targetPort, opts) {
   const o = opts || {};
-  // ⚠ P1（2026-09-13）：必须是 **let** —— 门卫令牌需支持热更新（见 setToken）。
+  // 必须用 let：门卫令牌需经 setToken 热更新。
   let token = o.token || '';
   const logger = o.logger || null;
   const authority = targetHost + ':' + targetPort;
@@ -140,7 +135,7 @@ function createRelay(targetHost, targetPort, opts) {
       const upstream = http.request(
         { hostname: targetHost, port: targetPort, path: req.url, method: req.method, headers: buildForwardHeaders(req, authority, cookie) },
         (ur) => handleUpstream(ur, res, req.url, (status) => {
-          // 会话自愈：上游 401/403 且正注入 DSH cookie → 清 cookie，下次请求重换。
+          // 会话自愈：上游 401/403 时清 cookie，下次请求重换。
           if (status === 401 || status === 403) session.invalidate(status);
         }, logger)
       );

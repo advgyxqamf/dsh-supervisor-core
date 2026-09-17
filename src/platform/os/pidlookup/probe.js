@@ -1,11 +1,9 @@
 'use strict';
 
-// pidlookup/probe.js —— 平台进程探测（**IO 层**：/proc、lsof、netstat、ss、wmic）。
-//
-// - Linux：/proc/net/tcp* 收集 LISTEN inode → /proc/<pid>/fd 匹配；ss 兜底（异 pidns）。
-// - macOS：lsof -nP -iTCP:<port> -sTCP:LISTEN（同步，短超时）。
-// - Windows：netstat -ano 解析 LISTENING 行；cmdline 走 wmic → PowerShell CIM 回退。
-// 任一步失败返回 null，调用方自行降级。纯解析/归一化在 norm.js（本文件只做 IO + 编排）。
+// 平台进程探测（IO 层：/proc、lsof、netstat、ss、wmic）。
+// Linux 用 /proc/net/tcp* 收集 LISTEN inode 再匹配 /proc/<pid>/fd，ss 兜底（异 pidns）；
+// macOS 用 lsof；Windows 用 netstat -ano，cmdline 走 wmic 再到 PowerShell CIM 回退。
+// 任一步失败返回 null，调用方自行降级；纯解析/归一化在 norm.js。
 
 const fs = require('node:fs');
 const ex = require('../../util/exec');
@@ -57,10 +55,9 @@ function macFind(port) {
 }
 
 function winFind(port) {
-  // netstat -ano 解析 LISTENING 行。
-  // 2026-09-10 复盘：曾改 PowerShell Get-NetTCPConnection 优先以解 netstat 可见滞后，但 PowerShell
-  // 输出/执行不确定性使守卫「端口占用判定」（smoke.js S9）在 win runner 偶发失效——回退 netstat。
-  // relay 建连的可见滞后问题已由 relay/manager targetReachable(TCP 直连) 根治，此处不再承担该职责。
+  // netstat -ano 解析 LISTENING 行。曾改 PowerShell Get-NetTCPConnection 优先以解 netstat 可见
+  // 滞后，但 PowerShell 输出的不确定性使守卫端口占用判定在 win runner 偶发失效，故回退 netstat；
+  // relay 建连的可见滞后问题已由 targetReachable（TCP 直连）根治。
   try {
     // netstat 输出例：TCP  127.0.0.1:41000  0.0.0.0:0  LISTENING  12345
     const out = ex.runOut('netstat', ['-ano'], { timeoutMs: 3000 });
@@ -70,9 +67,8 @@ function winFind(port) {
   return null;
 }
 
-/** Linux 兜底：/proc fd 扫描在异 pidns 环境（容器/受限 /proc）看不到宿主进程时，
- *  用 ss（netlink，同 netns 可见宿主监听）解析 users:(…pid=NN…)——2026-09 实证：run_code 沙箱
- *  见得到 ss 的端口却 /proc 扫描不到宿主 daemon → findListeningPid 恒 null → 误判失联重复拉起。 */
+/** Linux 兜底：/proc fd 扫描在异 pidns（容器/受限 /proc）看不到宿主进程时，用 ss（netlink，
+ *  同 netns 可见宿主监听）解析 users 里的 pid —— 否则 findListeningPid 恒 null，误判失联重复拉起。 */
 function linuxFindSs(port) {
   // systemd user 环境 PATH 可能不含 /usr/sbin（ss 默认位置）——候选路径逐个试
   const candidates = ['ss', '/usr/sbin/ss', '/usr/bin/ss', '/bin/ss'];
@@ -92,10 +88,8 @@ function isAlive(pid) {
   catch (e) { return !!e && e.code === 'EPERM'; }
 }
 
-/** 读取进程命令行（三平台：Linux /proc / macOS ps / Windows wmic）。
- *  2026-09 审计修复：原实现非 Linux 返回 null → supervisor._isManagedProcess 在 win/mac 恒 false，
- *  接管既有实例/停止手动启动 DSH 的 cmdline 校验防线静默失效（既不能接管也不报错）。
- *  现补 mac/win 实现，使防线三端保留。 */
+/** 读取进程命令行（三平台：Linux /proc、macOS ps、Windows wmic）。原实现非 Linux 返回 null，
+ *  使 supervisor._isManagedProcess 在 win/mac 恒 false、接管既有实例的 cmdline 校验静默失效。 */
 function readCmdline(pid) {
   if (isLinux) {
     try {
@@ -113,22 +107,11 @@ function readCmdline(pid) {
   if (isWindows) {
     // wmic process where ProcessId=<pid> get CommandLine /value
     const out = ex.runOut('wmic', ['process', 'where', 'ProcessId=' + pid, 'get', 'CommandLine', '/value'], { timeoutMs: 5000 });
-    // ⚠ P1-2 修复（2026-09-12）：**wmic 取不到命令行时也必须走下方回退**。
-    //
-    //   缺陷：原实现 `return m ? m[1].trim() : null;` —— 只要 wmic **存在**
-    //     （Win10/11 出厂仍在，仅标记弃用）且退出码 0，即便输出是
-    //     `No Instance(s) Available.`（进程已退出/权限不足/名称不中），
-    //     正则不命中就**直接 return null** → 下方回退**永远不可达**；
-    //     而回退上方的注释恰好声称「wmic 失败或在新 Windows 已弃用：回退 PowerShell CIM」。
-    //
-    //   后果：`isDshCmdline` 恒 false → `_isManagedProcess` 恒 false →
-    //     Windows 上**既不能接管手动启动的 DSH、也不给出任何错误**（与「三端保留防线」的声明相反）。
-    //
-    //   修法：wmic 仅在**确实解析出非空命令行**时返回；否则继续走回退。
+    // P1-2：wmic 取不到命令行时必须继续走下方回退。原实现在正则不命中时直接 return null，
+    // 使回退永远不可达，isDshCmdline 恒 false，Windows 上既不能接管手动启动的 DSH 也不报错。
+    // 修法：仅在确实解析出非空命令行时返回，否则继续 PowerShell CIM 回退（缺失/无输出/解析不中同此）。
     const viaWmic = parseWmicCommandLine(out);
     if (viaWmic) return viaWmic;
-    // 落空 → 继续尝试回退（不再直接 return null）——由 parseWmicCommandLine 返回 null 表达
-    // wmic 缺失/不可用/无输出/解析不中：回退 PowerShell CIM
     {
       const ps = "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + pid + "').CommandLine";
       const o = ex.runOut('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { timeoutMs: 5000 });

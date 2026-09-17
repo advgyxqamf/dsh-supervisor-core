@@ -1,14 +1,10 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 作业服务（域：plugin / jobs，纯状态）
-//
-// F7：作业表（保留上限 50）+ 作用域互斥队列 + 状态视图 + 统一任务注册表桥接。
-//   · createJobs({ tasks }) —— 有状态服务，tasks 经 ctor 注入。
-//   · 本文件**零出边指向 ops/updater/index**（只依赖 model）→ ops ↔ jobs 双向环在此断链。
-//   ⚠ 互斥语义逐字保留（round13 依赖「异常不吞、调用方 .then 继续推进」）：
-//     prev.then(fn, fn) + _scopeQueues[id] = run.catch(()=>{}) + 返回 run.catch(e=>({ok:false,error}))
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域作业服务（有状态，零出边指向 ops/updater/index，只依赖 model）。
+// 作业表（保留上限 50）+ 作用域互斥队列 + 状态视图 + 统一任务注册表桥接；
+// tasks 经 ctor 注入。
+// 互斥语义须逐字保持（异常不吞、调用方 .then 继续推进）：
+//   prev.then(fn, fn) + 续链 run.catch(()=>{}) + 返回 run.catch(e=>({ok:false,error}))
 
 const { createJobRecord, finishJobRecord, planJobCleanup, taskStateToJobState } = require('./model');
 
@@ -72,7 +68,7 @@ function createJobs({ tasks }) {
     return job || { error: 'job not found' };
   };
 
-  return { _jobs, _scopeQueues, withScopeLock, cleanupJobs, createJob, finishJob, installStatus };
+  return { _jobs, _scopeQueues, withScopeLock, createJob, finishJob, installStatus };
 }
 
 module.exports = { createJobs };

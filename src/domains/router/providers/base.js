@@ -1,11 +1,11 @@
 'use strict';
 
 // 供应商基座：抽象契约（B1）+ 账号池（B5）+ 检测应用（B7）。
-// 状态前置原则：添加账号必须启动检测（拿配额）→ 检测结果直接入库（与运行中同机）：
-//   受限 → frozen + limit + recovery，恢复全自动；正常 → ready。一账号一实例（按 key 去重）。
+// 状态前置原则：添加账号必须启动检测（拿配额），检测结果直接入库并与运行中同一状态机：
+//   受限则 frozen + limit + recovery（恢复全自动），正常则 ready。一账号一实例（按 key 去重）。
 // 纯策略在 model.js / policies/*，落盘经 store.js；本文件只做契约与账号池编排。
 
-require('../port-segments'); // DS-G4 §4.2：本域端口段/独立池申报（require 即注入）
+require('../port-segments'); // 本域端口段/独立池申报（require 即注入）
 const { keyFingerprint, maskKey, accountModel, serializeProvider, PROVIDER_PRESETS } = require('./model');
 const { AccountStore } = require('./store');
 const quota = require('./policies/quota');
@@ -33,7 +33,7 @@ class ProviderBase {
     this.activated = o.activated === true;
   }
 
-  /** 当前「实际在用/应高亮」账号 keyId：① 持久化锁定（若可用/在用）② 自动在用 activeAccount。 */
+  /** 当前「实际在用/应高亮」账号 keyId：优先持久化锁定（若可用/在用），否则自动在用 activeAccount。 */
   selectedKeyId() {
     const locked = this.selectedAccountKeyId
       ? (this.accounts || []).find((a) => a.keyId === this.selectedAccountKeyId)
@@ -48,7 +48,7 @@ class ProviderBase {
   async detectAccount(acc) {
     throw new Error('detectAccount must be implemented by subclass');
   }
-  // ─ 能力契约声明（PROVIDER-GATEWAY-ARCHITECTURE §5.2 / PG-1）──
+  // 能力契约声明（PG-1）
   /** 本 provider 是否具备某项能力；缺省为无 process 能力（最保守）。 */
   supports(_cap) { return false; }
   // process-pool 能力面的契约占位（默认抛错，避免被误当 no-op 使用）
@@ -81,7 +81,7 @@ class ProviderBase {
     }
     acc.quota = det.quota || null;
     const summary = this.accountQuotaSummary(acc);
-    // 入库即如实、且与运行中完全同一台状态机：受限 → frozen + limit + recovery；正常 → ready。
+    // 入库即如实、且与运行中同一状态机：受限则 frozen + limit + recovery，正常则 ready。
     this.applyDetection(acc, { ok: true, quota: det.quota || null });
     if (acc.status === 'ready' && this.events) this.events.append('account_ready', { provider: this.name, key: acc.maskedKey });
     const limited = (acc.limit && acc.limit.kind) || null;
@@ -92,7 +92,7 @@ class ProviderBase {
     const idx = this.accounts.findIndex((a) => a.keyId === keyId);
     if (idx < 0) return { ok: false, error: '账号不存在' };
     const acc = this.accounts[idx];
-    // 实例/端口清理属 process-pool 子类：经 ctor 注入的钩子执行（打破 base→proxy 反向边）
+    // 实例/端口清理属 process-pool 子类：经 ctor 注入的钩子执行（打破 base 到 proxy 的反向边）
     if (this._hooks && typeof this._hooks.onDiscardAccount === 'function') {
       try { this._hooks.onDiscardAccount(acc); } catch {}
     }
@@ -105,7 +105,7 @@ class ProviderBase {
   /** credits 受限判定（单源纯函数；可被覆写）。 */
   _isCreditsLow(acc) { return quota.isQuotaCreditsLow(acc && acc.quota); }
 
-  /** 上游响应 → signal（供应商可覆写识别专属错误码；router 不内置词表）。 */
+  /** 上游响应转为 signal（供应商可覆写识别专属错误码；router 不内置词表）。 */
   classifyResponse(status, headers, bodyText) {
     return quota.classifyUpstreamLimited(status, bodyText);
   }
@@ -133,7 +133,7 @@ class ProviderBase {
     return !this._windowExhausted(acc);
   }
 
-  // ── 冻结/恢复策略（policies/freeze.js）──
+  // 冻结/恢复策略（policies/freeze.js）
   _setStatus(acc, status, nextResetAt, error, autoRecover) { return freeze.setStatus(acc, status, nextResetAt, error, autoRecover, this); }
   _ensureLimit(acc) { return freeze.ensureLimit(acc); }
   _setLimit(acc, kind, reason, recovery) { return freeze.setLimit(acc, kind, reason, recovery, this); }
@@ -146,7 +146,7 @@ class ProviderBase {
   _reconcileLock() { return freeze.reconcileLock(this); }
   _nextResetAt(q) { return quota.nextResetAt(q); }
 
-  // ── 账号使用状态（纯派生，不持久化）──
+  // 账号使用状态（纯派生，不持久化）
   markInUse(keyId) {
     const acc = (this.accounts || []).find((a) => a.keyId === keyId);
     if (!acc) return;

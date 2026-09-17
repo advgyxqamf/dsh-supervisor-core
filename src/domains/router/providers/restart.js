@@ -1,15 +1,15 @@
 'use strict';
 
 // 重启编排（B13）+ 实例对账编排 —— IO 编排，经 provider 显式入参（零 this 跨文件）。
-// 从 proxy.js 抽出：重启后的「kill → 延迟 → 拉起 → 探活」重拉段、以及 reconcile 单飞回路。
-// ⚠ 在途延后/退避/停进程（restartInstance 主体）仍留在 proxy.js —— 那部分被源码门禁钉住。
+// 从 proxy.js 抽出：重启后的「kill -> 延迟 -> 拉起 -> 探活」重拉段、以及 reconcile 单飞回路。
+// 注意 在途延后/退避/停进程（restartInstance 主体）仍留在 proxy.js —— 那部分被源码门禁钉住。
 
 const { INSTANCE_STATES } = require('../model');
 
 /** 实例回收闲置宽限期（ms）：非期望集实例若在宽限期内被使用过，本轮不回收。 */
 const IDLE_RECLAIM_GRACE_MS = 90 * 1000;
 
-/** 重启重拉编排：kill 后短延迟（端口释放）→ 拉起 → 探活。
+/** 重启重拉编排：kill 后短延迟（端口释放）-> 拉起 -> 探活。
  *  @param deps { startInstance, waitHealthy, isAlive, logger, isStopping } */
 function createRestartOrchestrator(deps) {
   const d = deps || {};
@@ -114,4 +114,4 @@ function reconcileNow(provider) {
   reconcileInstances(provider, { stop: false }).catch(() => {});
 }
 
-module.exports = { createRestartOrchestrator, prewarmAsync, runReconcile, reconcileInstances, reconcileNow, IDLE_RECLAIM_GRACE_MS };
+module.exports = { createRestartOrchestrator, prewarmAsync, runReconcile, reconcileInstances, reconcileNow };

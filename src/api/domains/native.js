@@ -26,7 +26,7 @@ function handle(ctx) {
       collectBody(req, res, 1024, (body) => {
         let version = null;
         try { const j = body ? JSON.parse(body) : {}; if (typeof j.version === 'string' && j.version) version = j.version; } catch {}
-        // 异步任务模式：同步前置检查拒绝 → 400；通过 → 202，进度经 /native/status 轮询（前端不再真空）
+        // 异步任务模式：同步前置检查拒绝返回 400；通过返回 202，进度经 /native/status 轮询（前端不再真空）
         const r = sup.nativeManager.startInstall(version);
         if (r && r.ok === false) return send(400, r);
         return send(202, { ok: true, accepted: true, state: 'installing' });
@@ -48,13 +48,13 @@ function handle(ctx) {
     }
     if (req.method === 'POST' && pathname === '/native/uninstall') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
-      // 异步任务模式：同步前置检查拒绝 → 400；通过 → 202，进度经 /native/status 轮询
+      // 异步任务模式：同步前置检查拒绝返回 400；通过返回 202，进度经 /native/status 轮询
       const r = sup.nativeManager.startUninstall();
       if (r && r.ok === false) return send(400, r);
       return send(202, { ok: true, accepted: true, state: 'uninstalling' });
     }
-    // ── 原生主干(main)设置（概念清分 2026-09-06）：main 的设置不再经 /instances（沙箱域）；
-    //    统一走本主干入口。白名单：guardian(守护自动拉起) / remoteEnabled(远程控制) / frp。
+    // 原生主干(main)设置：main 的设置不经 /instances（沙箱域），统一走本入口。
+    // 白名单：guardian(守护自动拉起) / remoteEnabled(远程控制) / frp。
     if (req.method === 'POST' && pathname === '/native/settings') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, { ok: false, error: 'cross-origin request rejected' }); }
       collectBody(req, res, 4096, (body) => {
@@ -69,7 +69,7 @@ function handle(ctx) {
       });
       return;
     }
-  // 域内未匹配(方法/子路径) → 全局兜底语义(与单文件时代一致)
+  // 域内未匹配(方法/子路径)：全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });
 }

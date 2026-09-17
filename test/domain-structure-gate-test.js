@@ -6,7 +6,7 @@
 //
 // ## 锁定的不变量（DG-1..DG-16，逐条见 SSOT §9）
 //   DG-1  域门面 index.js ≤150 行且去注释源码无业务逻辑关键词      （DF-1 / R3）
-//   DG-2  任何 src/**/*.js ≤400 行                                   （DF-2 / R3）
+//   DG-2  任何 src/**/*.js ≤300 行                                   （DF-2 / R3）
 //   DG-3  contract.pure 声明的纯文件零 IO require                    （DF-3）
 //   DG-4  域内跨文件 this.X() = 0（剔关键字 + 契约豁免 + 抽象占位）  （DF-4）
 //   DG-4b 豁免项必须在 contract.js 有出处（防豁免表腐化）

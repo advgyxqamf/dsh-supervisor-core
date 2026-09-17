@@ -12,7 +12,7 @@ function read(host) {
   try { return JSON.parse(fs.readFileSync(host.manifestFile, 'utf8')); } catch { return null; }
 }
 
-/** 原子写安装清单（.tmp → rename），mode 0600；失败不致命（仅告警）。 */
+/** 原子写安装清单（.tmp -> rename），mode 0600；失败不致命（仅告警）。 */
 function save(host, m) {
   try {
     fs.mkdirSync(host.stateDir, { recursive: true });
@@ -24,7 +24,7 @@ function save(host, m) {
   } catch (e) { host.logger.warn && host.logger.warn('manifest 保存失败: ' + e.message); }
 }
 
-/** 记录安装清单。dataPaths 未显式传 → 继承既有认领（首装认领不因升级丢失）。
+/** 记录安装清单。dataPaths 未显式传则继承既有认领（首装认领不因升级丢失）。
  *  @param {string} version
  *  @param {string[]|undefined} dataPaths 卸载时删除的数据路径（默认继承既有认领）
  *  @param {string|null} npmRoot npm 全局根（由调用方解析，测试可注入） */
@@ -48,7 +48,7 @@ function record(host, version, dataPaths, npmRoot) {
 }
 
 /** 卸载时可连带删除的数据路径（仅当本 supervisor 是干净 ~/.dsh 的首装者才认领）。
- *  ~/.dsh 已有任一用户数据（sessions/storages/profiles/settings/.credentials）→ 不认领。 */
+ *  ~/.dsh 已有任一用户数据（sessions/storages/profiles/settings/.credentials）则不认领。 */
 function claimDataPaths(host) {
   const paths = [
     path.join(host.dshHome, 'sessions'),

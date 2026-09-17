@@ -1,18 +1,13 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 生命周期管理器（LifecycleManager）—— 归一化架构核心（2026-09 用户定稿）。
+// 生命周期管理器（LifecycleManager）—— 归一化架构核心。
 //
-// 定位：DSHSUP 全部模块生命周期的唯一注册表与统一入口。
-//   - 守卫（supervisor）持有一个 LifecycleManager；
-//   - 每个模块（DSH/实例/智能路由/反代实例/远程控制/插件）注册为 ManagedLifecycle；
-//   - 所有启停走统一接口：manager.start('dsh') / manager.stop('router') ……
-//     模块不再各自对前端出启停 API；
+// 定位：全部模块生命周期的唯一注册表与统一入口。
+//   - 守卫持有一个 LifecycleManager，每个模块注册为 ManagedLifecycle；
+//   - 所有启停走统一接口 manager.start/stop/restart，模块不再各自对前端出启停 API；
 //   - 守卫重启只重置本管理器的观测状态，绝不停/杀被管模块（stop 仅在显式请求时执行）；
-//   - 周期拉起由守卫 supervisor 的 _daemonSuperviseOnce('router'|'lan')（经 ManagedRegistry adapter 驱动）
-//     与实例 watchdog/guardian 承担；LifecycleManager 只收敛「统一启停 + 状态视图」——
-//     2026-09 债务清理：遗留且从未接线的 monitor 三件套（startMonitoring/monitorOnce 等）已删除。
-// ═══════════════════════════════════════════════════════════════════════════
+//   - 周期拉起由守卫 daemon 监督与实例 watchdog/guardian 承担；本管理器只收敛
+//     「统一启停 + 状态视图」，不内置探活。
 
 const { ManagedLifecycle } = require('./entry');
 
@@ -23,7 +18,7 @@ class LifecycleManager {
     this.registrations = new Map(); // id -> ManagedLifecycle
   }
 
-  /* ── 注册 ── */
+  /* 注册 */
   register(lc) {
     if (!(lc instanceof ManagedLifecycle)) throw new Error('register 需要 ManagedLifecycle 实例');
     this.registrations.set(lc.id, lc);
@@ -40,14 +35,14 @@ class LifecycleManager {
 
   all() { return [...this.registrations.values()]; }
 
-  /* ── 统一启停（外部唯一入口）── */
+  /* 统一启停（外部唯一入口） */
 
   /** 启动模块并纳入监测（desired=running）。 */
   async start(id) {
     const lc = this.registrations.get(id);
     if (!lc) return { ok: false, error: '未注册模块: ' + id };
-    // B1 能力执法：声明不可启停的模块（如 plugin 聚合）显式拒绝——
-    // 原实现会走到 no-op 回调并返回 {ok:true}，用户以为成功了（假成功）。
+    // 能力执法：声明不可启停的模块（如 plugin 聚合）显式拒绝——
+    // 否则会走到 no-op 回调并返回 {ok:true}，用户以为成功了（假成功）。
     if (lc.startable === false) return { ok: false, error: '模块不可启停（' + lc.kind + ':' + lc.id + '）' };
     // dsh 由守卫恒监管（internal 状态机）：start 只是申报运行意图，不翻转纳管位
     if (id !== 'dsh') lc._monitoring = true;
@@ -74,8 +69,8 @@ class LifecycleManager {
     const lc = this.registrations.get(id);
     if (!lc) return { ok: false, error: '未注册模块: ' + id };
     if (lc.startable === false) return { ok: false, error: '模块不可启停（' + lc.kind + ':' + lc.id + '）' }; // B1 执法
-    // 委托 lc.restart(): ManagedLifecycle 内 _restart 回调优先(如 dsh→requestRestart 真重启
-    // 停旧拉新), 无回调才退化为 stop→start(通用模块)。
+    // 委托 lc.restart()：ManagedLifecycle 内 _restart 回调优先（如 dsh 经 requestRestart
+    // 停旧拉新），无回调才退化为 stop -> start（通用模块）。
     if (typeof lc.restart === 'function') {
       const r = await lc.restart();
       return { ok: r.ok !== false, error: r.error, ...lc.snapshot() };
@@ -97,7 +92,7 @@ class LifecycleManager {
 
   /**
    * 守卫 shutdown：停全部 monitoring 的模块。
-   * 契约（RC2）：本管理器**不内置** dsh 特例——stopAll 会停掉所有纳管/期望运行项。
+   * 契约（RC2）：本管理器不内置 dsh 特例——stopAll 会停掉所有纳管/期望运行项。
    * 「守卫退出不动 DSH」由调用方以 exclude:['dsh'] 保证（见 supervisor.js 的 stopAll 调用）。
    * @param {object} opts { exclude?: string[] } 额外豁免的模块 id（如独立 daemon 型 router）
    */

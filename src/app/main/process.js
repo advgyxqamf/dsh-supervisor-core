@@ -1,14 +1,10 @@
 'use strict';
 
-// §7（步骤 7）拆分：app/main/process.js —— 主进程生命周期（spawn/接管/端口再推导/重启/停止）。
-// 逐字搬迁自 src/app/main/main-process.js（原型 mixin），仅做两件事：
-//   1) 导出形态规范化：Object.getOwnPropertyDescriptors(X.prototype) → { methods: { ... } }（契约 §2）；
-//   2) 方法体与注释逐字未改（含缩进）；方法内部继续以 this 协作（契约 §2：本步不做 ctor 注入）。
-// 装配：app/assembly/compose.js 以 Object.assign(host, mod.methods) 注入（DS-G3）。
+// app/main/process.js —— 主进程生命周期（spawn/接管/重启/停止）。
+// 导出形态 { methods }；装配：app/assembly/facets.js 装到 host 实例；方法内部以 this 协作。
 const spawnOS = require('../../platform/os/spawn');
 const pidlook = require('../../platform/os/pidlookup');
 const { LineBuffer } = require('../../platform/service/log/log');
-const platform = require('../../platform/os/index');
 const native = require('../../app/native/command');
 // DF-2/DF-3（R3 严值）：端口运行时再推导已拆到 main/port-rederive.js（独立切面）。
 const { findManagedDshPort, applyMainPort } = require('./port-rederive');
@@ -21,9 +17,9 @@ module.exports = {
 
   // ---- 生命周期动作 ----
   async _startProcess() {
-    this.main.actNote('start', 'spawn'); // C3-3b G1 影子 actual 记账
+    this.main.actNote('start', 'spawn'); // 影子 actual 记账
     this._crashHalted = false; // 主动拉起 = 清除崩溃停靠（进入运行流程）
-    // 前置条件：原生 DSH 必须已安装才尝试启动。未安装 → 进入「未安装」状态：
+    // 前置条件：原生 DSH 必须已安装才尝试启动。未安装则进入「未安装」状态：
     // 不启动、不重试、不计数崩溃；一次性通知引导安装（与"启动失败"严格区分）。
     const nst = this.nativeManager ? this.nativeManager.status() : { installed: true };
     if (!nst.installed) {
@@ -43,9 +39,9 @@ module.exports = {
     let child;
     try {
       // detached：独立进程组，便于按组发信号（DSH 派生的子进程一并收到）。
-      // 插件 --patch 覆盖层由 spawnCommand()/native.nativeCommand() 统一附加（顶层位置），此处不再重复拼接。
-      // stdio 必须保持 ['ignore','pipe','pipe']（W-3：下方要读 stdout 里的令牌），故用 piped 而非 detached；
-      // 进程组语义经 opts.detached:true 保持（W-2）。
+      // 插件 --patch 覆盖层由 spawnCommand()/native.nativeCommand() 统一附加（顶层位置），此处不再拼接。
+      // stdio 必须保持 ['ignore','pipe','pipe']（下方要读 stdout 里的令牌），故用 piped 而非 detached；
+      // 进程组语义经 opts.detached:true 保持。
       child = spawnOS.piped(cmd, args, { env: process.env, detached: true });
     } catch (err) {
       this.events.append('spawn_failed', { message: err.message });
@@ -67,8 +63,7 @@ module.exports = {
 
       const clean = sanitizeToken(line);
       this.dshWriter.write(clean);
-      // 实时镜像同样走脱敏后的完整行——dsh-supervisor 单元 journald 不再残留 token 明文
-      // （原 raw chunk 镜像会把 ?token= 明文写进 journald）
+      // 实时镜像同样走脱敏后的完整行，dsh-supervisor 单元 journald 不再残留 token 明文。
       process.stdout.write('[dsh] ' + clean + '\n');
     });
     const errBuf = new LineBuffer((line) => {
@@ -124,7 +119,7 @@ module.exports = {
   },
 
   _enterRunning() {
-    this.main.actNote('enterRunning', 'healthy'); // C3-3b G1 影子 actual 记账
+    this.main.actNote('enterRunning', 'healthy'); // 影子 actual 记账
     const wasRunning = this.state.phase() === 'RUNNING';
     this.state.setPhase('RUNNING');
     this._mSetAdopted(false);
@@ -150,7 +145,7 @@ module.exports = {
 
   /** 期望停止下发现无主健康实例：仅观测（拿 pid、如实展示），不强杀不拉起。 */
   _adoptObserved() {
-    this.main.actNote('adoptObserved', 'observe'); // C3-3b G1 影子 actual 记账
+    this.main.actNote('adoptObserved', 'observe'); // 影子 actual 记账
     this.state.setPhase('OBSERVED');
     this._mSetAdopted(true);
     this._mSetObservedOnly(true);
@@ -170,7 +165,7 @@ module.exports = {
   },
 
   _adopt() {
-    this.main.actNote('adopt', 'adopt'); // C3-3b G1 影子 actual 记账
+    this.main.actNote('adopt', 'adopt'); // 影子 actual 记账
     this.state.setPhase('RUNNING');
     this._mSetAdopted(true);
     this._mSetObservedOnly(false);
@@ -180,8 +175,8 @@ module.exports = {
     this._mSetBackoffUntil(null);
     // 发现接管目标的 pid：使 stop/升级/存活观测对既有实例同样生效
     this._mSetAdoptPid(pidlook.findListeningPid(this.config.targetPort));
-    // 原生 DSH 端口可被用户改动（config 默认只是默认）→ 配置端口无监听时，从受管 DSH 进程
-    // 推导真实端口并更正注册（2026-09 架构补齐），再以其 pid 接管。
+    // 原生 DSH 端口可被用户改动（config 默认只是默认），配置端口无监听时从受管 DSH 进程
+    // 推导真实端口并更正注册，再以其 pid 接管。
     if (this._mAdoptPid() === null) {
       const found = findManagedDshPort(this.config);
       if (found && found.port && found.port !== this.config.targetPort) {
@@ -212,8 +207,8 @@ module.exports = {
     this._mSetLastRestartAt(new Date().toISOString());
     this.events.append('restart_triggered', { reason });
     this.logger.warn('restart triggered: ' + reason);
-    // 实例重启 = DSH 启动令牌轮换：清空已捕获令牌，使进入运行后统一令牌服务重新捕获新令牌
-    // （旧令牌随旧进程失效，relay 若继续持有只会换取失败；先清空避免「新旧令牌混淆」）
+    // 实例重启 = DSH 启动令牌轮换：清空已捕获令牌，进入运行后统一令牌服务重新捕获新令牌。
+    // 旧令牌随旧进程失效，relay 若继续持有只会换取失败；先清空避免新旧令牌混淆。
     this.tokenService.clear('main');
     if (countCrash) {
       this._mSetRestartCount(this._mRestartCount() + 1);
@@ -224,18 +219,18 @@ module.exports = {
     this._mSetRestartAt(Date.now() + this.config.portReleaseWaitMs);
     const child = this._mChild();
     if (child && child.exitCode === null) this.main.killSequence(child);
-    // 重启前停掉仍运行中的目标，保证 RESTARTING → 重拉路径畅通：
-    //  - spawn 托管下被接管的存活实例（如假死触发 http_unhealthy 时进程还活着）→ 杀其 pid；
-    //  （adopted_exit 场景 adopted 已死，此处 isAlive 为 false 自然跳过，不误杀。）
+    // 重启前停掉仍运行中的目标，保证 RESTARTING 到重拉路径畅通：
+    //  spawn 托管下被接管的存活实例（如假死触发 http_unhealthy 时进程还活着）杀其 pid；
+    //  adopted_exit 场景 adopted 已死，此处 isAlive 为 false 自然跳过，不误杀。
     if (this._mAdoptPid() && pidlook.isAlive(this._mAdoptPid())) {
       try { this.main.killAdopted(this._mAdoptPid()); } catch (e) { this.logger.warn('adopt kill during restart: ' + e.message); }
     }
-    this.main.actNote('restart', reason); // C3-3b G1 影子 actual 记账（bump 退避记账不改变 restart 动作）
+    this.main.actNote('restart', reason); // 影子 actual 记账（退避记账不改变 restart 动作）
     this.state.write();
   },
 
   stopProcess(reason) {
-    this.main.actNote('stop', reason); // C3-3b G1 影子 actual 记账
+    this.main.actNote('stop', reason); // 影子 actual 记账
     this.events.append('stop', { reason });
     this.logger.info('stop: ' + reason);
     const child = this._mChild();

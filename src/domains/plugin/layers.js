@@ -1,16 +1,10 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 补丁层写 / 串行队列 / 残留 scrub（域：plugin / layers，写）
-//
-// F6：本插件行「只增/只删 disabled 行」的读改写；卸载残留 scrub；两层共用一条
-//     串行队列（防并发 read→write 丢失更新）。原子写（tmp+rename+0600）。
-//   · createLayers({ overlayFile, logger }) —— 有状态写服务（队列），经 ctor 注入。
-//   · applyBundleEnabled(ctx, ...) —— 启用/禁用（热应用，不重启）。
-//   · scrubPluginLayers(ctx, ...) —— 卸载残留清理（与 applyBundleEnabled 共用队列）。
-//   ⚠ 队列纪律（round13 门禁）：单次异常**不得永久毒化**队列；续链吞 rejection，
-//     返回给调用方的 run 保留 rejection 并如实记日志（文案不变）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 插件域补丁层写 / 串行队列 / 残留 scrub（有状态写服务）。
+// 插件行「只增/只删 disabled 行」的读改写；卸载残留 scrub；启用与 scrub 共用同一条
+// 串行队列，防并发 read->write 丢失更新；写盘用 tmp+rename+0600 原子写。
+// 队列纪律：单次异常不得永久毒化队列；续链吞 rejection，返回给调用方的 run 保留
+// rejection 并如实记日志（文案不变）。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -23,7 +17,7 @@ function createLayers({ overlayFile, logger }) {
   /** 补丁层写唯一入队点：续链吞 rejection（仅续链），返回的 run 保留 rejection。 */
   const enqueue = (tag, fn) => {
     const run = queue.then(fn);
-    // 链尾吞掉 rejection（仅用于**续链**，不影响下面 return 给调用方的 run）。
+    // 链尾吞 rejection 仅用于续链，不影响返回给调用方的 run。
     queue = run.catch(() => {});
     return run.catch((e) => {
       const msg = (e && e.message) || String(e);
@@ -42,8 +36,7 @@ function createLayers({ overlayFile, logger }) {
     profile.dsh = profile.dsh || {};
     profile.dsh.profile = profile.dsh.profile || {};
     profile.dsh.profile.bundles = nextBundles;
-    // 原子写（tmp+rename + 0600）：裸 writeFileSync 在并发/中断下可能撕裂 package.json，
-    // 且默认 umask 下可能世界可读。与 writeHomePatch 同款模式（2026-09 审计修复）。
+    // 原子写(tmp+rename+0600)：裸 writeFileSync 在并发/中断下可能撕裂 package.json，且默认 umask 可能世界可读。
     const tmp = profilePath + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(profile, null, 2) + '\n', { mode: 0o600 });
     fs.renameSync(tmp, profilePath);
@@ -73,7 +66,7 @@ function createLayers({ overlayFile, logger }) {
     const log = (m) => { try { if (typeof onLog === 'function') onLog(m); } catch {} };
     const findings = { cleaned: [], warnings: [] };
     try {
-      // 1) home 补丁层（我们管理，JSON）：移除指向该插件的行
+      // 1) home 补丁层（本域管理，JSON）：移除指向该插件的行
       const hp = readHomePatch(target);
       if (hp.ok) {
         const before = hp.entries.length;
@@ -147,9 +140,6 @@ function createLayers({ overlayFile, logger }) {
     return findings;
   };
 
-  /** 卸载残留清理：与 applyBundleEnabled 共用串行队列。 */
-  const scrubPluginLayers = (ctx, target, name, onLog) => enqueue('scrub', () => scrubPluginLayersInner(ctx, target, name, onLog));
-
   /** 启用/禁用（写 home 补丁层 + 清 legacy overlay；热应用，不重启）。 */
   const applyBundleEnabled = async (ctx, name, on, targetStr) => {
     if (isProtectedName(name)) return { ok: false, error: '内置组件不可变更' };
@@ -179,11 +169,11 @@ function createLayers({ overlayFile, logger }) {
         continue;
       }
       let changed = false;
-      // 补丁行只增/只删「本插件的 disabled 行」，绝不整删本插件 id 的所有行——
-      // home 补丁层可能含 insert/include 型或用户手写的非 disabled 行（见 scrubPluginLayers 对 insert 行的
-      // 谨慎处理），一刀切 filter 会静默丢弃这些行（2026-09 架构审计 Blocker 级缺陷修复）。
+      // 补丁行只增/只删本插件的 disabled 行，绝不整删本插件 id 的所有行——
+      // home 补丁层可能含 insert/include 型或用户手写的非 disabled 行，
+      // 一刀切 filter 会静默丢弃这些行。
       if (!on) {
-        // 禁用：本插件的既有行统一置 disabled（保留行身份/其它字段），缺失则追加 disabled 行
+        // 禁用：既有行统一置 disabled（保留行身份/其它字段），缺失则追加 disabled 行
         const before = JSON.stringify(hp.entries);
         const next = hp.entries.map((e) => (isOwnRow(e, ids) ? { ...e, disabled: true } : e));
         for (const id of ids) if (!next.some((e) => e.id === id)) next.push({ id, disabled: true });
@@ -221,12 +211,10 @@ function createLayers({ overlayFile, logger }) {
   };
 
   return {
-    get _bundleOpQueue() { return queue; },
     enqueue,
     removeFromProfileBundles,
     writeHomePatch,
     saveOverlayEntries,
-    scrubPluginLayers,
     scrubPluginLayersInner,
     applyBundleEnabled,
   };

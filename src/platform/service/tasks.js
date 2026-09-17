@@ -1,12 +1,9 @@
 'use strict';
 
-// 统一安装/更新任务注册表（Task Registry）。
-// 收敛系统内全部「安装 / 升级 / 卸载 / 更新」操作到同一个任务模型：
-//  - 统一状态机：pending → running → succeeded|failed|skipped|canceled
-//  - 明确状态：任何时刻任务都有可观测状态 + step 级进度 + 有界日志
-//  - 持久化历史：<产品状态根>/supervisor/tasks.json（见 platform/service/state-root.js），守卫重启后仍可查看
-//  - 各业务模块（native/instance/plugin/router）只保留执行逻辑，
-//    任务生命周期统一交给本注册表。
+// 统一安装/更新任务注册表（Task Registry）：收敛系统内全部安装/升级/卸载/更新操作到同一任务模型。
+// 统一状态机 pending -> running -> succeeded|failed|skipped|canceled；任何时刻有可观测状态 + step 级进度
+// + 有界日志；持久化到 <产品状态根>/supervisor/tasks.json，守卫重启后仍可查看。
+// 各业务模块只保留执行逻辑，任务生命周期统一交给本注册表。
 
 const path = require('node:path');
 const taskStore = require('./task-store');
@@ -23,7 +20,7 @@ function taskId() {
 class TaskRegistry {
   /**
    * @param {object} opts
-   *   - stateDir: 状态目录（默认 <产品状态根>/supervisor，见 platform/service/state-root.js），tasks.json 落于此
+   *   - stateDir: 状态目录，tasks.json 落于此（见 platform/service/state-root.js）
    *   - logger: 可选日志器
    *   - events: 可选事件总线（append('task_created'|'task_state'|...)）
    */
@@ -45,8 +42,7 @@ class TaskRegistry {
     if (this.events && this.events.append) { try { this.events.append(type, data); } catch {} }
   }
 
-  /* ═══════ 持久化 ═══════ */
-  /* ═══════ 持久化 ═══════ */
+  /* 持久化 */
   _load() {
     const loaded = taskStore.loadTasks(this.file, (t) => this._log('warn', 'recovered interrupted task ' + t.id + ' as failed'));
     if (loaded) this.tasks = loaded;
@@ -65,7 +61,7 @@ class TaskRegistry {
     }
   }
 
-  /* ═══════ 任务创建与查询 ═══════ */
+  /* 任务创建与查询 */
   /**
    * 创建任务。
    * @param {string} kind    'native' | 'instance' | 'plugin' | 'proxy-app'
@@ -103,10 +99,9 @@ class TaskRegistry {
   }
 
   /**
-   * 统一作业执行器（RC4）：提供 begin→start→fn→succeed/fail 的封装（作业体异常自动落 failed）。
-   * 内建契约——begin→start→fn 执行→（成功 succeed / 异常自动 fail）；
-   * finally 清 _current 索引。作业 fn 内的任何异常都不再逃逸为
-   * unhandledRejection / 任务永久 running（审计 P2-2：实例升级 IIFE 锁死）。
+   * 统一作业执行器：提供 begin->start->fn->succeed/fail 的封装（作业体异常自动落 failed）。
+   *  内建契约：finally 清 _current 索引；fn 内的任何异常都不再逃逸为 unhandledRejection /
+   *  任务永久 running。
    * @param {string} kind 任务类别（instance|native|plugin|router|dist）
    * @param {string} targetId 目标 id
    * @param {string} action 动作名（install|upgrade|uninstall|...）
@@ -174,7 +169,7 @@ class TaskRegistry {
     return this.tasks.filter((t) => t.state === 'running' || t.state === 'pending');
   }
 
-  /* ═══════ 任务推进 ═══════ */
+  /* 任务推进 */
   /** 标记任务运行中（从 pending 进入 running；首个 step 前调用）。 */
   start(taskId) {
     const t = this.get(taskId);
@@ -255,7 +250,7 @@ class TaskRegistry {
     return t;
   }
 
-  /* ═══════ 视图 ═══════ */
+  /* 视图 */
   /** 前端视图：安全字段（不暴露内部细节）。 */
   view(task) {
     if (!task) return null;

@@ -1,7 +1,7 @@
 'use strict';
 
 // npm 安装执行 + 端口健康验证 + 版本检查（IO）。
-// 全具名导出、显式收参（state 用于镜像选择/灰度事实），**不碰 this**（DF-4/DF-6）。
+// 全具名导出、显式收参（state 用于镜像选择/灰度事实），不碰跨文件 this。
 
 const net = require('node:net');
 const spawnOS = require('../os/spawn');
@@ -19,9 +19,8 @@ async function fetchNpmLatest(state, pkg, opts) {
   const o = opts || {};
   let origin = null;
   if (o.authoritative) {
-    // 发布权威源解析（RC6 补充）：版本真相源 = 官方 npm registry。镜像同步有延迟，
-    // 把「镜像未同步」误判为「没有新版本」是真相源错误。
-    // ① 配置列表里显式配了官方源 → 用它；② 测试/私有部署注入非官方列表 → 尊重注入；③ 空 → 默认官方。
+    // 发布权威源解析：版本真相源 = 官方 npm registry。镜像同步有延迟，把「镜像未同步」
+    // 误判为「没有新版本」是真相源错误。优先级：配置里显式的官方源 > 注入的非官方列表 > 默认官方。
     const list = registry.registryOrigins(state);
     origin = list.find((x) => /registry\.npmjs\.org/.test(x)) || list[0] || 'https://registry.npmjs.org';
   } else {
@@ -30,19 +29,19 @@ async function fetchNpmLatest(state, pkg, opts) {
   if (!origin) return null; // 全部镜像不可达：明确失败（checkUpdate 据此报错而非误报最新）
   try {
     const base = policies.normalizeOrigin(origin);
-    // 拉包完整元数据（dist-tags + versions），选版算法**不在这里**：
-    //   我们的包 → release.pickReleaseVersion 走 §3 五步；第三方包 → 取全量最高。
+    // 拉包完整元数据（dist-tags + versions）；选版算法不在这里：
+    //   我们的包走 release.pickReleaseVersion，第三方包取全量最高。
     const res = await fetch(base + '/' + encodeURIComponent(pkg), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return null;
     const j = await res.json();
     const picked = release.pickReleaseVersion(j, {
       isOurs: release.isOurReleasePackage(pkg),
-      canary: policies.isInCanaryList(state), // 仅 isOurs 分支消费（契约 §5）
+      canary: policies.isInCanaryList(state), // 仅 isOurs 分支消费
       isValid: (v) => typeof v === 'string' && VERSION_RE.test(v),
     });
     if (picked) return picked;
-    // 兜底：registry 元数据里没有任何可用版本（例如仅 pkg/latest 端点有）——
-    // 这是「版本缺失」而非「通道选择」，与选版算法无关，故保留在调用点。
+    // 兜底：元数据里没有任何可用版本（例如仅 pkg/latest 端点有）——属「版本缺失」
+    // 而非「通道选择」，与选版算法无关，故留在调用点。
     const lr = await fetch(base + '/' + encodeURIComponent(pkg) + '/latest', { signal: AbortSignal.timeout(8000) });
     if (!lr.ok) return null;
     const lj = await lr.json();
@@ -79,7 +78,7 @@ async function fetchLatestVersion(state, pkg, channel, opts) {
   return fetchNpmLatest(state, pkg, { authoritative: o.authoritative === true });
 }
 
-/** 安装执行器（统一 npm 安装）：镜像注入 / 超时 / 行日志 / 退出码 / 进程树清理全在此一份。
+/** 安装执行器（统一 npm 安装）：镜像注入 / 超时 / 行日志 / 退出码 / 进程树清理。
  *
  *  @param {object} opts
  *   - pkg / version（version 必须显式）/ prefix（沙箱） / registry / timeoutMs / detached / onLine
@@ -90,7 +89,7 @@ function runNpmInstall(opts) {
   if (!o.version) return Promise.resolve({ ok: false, error: 'runNpmInstall: 缺少 version（必须显式携带）', output: [] });
   // 唯一安装执行器：commandTemplate 支持完整替换命令（测试/特殊环境注入 fake-npm 等）。
   let argv;
-  // P1-C：经统一解析（Windows → npm.cmd）。旧实现硬编码 'npm' → ENOENT。
+  // 经统一解析（Windows 下为 npm.cmd），不得硬编码裸 'npm'（会 ENOENT）。
   let bin = runtimeContract.npmBin(npmBin);
   if (Array.isArray(o.commandTemplate) && o.commandTemplate.length) {
     argv = o.commandTemplate.map((s) => String(s).replace(/{pkg}/g, pkg).replace(/{version}/g, o.version).replace(/{prefix}/g, o.prefix || ''));

@@ -2,11 +2,9 @@
 
 const parseModule = require('./parse');
 
-// 转发 IO 层（网络）：上游响应读取 + 重试循环 + 流式透传。
-// 从 forward-core.js:148-290,:321,:429 抽出，并合并 model/inflight 的显式 effect。
-// 依赖经 ctor 注入（deps={log,logger,readBody,canPersist,parse,usage,inflight,switcher,
-// events,getPricing,agents,maskKey}）；本文件只 require ./parse（纯）。
-// ★ 行为修复：两条结束路径（writeThrough 成功 / 错误中断）统一走 endInflight() 的 effects。
+// 转发 IO 层（网络）：上游响应读取 + 重试循环 + 流式透传。依赖经 ctor 注入
+// （deps={log,logger,readBody,canPersist,parse,usage,inflight,switcher,events,getPricing,agents,maskKey}）；
+// 本文件只 require ./parse（纯）。两条结束路径（writeThrough 成功 / 错误中断）统一走 endInflight() 的 effects。
 
 const crypto = require('node:crypto');
 const http = require('node:http');
@@ -90,7 +88,7 @@ function createForwarder(deps) {
       acc = switcher.pickFor(prov, { excludeKeys: triedKeys });
       if (!acc || triedKeys.has(acc.key)) break;
       triedKeys.add(acc.key);
-      // 按需激活必须在 resolveTarget 之前（实例未启动 port=null → 否则死锁）
+      // 按需激活必须在 resolveTarget 之前（实例未启动 port=null，否则死锁）
       const activeProv = prov;
       const curInst = parse.instOf(activeProv, acc);
       if (activeProv && activeProv.kind === 'proxy' && curInst) {
@@ -190,7 +188,7 @@ function createForwarder(deps) {
     res.end(JSON.stringify({ error: 'all accounts exhausted' }));
   }
 
-  /** 上游→客户端透传：头复制 + 流式转发 + 用量统计（按账号 byKey/byModel）。 */
+  /** 上游->客户端透传：头复制 + 流式转发 + 用量统计（按账号 byKey/byModel）。 */
   function writeThrough(req, res, out, acc, prov, meta) {
     const ur = out.res;
     const status = meta.status;
@@ -293,4 +291,4 @@ function createForwarder(deps) {
   return { proxyFor, writeThrough, forwardOnce, endInflight, recordError };
 }
 
-module.exports = { createForwarder, readUpstreamBody, HOP_HEADERS };
+module.exports = { createForwarder, readUpstreamBody };

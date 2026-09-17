@@ -1,9 +1,8 @@
 'use strict';
 
-// 命令拼装（B9）—— 纯函数，零 IO / 零 require。
-// 缓存优先（~/.npm/_npx 已缓存的包 → node <bin>，零解析/零下载/秒起）；缓存未命中 → npx --yes。
-// ⚠ 凭证不在本模块处理：{{key}} / --api-key 的剔除是**调用方（provider）的凭证纪律**，
-//   本模块只负责 argv 结构与占位替换，绝不持有/注入任何密钥。
+// 命令拼装（B9）：纯函数，零 IO / 零 require。缓存优先（~/.npm/_npx 已缓存的包直接用
+// node <bin>，零解析/零下载/秒起），缓存未命中则 npx --yes。注意：凭证不在本模块处理，
+// {{key}} / --api-key 的剔除是调用方（provider）的凭证纪律，本模块绝不持有或注入密钥。
 
 /** 由 app 模板 + 端口构造 spawn argv（纯）。
  *  @param ctx { app, port, cachedBin, registry, npxBin, execPath }

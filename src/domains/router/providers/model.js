@@ -1,7 +1,7 @@
 'use strict';
 
-// 账号模型（B2）：账号结构、keyId、状态字段、序列化形状 —— 纯模块（零 IO）。
-// 从 base.js 抽出：keyFingerprint/maskKey、序列化、供应商预设常量。
+// 账号模型（B2）：账号结构、keyId、状态字段、序列化形状，纯模块（零 IO）。覆盖
+// keyFingerprint/maskKey、序列化与供应商预设常量。
 
 const crypto = require('node:crypto');
 
@@ -75,8 +75,8 @@ const PROVIDER_PRESETS = [
   },
 ];
 
-/** provider 整体序列化（供 RouterStore 落盘）：一致性守卫 + 锁收敛前置。
- *  provider 通过显式入参传入（不再用 this）：基类/子类方法经 provider.* 调用，保留覆写语义。 */
+/** provider 整体序列化（供 RouterStore 落盘）：一致性守卫 + 锁收敛前置。provider 经显式入参
+ *  传入，基类/子类方法经 provider.* 调用，保留覆写语义。 */
 function serializeProvider(p) {
   try { for (const a of (p.accounts || [])) p._normalizeConsistency(a); } catch {}
   p._reconcileLock();

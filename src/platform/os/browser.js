@@ -1,24 +1,17 @@
 'use strict';
 
-// 平台化浏览器打开：三端同一 open(url) 接口（2024 起 Linux 也可走 xdg-open）。
-// 仅接受本机回环 URL（调用方已校验）；失败返回 false。
-//
-// launchIsolated（跨平台审计 §7.1）：把「以隔离 profile + 无痕 + 反指纹参数打开浏览器」的
-// **平台差异**（mac 的 `open -na`、Windows 的 `cmd start` 与参数转义、Linux 的候选二进制顺序）
-// 收敛到平台层；调用方（router-ops）只提供策略参数，不再出现 process.platform 分支与二进制名。
+// 平台化浏览器打开：三端同一 open(url) 接口；仅接受本机回环 URL（调用方已校验），失败返回 false。
+// launchIsolated 把「隔离 profile + 无痕 + 反指纹参数打开浏览器」的平台差异收敛到平台层，
+// 调用方只提供策略参数，不再出现 process.platform 分支与二进制名。
 
-// SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）。
-// 浏览器打开是“完全脱离本进程”的语义 → 用 detachedIgnored（detached + stdio 'ignore'）。
+// 异步 spawn 统一封装（固定 windowsHide:true）；浏览器打开完全脱离本进程，
+// 用 detachedIgnored（detached + stdio ignore）。
 const spawnOS = require('./spawn');
 
-/** 平台 → 打开 URL 的命令（**纯函数，可穷举**；不 spawn）。
- *
- *  ⚠ Windows 的 `start` 第一个参数是**窗口标题**，必须显式给空串（`""`），
- *    否则 URL 会被当成标题、浏览器不打开 —— 这是 `start` 的经典陷阱。
- *    把它固定成可断言的纯函数，避免"顺手删掉空参数"这类回归。
- *  ⚠ 未知平台：**有意**退化为 `xdg-open`（best-effort 且失败静默）。
- *    与 autostart 不同——那里会向用户/面板**宣称**某个服务管理器（kind），
- *    故未知平台必须显式 none；而这里不宣称任何能力，只是尽力尝试。 */
+/** 平台到打开 URL 的命令（纯函数，可穷举；不 spawn）。
+ *  Windows 的 start 第一个参数是窗口标题，必须显式给空串，否则 URL 被当标题、浏览器不打开。
+ *  未知平台有意退化为 xdg-open（best-effort 且失败静默）：这里不宣称任何能力，只尽力尝试；
+ *  与 autostart 不同 —— 那里要向用户宣称服务管理器 kind，故未知平台必须显式 none。 */
 function openCommand(platform, url) {
   const pl = platform || process.platform;
   if (pl === 'darwin') return { cmd: 'open', args: [url] };
@@ -46,15 +39,10 @@ function _spawnDetached(bin, args, env, onExit) {
   return child;
 }
 
-/** 平台 → 隔离打开的**命令规划**（纯函数，可穷举；不 spawn）。
- *
- *  返回两种形态：
- *    · `{kind:'single', bin, args, isolated}`  —— 单命令（darwin/win32）
- *    · `{kind:'chain', candidates:[...]}`      —— 候选链（linux，按可用性依次尝试）
- *
- *  ⚠ Windows 有意**只传** `--incognito` + `--user-data-dir`，不传 antiArgs ——
- *    `cmd start` 对复杂参数（含引号/反斜杠的指纹参数）转义脆弱，宁可少传也不传坏。
- *    这是**刻意的权衡**，用断言固定住，防止有人"顺手补全 antiArgs"反而引入转义 bug。
+/** 平台到隔离打开的命令规划（纯函数，可穷举；不 spawn）。
+ *  返回 {kind:single,bin,args,isolated} 或 {kind:chain,candidates}（linux 按可用性依次尝试）。
+ *  Windows 有意只传 --incognito + --user-data-dir，不传 antiArgs：cmd start 对含引号/反斜杠的
+ *  参数转义脆弱，宁可少传也不传坏（用断言固定，防止顺手补全反而引入转义 bug）。
  *  @param {{profileDir?:string, antiArgs?:string[]}} [opts] */
 function isolatedPlan(platform, url, opts) {
   const o = opts || {};
@@ -114,7 +102,7 @@ function launchIsolated(url, o) {
       let child;
       try { child = spawnOS.detachedIgnored(c.bin, c.args, { env: env || sysEnv }); }
       catch { return tryNext(); }
-      // bin 不存在 → 下一个候选（error 事件同步触发，故递归前先注册）
+      // bin 不存在 -> 下一个候选（error 事件同步触发，故递归前先注册）
       child.on('error', () => { tryNext(); });
       if (c.watch && typeof onExit === 'function') child.on('exit', () => { try { onExit(); } catch {} });
       child.unref();

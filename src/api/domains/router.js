@@ -9,13 +9,13 @@ function handle(ctx) {
   const { sup, req, res, pathname, identity, send, collectBody, originAllowed, tokOf } = ctx;
 
     // 智能路由（中转服务）生命周期
-    // R4 域摘要：daemon 监督模式读目录 router-daemon 项 domainSummary（监督拍缓存，≤1 个 fetch 周期陈旧）；
+    // 域摘要：daemon 监督模式读目录 router-daemon 项 domainSummary（监督拍缓存，≤1 个 fetch 周期陈旧）；
     // 非 daemon 模式（内嵌）回退本地实例实时摘要。目录只存引用，账号明细/令牌仍只走实时 /router/*。
     if (req.method === 'GET' && pathname === '/router/domain-summary') {
       return send(200, sup.routerDomainSummary());
     }
     if (req.method === 'GET' && pathname === '/router/ports') {
-      // 资源端口视图（阶段迁移 S1）：router 段由 daemon 自供（ctl），守卫仅转发；降级走内嵌副本同方法
+      // 资源端口视图：router 段由 daemon 自供（ctl），守卫仅转发；降级走内嵌副本同方法
       return Promise.resolve(sup.routerApi().portsView()).then((r) => send(200, r)).catch((e) => send(200, { records: [], error: e && e.message }));
     }
     if (req.method === 'GET' && pathname === '/router/status') {
@@ -29,11 +29,12 @@ function handle(ctx) {
       }
       const action = pathname.slice('/router/'.length);
       req.resume();
+      // setRouterRunning 失败返回 {ok:false}：不得恒 200（启停未生效须让调用方可见）。
       if (action === 'start') {
-        return Promise.resolve(sup.setRouterRunning(true)).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
+        return Promise.resolve(sup.setRouterRunning(true)).then((r) => send(r && r.ok === false ? 400 : 200, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
       }
       if (action === 'stop') {
-        return Promise.resolve(sup.setRouterRunning(false)).then((r) => send(200, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
+        return Promise.resolve(sup.setRouterRunning(false)).then((r) => send(r && r.ok === false ? 400 : 200, r)).catch((e) => send(500, { ok: false, error: (e && e.message) || String(e) }));
       }
     }
 
@@ -123,14 +124,14 @@ function handle(ctx) {
         try {
           const j = body ? JSON.parse(body) : {};
           if (!j.id || !j.fingerprint) return send(400, { ok: false, error: 'need id + fingerprint' });
-          // switchToKey 为 async：必须 await，否则 Promise 被序列化为 {}（历史未暴露：p2p-api 测试此前从未跑通）
+          // switchToKey 为 async：必须 await，否则 Promise 被序列化为 {}
           return Promise.resolve(sup.routerApi().switchToKey(j.id, j.fingerprint)).then((r) => send(r && r.ok ? 200 : 400, r || { ok: false, error: 'unknown' })).catch((e) => send(500, { ok: false, error: e.message }));
         } catch { return send(400, { ok: false }); }
       });
       return;
     }
-    // ⚠ /router/providers/account/confirm 已删除（Phase 5 / 决策 A6）：review 状态与 confirmAccount
-    //   一并移除（无写入方的状态不留存）。账号入库即终态，无需"入池确认"。
+    // /router/providers/account/confirm 已删除：review 状态与 confirmAccount 一并移除
+    //（无写入方的状态不留存）。账号入库即终态，无需"入池确认"。
 
     if (req.method === 'POST' && pathname === '/router/providers/account/discard') {
       if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
@@ -154,7 +155,7 @@ function handle(ctx) {
       collectBody(req, res, 4096, (body) => { try { const j = body ? JSON.parse(body) : {}; if (!j.id) return send(400, { ok: false, error: 'need id' }); return Promise.resolve(sup.routerApi().deactivateProvider(j.id)).then((r) => send(r && r.ok === false ? 400 : 200, r)).catch((e) => send(500, { ok: false, error: e.message })); } catch { return send(400, { ok: false }); } });
       return;
     }
-  // 域内未匹配(方法/子路径) → 全局兜底语义(与单文件时代一致)
+  // 域内未匹配(方法/子路径)：全局兜底语义(与单文件时代一致)
   if (req.method === 'GET' || req.method === 'POST') return send(404, { error: 'not found', path: pathname });
   return send(405, { error: 'method not allowed' });
 }

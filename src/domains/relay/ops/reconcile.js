@@ -29,7 +29,7 @@ function removeOne(host, proxy, inst) {
   if (host.events) host.events.append('lan_instance_removed', { id: proxy.id, reason: !inst ? 'stale' : 'disabled' });
 }
 
-/** relay 运行 = 目标存活：up → 确保在监听；down → 暂停（保留注册）。 */
+/** relay 运行 = 目标存活：up 则确保在监听，down 则暂停（保留注册）。 */
 async function ensureProxyRunning(host, proxy, inst) {
   const targetAlive = await targetReachable(inst);
   const running = !!(host._lanServers && host._lanServers[proxy.id]);
@@ -97,7 +97,7 @@ async function removeProxyForInstance(host, instId) {
   host.syncFrpc();
 }
 
-/** 实例启动时联动远程代理：remoteEnabled 且实例在跑→确保对应 relay 在监听。 */
+/** 实例启动时联动远程代理：remoteEnabled 且实例在跑时确保对应 relay 在监听。 */
 async function instanceStart(host, inst) {
   if (!inst || !inst.remoteEnabled || !inst.port) return;
   const existing = host.lanInstances.find((p) => p.dshPort === inst.port);

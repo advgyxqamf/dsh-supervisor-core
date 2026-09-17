@@ -76,9 +76,9 @@ function listProviders(state, deps) {
       return {
         keyId: a.keyId,
         maskedKey: a.maskedKey,
-        status: a.status,                       // ★ 单事实源（validity 字段已删除）
+        status: a.status,                       // 单事实源（validity 字段已删除）
         validity: a.status,                     // 兼容字段（=status，避免旧前端读 undefined）
-        usage: usageOf,                          // ★ 纯派生（activeAccount/实例实况）
+        usage: usageOf,                          // 纯派生（activeAccount/实例实况）
         quota: a.quota || null,
         limit: (p._ensureLimit ? p._ensureLimit(a) : a.limit) || null, // M2：limitKind+recovery
         nextResetAt: a.nextResetAt || null,

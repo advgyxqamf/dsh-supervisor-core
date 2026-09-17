@@ -1,12 +1,12 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
+// 
 // app/control/specs.js —— 受管对象申报工厂（真 ctor 注入）。
 //
 // 级 2：createSpecs(deps) 自己持有申报/注册实现。
 //   const specs = createSpecs({ getState, getManagedObjects, getInstances, getConfig, getCtl, getDaemons, getLogger });
 // 可只 require 本模块 + 假 deps 直测（DF-6）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 
 
 const os = require('node:os');
 const path = require('node:path');
@@ -58,7 +58,7 @@ function createSpecs(deps) {
     };
   }
 
-  /** 申报或更新（存在→update 应然；否则 register）。 */
+  /** 申报或更新（存在->update 应然；否则 register）。 */
   function upsert(spec) {
     const m = reg();
     if (!m || !spec) return;

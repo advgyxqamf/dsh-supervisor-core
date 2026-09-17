@@ -1,17 +1,17 @@
-# 发布与验收：内核操作指南（2026-09-11 重写）
+# 发布与验收：内核操作指南
 
-> **本文件已于 2026-09-11 重写**。原版基于「SEA 二进制 + export-shell.sh 导出壳仓」的旧架构，
-> 该架构已废：SEA 全平台弃用（macOS 上游缺陷）、壳已彻底独立成仓、`export-shell.sh` 已删。
+> 本指南基于现行架构（Node launcher + 壳独立成仓）。旧架构（SEA 二进制 + `export-shell.sh` 导出壳仓）已废止：
+> SEA 全平台弃用（macOS 上游缺陷）、壳已彻底独立成仓、`export-shell.sh` 已删。
 
 ## 仓库位置（两仓完全独立，不同账号）
 
 | 仓 | 地址 | 可见性 | 内容 |
 |---|---|---|---|
-| **内核** | `advgyxqamf/dsh-supervisor-core` | 🔒 私有 | `bin/` `src/` `ui/` `test/` `release/` + 内核文档 |
-| **桌面壳** | `wasi7mglns/dsh-supervisor-launcher` | 🌐 公开 | `src-tauri/`（Tauri 引导器，MIT）+ 壳文档与脚本 |
+| **内核** | `advgyxqamf/dsh-supervisor-core` | 公开 | `bin/` `src/` `ui/` `test/` `release/` + 内核文档 |
+| **桌面壳** | `wasi7mglns/dsh-supervisor-launcher` | 公开 | `src-tauri/`（Tauri 引导器，MIT）+ 壳文档与脚本 |
 
 两仓**不共享目录**：壳的构建、签名、发布、测试全部由壳仓自持；
-内核仓只保留对接代码（`src/domains/shell/`、`src/api/shell.js`）。
+内核仓只保留对接代码（`src/domains/shell/`、`src/api/domains/shell.js`）。
 
 ## 内核发布：四平台全由 CI 产出（2026-09-13 硬标准）
 

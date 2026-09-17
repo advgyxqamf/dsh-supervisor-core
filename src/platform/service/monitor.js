@@ -1,9 +1,7 @@
 'use strict';
 
-// 平台能力：在线探测（原 guard/monitor/index.js，Phase 1 上游化——守卫与各域共用的纯探测，无生命周期动作）。
-// 统一对原生与沙箱实例适用：端口 + 监听 pid + cmdline 特征判定，绝不拉起/绝不接管/绝不做任何生命周期动作。
-// 监控的结果仅作为观测/决策依据；是否拉起由守护(guardian)依据 monitor 开关决定。
-// 守卫自身生命周期与这些目标完全隔离。
+// 平台能力：在线探测（守卫与各域共用的纯探测，无生命周期动作）。统一对原生与沙箱实例适用：
+// 端口 + 监听 pid + cmdline 特征判定；绝不拉起/接管/做任何生命周期动作，结果仅作观测/决策依据。
 
 const pidlook = require('../os/pidlookup');
 const probeModule = require('../util/probe'); // 探测原语已上游化到平台层（PROVIDER-GATEWAY-ARCHITECTURE §7 Phase 1）
@@ -13,25 +11,20 @@ function isPortListening(host, port, timeoutMs) {
   return probeModule.portListening(host, port, timeoutMs || 1000);
 }
 
-/**
- * 统一目标在线判定核心。
- * 语义：up/running 只以「端口有进程在监听」为准（探测只管在不在）；
- *       isDsh 仅作标注（接管时由 supervisor 用启动命令精确校验"是不是我们的 DSH"），
- *       不再参与在线判定——避免"DSH 装在路径不含 dsh 的目录就永不在线"这类误判。
- */
+/** 统一目标在线判定核心。语义：up/running 只以端口有进程监听为准；isDsh 仅作标注
+ *  （接管时由 supervisor 用启动命令精确校验是否我们的 DSH），不参与在线判定，
+ *  避免 DSH 装在路径不含 dsh 的目录就永不在线的误判。 */
 function pidState(port) {
   const pid = pidlook.findListeningPid(port);
   if (pid === null) return { pid: null, isDsh: false };
   return { pid, isDsh: pidlook.isDshCmdline(pid) };
 }
 
-/**
- * 统一健康探测（L1 端口 + L2 HTTP；L0 进程存活由调用方/tick 承担）：
- *  - L1 端口在线（up）：端口可连且有监听 pid；
- *  - L2 HTTP 健康（httpOk）：GET healthUrl 2xx（或 401/403 认证响应视为在线；httpProbeEnabled=false 时退化为 up）；
+/** 统一健康探测（L1 端口 + L2 HTTP；L0 进程存活由调用方/tick 承担）：
+ *  L1 端口在线且存在监听 pid；L2 GET healthUrl 2xx（或 401/403 认证响应视为在线；
+ *  httpProbeEnabled=false 时退化为 up）。
  *  @param opts { portTimeoutMs?, httpProbeEnabled?, healthUrl?, httpTimeoutMs? }
- *  @returns {{ up:boolean, pid:number|null, isDsh:boolean, httpOk:boolean, httpStatus:number|null }}
- */
+ *  @returns {{ up:boolean, pid:number|null, isDsh:boolean, httpOk:boolean, httpStatus:number|null }} */
 async function probe(host, port, opts) {
   const o = opts || {};
   const listening = await isPortListening(host, port, o.portTimeoutMs || 1200);

@@ -6,8 +6,8 @@
 const execPath = require('../../platform/os/exec-path');
 const ex = require('../../platform/util/exec');
 
-/** npm 可执行：优先注入值（测试），否则跨平台解析（Windows → npm.cmd）。
- *  ⚠ 经模块对象调用而非解构：解构是值绑定，无法被测试替换。 */
+/** npm 可执行：优先注入值（测试），否则跨平台解析（Windows 用 npm.cmd）。
+ *  经模块对象调用而非解构：解构是值绑定，无法被测试替换。 */
 function npmExe(host) { return (host && host._npmBin) || execPath.npmBin(); }
 
 /** 注入的前置参数（仅测试；生产恒为空）：以 node 执行包内 JS 时使用。 */

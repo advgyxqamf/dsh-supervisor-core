@@ -79,7 +79,7 @@ echo -n TOKEN | bash release/scripts/cred.sh put 名   # 写入并置 active
    `requiredPermission` / `file`（**必须在库内**）/ `verify`（API 打点）/ `status`；
 2. 写入值：`bash release/scripts/cred.sh put 名`（从 stdin 读；自动 0600、自动置 active）；
 3. 验证：`bash release/scripts/cred.sh verify 名` 应显示 OK；
-4. 跑门禁：`npm test`（`credential-hygiene-test` 必须全过）；
+4. 由 CI 门禁验证：`credential-hygiene-test` 必须全过（按 ACCEPTANCE-STANDARD，测试不在本机执行）；
 5. 若是**轮换**，在 `history` 记一条（旧令牌尾号 / 失效原因 / 处置）。
 
 ### 轮换 / 作废

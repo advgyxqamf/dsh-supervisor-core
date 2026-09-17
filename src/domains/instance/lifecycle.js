@@ -1,7 +1,6 @@
 'use strict';
-// 多实例管理器 —— 单元生命周期（域：instance / lifecycle）
-// 「怎么把单元跑起来」：模板让位 + 清理残留 transient 单元 + 启停 + 探测 + 监督拍。
-// 协作方经 deps 显式注入；「首次安装」经 deps.install 注入（不 require upgrade，否则成环）。
+// 单元生命周期：模板让位 + 清理残留 transient 单元 + 启停 + 探测 + 监督拍。
+// 协作方经 deps 显式注入；首次安装经 deps.install 注入（不 require upgrade，否则成环）；
 // 全部经平台 Provider（deps.service），绝不直接调 systemctl。
 const fs = require('node:fs');
 const path = require('node:path');
@@ -14,13 +13,13 @@ function createLifecycle(deps) {
   const isSandboxSupported = deps.isSandboxSupported;
   // 状态转移的显式副作用集合（落盘/发事件/令牌）——取用点现读 deps，避免快照漂移。
   const stateDeps = () => ({ events, logger, save: () => store.save(), tokens });
-  /** 准备 systemd 用户目录并让位历史遗留模板（**改名保留，绝不删除**，不按内容判归属）。
+  /** 准备 systemd 用户目录并让位历史遗留模板（改名保留，绝不删除，不按内容判归属）。
    *  模板会阻挡 systemd-run transient 单元；改名阻断效果相同但绝不丢数据。 */
   function _prepareSystemd() {
     try {
       fs.mkdirSync(systemdDir, { recursive: true });
       if (fs.existsSync(systemdTemplatePath)) {
-        // 让位目标名带 epoch 时间戳（唯一 → 无需先删；旧实现固定名 + 先 rmSync 会静默删用户文件）。
+        // 让位目标名带 epoch 时间戳（唯一，无需先删；固定名加先 rmSync 会静默删用户文件）。
         const stamp = Date.now();
         let aside = systemdTemplatePath + '.disabled-by-dsh-' + stamp;
         let n = 1;
@@ -97,7 +96,19 @@ function createLifecycle(deps) {
     const inst = store.instances.find((i) => i.id === id);
     if (!inst) return { ok: false, error: '实例不存在' };
     if (!isSandboxSupported()) return { ok: false, error: '当前平台不支持沙箱实例（需 Linux + systemd-run；能力矩阵见 GET /env/status 的 capabilities.multiInstance）' };
-    service.stopUnit('dsh-web@' + inst.id, { timeoutMs: 20000 }); // RC4：有界，防 dbus 挂起冻结守卫
+    const unit = 'dsh-web@' + inst.id;
+    let stopped;
+    try { stopped = service.stopUnit(unit, { timeoutMs: 20000 }); } // RC4：有界，防 dbus 挂起冻结守卫
+    catch (e) { stopped = false; logger.warn && logger.warn('[' + inst.id + '] 停止单元 ' + unit + ' 异常: ' + (e && e.message)); }
+    if (stopped === false) {
+      // 停止未确认：如实报错并保持原相位，绝不谎报已停止（否则 supervise 不再自愈、用户误以为已停）。
+      const msg = '停止实例失败（单元 ' + unit + ' 未确认停止）';
+      inst.state.lastError = msg;
+      store.save();
+      if (events) events.append('inst_stop_failed', { id: inst.id, name: inst.name, error: msg });
+      logger.warn && logger.warn('[' + inst.id + '] ' + msg);
+      return { ok: false, error: msg };
+    }
     inst.state.phase = 'STOPPED';
     store.save();
     if (inst.port && hooks.onInstanceStop) hooks.onInstanceStop(inst);
@@ -111,8 +122,8 @@ function createLifecycle(deps) {
     if (!inst) return { pid: null, running: false, isDsh: false, phase: 'STOPPED' };
     return probe(inst);
   }
-  /** 单实例监督拍（单实例 try/catch —— 单实例异常绝不拖垮心跳循环）。
-   *  STOPPED → INSTALLING → STARTING → RUNNING → BACKOFF(自愈退避) → FAILED(暴露原因,用户可重试)。 */
+  /** 单实例监督拍（try/catch：单实例异常绝不拖垮心跳循环）。
+   *  相位：STOPPED -> INSTALLING -> STARTING -> RUNNING -> BACKOFF(自愈退避) -> FAILED(用户可重试)。 */
   function supervise(id) {
     const inst = store.instances.find((i) => i.id === id);
     if (!inst || inst.domain === 'native') return { ok: true, skipped: !inst ? 'not-found' : 'native' };
@@ -120,12 +131,12 @@ function createLifecycle(deps) {
     try {
       const st = probe(inst);
       inst.state.lastProbeOk = st.running;
-      // 令牌回填与 phase 解耦：长驻/孤立实例在守卫重启后令牌不回填 → relay 无 cookie 401。
+      // 令牌回填与 phase 解耦：长驻/孤立实例在守卫重启后不回填令牌，relay 会无 cookie 401。
       if (inst.domain === 'sandbox' && tokens) { try { tokens.ensureCaptured(inst.id); } catch {} }
       const state = inst.state;
       const guarded = guardian.shouldGuard(inst); // 只影响「挂了是否自动拉起」，不影响手动启动
       switch (state.phase) {
-        case 'INSTALLING': { // 装完 → 拉起；装失败/超时 → FAILED；已监听 → 运行
+        case 'INSTALLING': { // 装完则拉起；装失败/超时则 FAILED；已监听则运行
           if (st.running) { stateMachine.setRunning(stateDeps(), inst, st, now); break; }
           if (state.installOk === true) {
             const r = _systemdStart(inst);
@@ -134,26 +145,29 @@ function createLifecycle(deps) {
           }
           if (state.installOk === false) { stateMachine.fail(stateDeps(), inst, state.installError || '安装失败'); break; }
           if (tasks) {
-            // 作业在跑 → 等待；无作业且无结果 → 中断恢复（守卫重启/任务中断遗留态）
+            // 作业在跑则等待。无作业行有两种可能：任务登记本身失败（安装其实仍在进行，dsh-install
+            // 的 begin/step 抛错后 task=null），或守卫重启/任务中断的遗留态；前者若立即判死，会把
+            // 进行中的安装永久卡 FAILED。故仅在确证作业失败/取消，或已安装超时（10 分钟）时才判死。
             if (!tasks.current('instance', inst.id)) {
-              let why = '安装中断（无进行中安装任务）';
+              let why = null;
               try {
                 const recent = tasks.list('instance').find((t) => t.target && t.target.id === inst.id && t.action === 'install');
-                if (recent && (recent.state === 'failed' || recent.state === 'canceled')) why = recent.error || why;
+                if (recent && (recent.state === 'failed' || recent.state === 'canceled')) why = recent.error || '安装失败';
               } catch {}
-              stateMachine.fail(stateDeps(), inst, why);
+              if (!why && state.installAt && now - state.installAt > 10 * 60 * 1000) why = '安装超时(10分钟)';
+              if (why) stateMachine.fail(stateDeps(), inst, why);
             }
           } else if (state.installAt && now - state.installAt > 10 * 60 * 1000) {
             stateMachine.fail(stateDeps(), inst, '安装超时(10分钟)'); // 无任务注册表环境的看护兜底
           }
           break;
         }
-        case 'STARTING': { // 端口起来 → 运行；超时(30s) → 退避重试
+        case 'STARTING': { // 端口起来则运行；超时(30s)则退避重试
           if (st.running) stateMachine.setRunning(stateDeps(), inst, st, now);
           else if (state.startAt && now - state.startAt > 30000) stateMachine.restart(stateDeps(), inst, '启动超时: DSH 未监听端口');
           break;
         }
-        case 'RUNNING': { // 挂了 → 守护开则退避自愈，否则回到「停止」
+        case 'RUNNING': { // 挂了：守护开则退避自愈，否则回到停止
           if (!st.running) {
             if (guarded) stateMachine.restart(stateDeps(), inst, '实例进程退出');
             else stateMachine.setStopped(stateDeps(), inst);
@@ -162,7 +176,7 @@ function createLifecycle(deps) {
           }
           break;
         }
-        case 'BACKOFF': { // 到期 → 重试启动；失败继续退避（自愈）
+        case 'BACKOFF': { // 到期则重试启动；失败继续退避（自愈）
           if (state.backoffUntil && now >= state.backoffUntil) {
             start(inst.id).then((r) => {
               if (!r || (!r.ok && !r.installing)) stateMachine.restart(stateDeps(), inst, '重试失败:' + ((r && r.error) || ''));
@@ -170,7 +184,16 @@ function createLifecycle(deps) {
           }
           break;
         }
-        default: break; // STOPPED / FAILED：保持，由用户手动 startInstance 重置
+        case 'FAILED': {
+          // 安装任务登记失败等会把进行中的安装误判 FAILED；若 npm 实际已成功（installOk===true），
+          // 必须自愈拉起，否则永久卡死（原自愈只认「安装超时」文案）。重试超限后不再自动拉起，交用户处理。
+          if (state.installOk === true && !st.running && !/重试超限/.test(state.lastError || '')) {
+            const r = _systemdStart(inst);
+            if (!r.ok) stateMachine.restart(stateDeps(), inst, '启动失败:' + r.error);
+          }
+          break;
+        }
+        default: break; // STOPPED：保持，由用户手动 startInstance 重置
       }
       store.save();
     } catch (e) {
@@ -178,6 +201,6 @@ function createLifecycle(deps) {
     }
     return { ok: true };
   }
-  return { _prepareSystemd, _cleanStaleUnit, _systemdStart, start, stop, probe, probeInstance, supervise };
+  return { _prepareSystemd, start, stop, probe, probeInstance, supervise };
 }
 module.exports = { createLifecycle };

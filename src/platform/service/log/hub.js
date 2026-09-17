@@ -1,16 +1,11 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════
-// EventHub —— 守卫事件汇聚枢纽（系统日志框架）。
-//
-// 定位：守卫是唯一对外汇聚面。各进程事件文件单写者，EventHub 只读聚合 →
-// 转写守卫唯一的聚合事件流文件（单写者=守卫），对外 /events 读它。
-//  - 聚合流 seq 即 gseq：全局单调、meta 续号、跨守卫重启连续（UI after 游标稳定）。
-//  - daemon 增量经 ctl eventsTail(afterSeq) 拉取（复用既有 ctl 通道），失败降级跳过。
-//
+// EventHub：守卫事件汇聚枢纽。各进程事件文件单写者，EventHub 只读聚合后转写守卫
+// 唯一的聚合事件流文件，对外 /events 读它。
+// 聚合流 seq 即 gseq：全局单调、meta 续号、跨守卫重启连续（UI after 游标稳定）；
+// daemon 增量经 ctl eventsTail(afterSeq) 拉取（复用既有 ctl 通道），失败降级跳过。
 // 不变量：聚合流文件只由 EventHub 写；水位只由 EventHub 写；对外 /events 只读聚合流。
 // 职责分层：源注册 sources.js / 纯读派生 core.js / ctl 与尾读 tail.js / 水位 watermark.js。
-// ═══════════════════════════════════════════════════════════════════════
 
 const path = require('node:path');
 const Events = require('./events');
@@ -20,18 +15,13 @@ const { ctlCall, tailFile } = require('./tail');
 const { loadWatermark, saveWatermark } = require('./watermark');
 
 class EventHub {
-  /**
-   * @param {object} opts
-   *  - stateDir: 守卫状态目录（聚合流/水位落此）
-   *  - guardEvents: 守卫 Events 实例（源之一）
-   *  - guardLogFile / dshLogFile / upgradeLogFile: 守卫侧运行日志（/logs/tail 用）
-   *  - daemonLogs / ctlPorts: 按装配短键索引的 daemon 日志/ctl 端口
-   *  - logger: 可选
-   */
+  // opts: stateDir 守卫状态目录（聚合流/水位落此）；guardEvents 守卫 Events 实例（源之一）；
+  // guardLogFile / dshLogFile / upgradeLogFile 守卫侧运行日志（/logs/tail 用）；
+  // daemonLogs / ctlPorts 按装配短键索引的 daemon 日志与 ctl 端口；logger 可选。
   constructor(opts) {
     this.stateDir = opts.stateDir;
-    // 聚合流/水位按守卫 stateFile 派生唯一名（同 registry 隔离思路）：同一 stateDir 多守卫(测试 TMP)
-    // 不得共写同一 aggregated 文件——否则 hub 自己制造多写者(seq 互踩)。
+    // 聚合流/水位按 aggBase 派生唯一名：同一 stateDir 下多守卫（测试 TMP）不得共写同一
+    // aggregated 文件，否则 hub 自己制造多写者，seq 互踩。
     this.aggBase = opts.aggBase || 'state';
     this.guardEvents = opts.guardEvents || null;
     this.guardLogFile = opts.guardLogFile || null;
@@ -63,7 +53,7 @@ class EventHub {
     this._tickSeq = 0;
   }
 
-  /** 内部告警出口：可选 logger + 绝不抛（失败路径上的最后一环）。 */
+  // 内部告警出口：可选 logger + 绝不抛（失败路径上的最后一环）。
   _log(level, msg) {
     try {
       const lg = this.logger;
@@ -71,7 +61,7 @@ class EventHub {
     } catch { /* 告警出口本身绝不抛 */ }
   }
 
-  /** 事件人性化 data：浅拷贝源 data 并注入可读 message；不改源事件对象。 */
+  // 事件人性化：浅拷贝源 data 并注入可读 message，不改源事件对象。
   _humaData(type, data) {
     if (data !== null && typeof data === 'object' && typeof data.message === 'string') return data;
     const msg = sources.humaneMsg(type, data);
@@ -83,7 +73,7 @@ class EventHub {
 
   _saveWatermark() { saveWatermark(this.aggDir, this.watermarkFile, this.watermark, this.logger); }
 
-  /** 转写事件到聚合流。@returns {number} 最后成功写入的源 seq（写失败不推进——RC5.2 契约） */
+  // 转写事件到聚合流，返回最后成功写入的源 seq；写失败不推进水位（RC5.2 契约）。
   _ingest(source, list) {
     let lastOkSeq = null;
     for (const e of list) {
@@ -99,11 +89,11 @@ class EventHub {
         };
         if (e.producer) rec.producer = e.producer;
         this.writer.appendRaw(rec); // 聚合流 seq/ts 由 appendRaw 注入
-        // 写盘失败（磁盘满/权限）→ 不推进水位，下轮 sync 补齐（RC5.2 契约）。
+        // 写盘失败（磁盘满/权限）：不推进水位，下轮 sync 补齐（RC5.2 契约）。
         if (this.writer._lastAppendOk === false) { this._log('warn', '[hub] ingest ' + source + ' seq=' + e.seq + ' 写盘失败，水位不推进'); break; }
         lastOkSeq = e.seq;
       } catch (e2) {
-        // appendRaw 内部已兜底不抛；此分支防御性保留——失败的源事件不推进水位，sync 重试补齐
+        // appendRaw 内部已兜底不抛，此分支防御性保留：失败源事件不推进水位，sync 重试补齐。
         this._log('warn', '[hub] ingest ' + source + ' seq=' + e.seq + ' failed: ' + ((e2 && e2.message) || e2));
         break;
       }
@@ -111,7 +101,7 @@ class EventHub {
     return lastOkSeq;
   }
 
-  /** 守卫事件推模式：守卫 Events.append 已同步调此——守卫事件零延迟入聚合流。 */
+  // 守卫事件推模式：守卫 Events.append 已同步调此，守卫事件零延迟入聚合流。
   pushGuard(rec) {
     if (!rec || typeof rec.seq !== 'number') return;
     // hub 来源标记：防御聚合流文件被误配为守卫事件文件时的递归（RC5.3 纵深防御之一）
@@ -128,7 +118,7 @@ class EventHub {
     try {
       this.writer.appendRaw(out);
       if (this.writer._lastAppendOk === false) {
-        // 写盘失败：水位不动——_syncGuard 会在后续拍补转写（事件不丢）
+        // 写盘失败：水位不动，_syncGuard 在后续拍补转写（事件不丢）。
         this._log('warn', '[hub] pushGuard append failed (watermark held): ' + rec.seq);
         return;
       }
@@ -138,7 +128,7 @@ class EventHub {
     }
   }
 
-  /** 兼容守卫扫文件增量入口：推模式下守卫事件已同步入流，本方法只补转写缺失增量并保水位。 */
+  // 兼容守卫扫文件增量入口：推模式下守卫事件已同步入流，本方法只补转写缺失增量并保水位。
   _syncGuard() {
     if (this.guardEvents && this.watermark[this._localSource] != null && this.guardEvents.seq > this.watermark[this._localSource]) {
       const list = this.guardEvents.tailSince(this.watermark[this._localSource]);
@@ -147,7 +137,7 @@ class EventHub {
     }
   }
 
-  /** 经 ctl 拉 daemon 事件增量并转写。失败降级（daemon 未监督/未起）。 */
+  // 经 ctl 拉 daemon 事件增量并转写；失败降级（daemon 未监督/未起）。
   async _syncDaemon(which) {
     const port = this._portFor(which);
     if (!port) {
@@ -173,19 +163,19 @@ class EventHub {
         }
         if (Array.isArray(v.events) && v.events.length) {
           const lastOk = this._ingest(which, v.events);
-          // 水位推进到"最后成功转写"的源 seq 与源文件 seq 的较小者——写失败不越界
+          // 水位推进到最后成功转写的源 seq 与源文件 seq 的较小者，写失败不越界
           this.watermark[which] = Math.max(this.watermark[which], lastOk != null ? Math.min(lastOk, v.seq) : this.watermark[which]);
         } else {
           this.watermark[which] = Math.max(this.watermark[which], v.seq);
         }
       }
     } catch (e) {
-      // daemon 未运行/未受监督：降级（守卫 /events 仍含守卫事件）——非装配错误，保持 debug 防刷。
+      // daemon 未运行/未受监督：降级（守卫 /events 仍含守卫事件），非装配错误，保持 debug 防刷。
       this.logger && this.logger.debug && this.logger.debug('[hub] ' + which + ' eventsTail 不可用: ' + ((e && e.message) || e));
     }
   }
 
-  /** 心跳每拍调用：聚合三源 → 聚合流。 */
+  // 心跳每拍调用：把各源增量聚合进聚合流。
   async sync() {
     this._tickSeq += 1;
     try { this._syncGuard(); } catch (e) { this.logger && this.logger.warn && this.logger.warn('[hub] guard sync: ' + ((e && e.message) || e)); }
@@ -199,12 +189,12 @@ class EventHub {
     this._saveWatermark();
   }
 
-  /** 对外增量读：seq > after（gseq=聚合流 seq）。 */
+  // 对外增量读：seq > after（gseq 即聚合流 seq）。
   read(after, limit) { return this.writer.readSince(after, limit); }
 
   get seq() { return this.writer.seq; }
 
-  /** /logs/tail: 读各运行日志尾部。 */
+  // /logs/tail：读各运行日志尾部。
   tailLog(stream, n) {
     // 预设流（与域无关的本进程日志）；业务流由注册源按其装配短键暴露。
     const fixed = { dsh: this.dshLogFile, upgrade: this.upgradeLogFile };
@@ -215,19 +205,19 @@ class EventHub {
     return tailFile(null, n);
   }
 
-  /** 读聚合流全窗（供检索/导出/metrics；readAll 全量，无 readSince 500 上限）。 */
+  // 读聚合流全窗（供检索/导出/metrics；readAll 全量，无 readSince 500 上限）。
   window() { return this.writer.readAll(); }
 
-  /** 用户时间线读：seq > after 且非 internal 的最近 limit 条业务事件。 */
+  // 用户时间线读：seq > after 且非 internal 的最近 limit 条业务事件。
   readVisible(after, limit) { return visibleFrom(this.window(), after, limit); }
 
-  /** 事件检索：filter { type?: 前缀, source?: ... } → 匹配事件（limit 上限 2000）。 */
+  // 事件检索：filter { type?: 前缀, source? } 匹配事件（limit 上限 2000）。
   readFiltered(filter, after, limit) { return filteredFrom(this.window(), filter, after, limit); }
 
-  /** 审计导出：把聚合流原文行导出为 JSONL 文本。 */
+  // 审计导出：把聚合流原文行导出为 JSONL 文本。
   exportLines(after, limit) { return exportFrom(this.window(), after, limit); }
 
-  /** 遥测派生（/metrics）：事件流上的只读投影。 */
+  // 遥测派生（/metrics）：事件流上的只读投影。
   metrics() { return metricsFrom(this.window(), this.seq); }
 }
 

@@ -1,11 +1,8 @@
 'use strict';
 
-// ══════════════════════════════════════════════════════════════════════════
-// 插件域 —— 更新检测与执行（域：plugin / updater，网络 + CLI 编排）
-//
-// F11：查 registry 最高版 vs 已装版；npm 型走 update→add；git/local 型拒绝。
-//   检测缓存（_updCache / _updTTL）挂在装配根，经 ctx 显式访问。
-// ══════════════════════════════════════════════════════════════════════════
+// 插件域更新检测与执行（网络 + CLI 编排）。
+// 查 registry 最高版 vs 已装版；npm 型走 update，失败退 add；git/local 型拒绝。
+// 检测缓存（_updCache/_updTTL）挂在装配根，经 ctx 显式访问。
 
 const { specType, isUpdateAvailable } = require('./policies');
 
@@ -21,7 +18,7 @@ async function checkUpdates(ctx, force) {
       const c = ctx._updCache[p.name];
       if (c && !force && (Date.now() - c.at) < ctx._updTTL) latest = c.latest;
       else {
-        // 插件均为**第三方 npm 包**：维持「取全量最高」语义不变（他人的 tag 策略不受我们控制）。
+        // 插件均为第三方 npm 包：维持「取全量最高」语义（他人 tag 策略不受控）。
         if (st === 'npm' && ctx.dist) { try { latest = await ctx.dist.fetchNpmLatest(p.name); } catch {} }
         ctx._updCache[p.name] = { latest, at: Date.now() };
       }
