@@ -3,7 +3,7 @@
 // app/domain-actions/main.js —— 原生 DSH(main) 域写动作（facade 只读，写动作下沉至此）。
 // 公网暴露安全闸单一事实源：调用 domains/relay/core.validateFrpExposure，使 app 侧
 // patchDshMain 与 relay 侧 setFrp 同规。实例冲突清单经宿主注入的只读投影
-// host.exposurePeers()，不直读 this.instances.instances（消除跨域内部数组穿透）。
+// host.exposurePeers()，不直读实例域的内部数组（消除跨域穿透）。
 // 无 Node 内建依赖：仅用 relay/core 的纯判定 + 宿主注入。
 
 const { validateFrpExposure } = require('../../domains/relay/core');
@@ -39,7 +39,7 @@ const methods = {
         enabled: true,
         remoteToken: String(meta.remoteToken || ''),
         frpRemotePort: meta.frpRemotePort,
-        peers: this.views.exposurePeers(), // 注入的只读投影（不直读 this.instances.instances）
+        peers: this.views.exposurePeers(), // 注入的只读投影（不直读实例域内部数组）
         selfId: 'main',
       });
       if (!v.ok) return { ok: false, error: v.error };

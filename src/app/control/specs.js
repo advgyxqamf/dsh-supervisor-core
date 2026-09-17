@@ -87,7 +87,8 @@ function createSpecs(deps) {
     if (!m) return;
     try {
       upsert(mainSpec());
-      const sandboxes = (instances() && instances().instances) || [];
+      const _m = instances();
+      const sandboxes = (_m && typeof _m.all === 'function' && _m.all()) || [];
       for (const inst of sandboxes) {
         if (inst.id === 'main' || inst.domain === 'native') continue;
         upsert(sandboxSpec(inst));

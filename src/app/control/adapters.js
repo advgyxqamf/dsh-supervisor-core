@@ -95,7 +95,7 @@ function registerAll(mgr, deps) {
       // phase/healthy 视图由守卫 _syncInstancesLifecycleView 每心跳真实刷新。
       status: () => {
         try {
-          const arr = (instances && instances.instances) || [];
+          const arr = (instances && typeof instances.all === 'function' && instances.all()) || [];
           const sand = arr.filter((i) => (i.domain || i.kind) === 'sandbox' || (i.domain !== 'native' && i.id !== 'main'));
           const running = sand.filter((i) => i.state && i.state.phase === 'RUNNING').length;
           return { count: sand.length, running };
@@ -109,7 +109,7 @@ function registerAll(mgr, deps) {
   if (supervisor) {
     // guardian 不在此写死：原生 DSH 守护开关(默认关, 持久化 dsh-main.json)由用户在面板控制，
     // 注册时从 supervisor 读当前值，此后经 _syncDshLifecycleView 从 A 平面(dsh-main.json)持续同步——
-    // 2026-09 收敛定稿：守护=跟开关走，与沙箱同语义，B 平面不持有独立守护策略。
+    // 守护=跟开关走，与沙箱同语义，B 平面不持有独立守护策略。
     const dshGuardian = (supervisor && typeof supervisor.mainGuardian === 'function')
       ? supervisor.mainGuardian() : false;
     const dsh = new ManagedLifecycle({

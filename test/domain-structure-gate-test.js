@@ -356,6 +356,9 @@ const RANK = {
   'frp-install.js': 2,
   // rank 3：模型 / 持久化 / 多实现 / 纯数据
   'model.js': 3, 'store.js': 3, 'providers': 3, 'instances': 3, 'port-segments.js': 3, 'proxy-apps.js': 3,
+  // 域契约文件（纯数据、零 require，与 model/store 同层）。此前未登记 → rank=null；
+  //   当前无域内消费者故 DG-7 仍绿，一旦有人 require('./contract') 会以「未归类」误报而非做方向检查。
+  'contract.js': 3,
   'layers.js': 3, 'ports.js': 3, 'config.js': 3, 'usage.js': 3, 'sandbox.js': 3,
   // 子目录首段
   'ops': 1, 'store': 3, 'model': 3, 'handlers': 1, 'policies': 2, 'core': 2, 'jobs': 2,
@@ -463,7 +466,10 @@ function consumerViolations(files, apiByDomain) {
 }
 
 // ── DG-11 数组穿透 ──
-const ARRAY_PIERCE = /\.instances\s*\.\s*instances\b/;
+// 判据必须同时覆盖三种真实写法：this.instances.instances（原）、别名 instances.instances、
+//   经 getter 的 instances().instances。原判据要求字面点号前缀，后两种长期漏检
+//   （app/control/adapters.js、app/control/specs.js、domains/relay/managed.js）。
+const ARRAY_PIERCE = /\binstances\s*(?:\(\s*\))?\s*\.\s*instances\b/;
 function piercings(files) {
   return files.filter((f) => ARRAY_PIERCE.test(f.src)).filter((f) => !f.rel.startsWith('domains/instance/')).map((f) => f.rel);
 }
@@ -858,6 +864,10 @@ console.log('扫描: ' + ENTRIES.length + ' 个 src/**/*.js，' + DOMAINS.length
     piercings([{ rel: 'app/x.js', src: strip('sup.instances.instances.find((i) => i);') }]).length === 1, 'hit');
   selfcheck('DG-11 反向：sup.instances.list() 不命中',
     piercings([{ rel: 'app/x.js', src: strip('sup.instances.list();') }]).length === 0, 'miss');
+  selfcheck('DG-11 反向：别名形态（instances && instances.instances）命中',
+    piercings([{ rel: 'app/x.js', src: strip('const a = (instances && instances.instances) || [];') }]).length === 1, 'hit');
+  selfcheck('DG-11 反向：调用形态（instances() && instances().instances）命中',
+    piercings([{ rel: 'app/x.js', src: strip('const a = (instances() && instances().instances) || [];') }]).length === 1, 'hit');
 }
 
 // ── DG-12 非空转 + 反向自检完备 ──

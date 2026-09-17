@@ -1,7 +1,7 @@
 'use strict';
 
 // 受管清单投影（半纯）：沙箱实例 + 原生主干 main 合成，以及本机非回环地址枚举。
-// 纯投影部分可脱离域对象单测（给 { instances, mainOf } 即可）。
+// 纯投影部分可脱离域对象单测（给 { instances, mainOf }；instances 只需提供 all() 查询接口）。
 
 const os = require('node:os');
 
@@ -19,7 +19,7 @@ function localAddresses() {
 
 /** 受管 DSH 合成清单：沙箱实例(instancemgr) + 原生主干 main(守卫核心视图)。 */
 function allManaged({ instances, mainOf }) {
-  const sandboxes = (instances && instances.instances) || [];
+  const sandboxes = (instances && typeof instances.all === 'function' && instances.all()) || [];
   const main = (typeof mainOf === 'function') ? mainOf() : null;
   return main ? [...sandboxes, main] : sandboxes;
 }
