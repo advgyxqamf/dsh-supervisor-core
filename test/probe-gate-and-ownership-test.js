@@ -144,17 +144,16 @@ check('E-e 源码调用 tasks.stepState 推进状态', /tasks\.stepState\(task\.
   const stripComments = (s) => s.split(String.fromCharCode(10))
     .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
     .join(String.fromCharCode(10));
+  // ⚠ 2026-09-17 P6-B B-1：runtime.js 实现体已**原地去 this**（改经惰性 deps），调用点由
+  //   `this._disableRouterPersist()` 变为 `d.disableRouterPersist()` ⇒ 判据一律**形态无关**
+  //   （只锁「该调用发生且受返回值判定约束」，不锁 this./d. 前缀）。判据本意不变。
+  const DISABLE_PERSIST_CALL = /disableRouterPersist\s*\(\s*\)\s*;/;
   check('E-h 抽出 _disableRouterPersist 集中处置', /_disableRouterPersist\(\) \{/.test(sv), '有');
-  // 三条 daemon 路径：① 已在跑 ② 拉起/接管成功 ③ supervisor.js 的兜底
-  const n = (sv.match(/_disableRouterPersist\(\);/g) || []).length;
+  // 两条 daemon 路径：① 已在跑 ② 拉起/接管成功（③ supervisor.js 的兜底见下）。
+  const n = (stripComments(sv).match(/[.\w]disableRouterPersist\s*\(\s*\)\s*;/g) || []).length;
   check('E-h supervise-view 内至少两处调用（覆盖两条 daemon 路径）', n >= 2, n + ' 处');
   check('E-h 拉起/接管路径按返回值判定',
-    /res\.mode === 'daemon'\).*_disableRouterPersist|_disableRouterPersist.*res\.mode/.test(sv)
-      || /if \(res && res\.mode === 'daemon'\) this\._disableRouterPersist\(\);/.test(sv), '有');
-  // ⚠ P6-B-3：判据改为**形态无关** —— router.js 的实现已由 { methods }+this 改为真 ctor 工厂
-  //   （createRouterActions(deps)，不再读 this），故不再要求 `this.` 前缀。
-  //   判据本意不变：锁的是「该调用发生（不再内联 setPersistEnabled(false)）」。
-  const DISABLE_PERSIST_CALL = /disableRouterPersist\s*\(\s*\)\s*;/;
+    /res\.mode\s*===\s*'daemon'\s*\)[\s\S]{0,40}disableRouterPersist\s*\(\s*\)\s*;/.test(sv), '有');
   check('E-h supervisor.js 兜底改用同一方法（不再内联）',
     DISABLE_PERSIST_CALL.test(stripComments(sup)), '有');
   // 反向自检（合成样本，不依赖真实数据）：带前缀/裸两形态都命中，缺失时不命中。
