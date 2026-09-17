@@ -42,7 +42,10 @@ function download(url, report) {
       const req = mod.get(u, { headers: { 'User-Agent': 'dsh-supervisor' }, timeout: 60000 }, (res) => {
         if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
           res.resume();
-          return get(res.headers.location, redirectsLeft - 1);
+          // 重定向目标必须校验协议：file:// 会让 http.get 同步抛（响应回调内逃逸为 uncaughtException）。
+          const next = String(res.headers.location);
+          if (!/^https?:\/\//i.test(next)) return reject(new Error('重定向到不支持的协议: ' + next.slice(0, 64)));
+          return get(next, redirectsLeft - 1);
         }
         if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
         const total = Number(res.headers['content-length']) || 0;
