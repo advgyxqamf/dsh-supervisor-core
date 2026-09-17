@@ -5,8 +5,8 @@
 // 导出形态 { methods }；装配：app/assembly/facets.js 装到 host 实例；方法内部以 this 协作。
 //
 // 阶段六 B-2 原地去 this：实现体不再经 this 的隐式方法调用取事实，改经按 host 缓存的**惰性 deps**。
-// 方法名/{ methods }/逐字体保留，装配路径与读源码形态的门禁（adopt-token-reclaim 的 _shadowExcluded/
-// http_unhealthy/adopt_token_reclaim 判据）不变，AT 棘轮计数归零。
+// 方法名/{ methods }/逐字体保留，装配路径与读源码形态的门禁（adopt-token-reclaim 的 _shadowExcluded、
+// http_unhealthy、令牌回收 reason 判据）不变，AT 棘轮计数归零。
 const DEPS = new WeakMap();
 function depsOf(host) {
   let d = DEPS.get(host);
