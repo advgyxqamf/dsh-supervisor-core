@@ -84,10 +84,23 @@ function handleOpen(ctx) {
 }
 
 // command 的 fail-closed 闸 = 结构闸 + 入口白名单（N11 / 审计 A2）：command 会被原样经
-//   startTransient 交给 systemd-run，任意二进制因此等同「以守卫身份执行任意命令」。
+//   startTransient 交给 systemd-run，任意二进制或任意脚本因此等同「以守卫身份执行任意命令」。
 // 信任边界：/instances/add 已经 originAllowed + （LAN 时）access key 鉴权，属操作者信任边界；
-//   但「任意可执行」不由本端点承担 —— 只收 DSH/node 入口，路径存在性不作为放行依据。
-// 400 契约：结构非法或入口不在白名单 → 400 { ok:false, error }；缺失/[] = 走沙箱默认命令。
+//   但「任意可执行 / 任意脚本」不由本端点承担。路径存在性不作为放行依据。
+// 允许的两种形态（UI「启动命令」占位符即形态 A）：
+//   A. node 族打头 → [node, <绝对路径的 DSH 入口>, ...其后为参数]
+//   B. DSH 入口打头 → [<DSH 入口>, ...其后为参数]
+// 形态 A 的三重校验（缺一即 400）：
+//   1) command[1] 必须存在且是**绝对路径** —— 相对入口会按沙箱 workingDir（data 目录，
+//      沙箱内可写）解析，形成「沙箱写文件 → 守卫重启执行」的二级面；
+//   2) 必须是 DSH 入口，三者之一：官方包内入口（<前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js，
+//      即内核 exec-path.dshJsIn()/resolveDsh() 的产出形态）、dsh 族 basename、或配置的 dshBin；
+//   3) 否则 ["node", "/tmp/evil.js"] 之类等于任意脚本执行。
+// 已知残留（如实登记，见 design-notes/_p3-c-api-hardening.md §1.4）：basename 判据仍可被
+//   「把脚本命名为 dsh*.js / dsh / dsh-supervisor」绕过；真正的结构解是启动期（inst.id 可得后）
+//   用 realpath + 安装根前缀复校，属 domains/instance 范围。
+// 400 契约：结构非法、入口不在白名单、或 node 族缺少/非绝对/错配 DSH 入口 → 400 { ok:false, error }；
+//   缺失/[] = 走沙箱默认命令（默认命令由域内 effectiveCommand 生成，不经本闸）。
 function commandShapeError(command, dshBin) {
   if (command === undefined || command === null) return null;
   if (!Array.isArray(command)) return 'command 必须为参数数组';
@@ -99,12 +112,35 @@ function commandShapeError(command, dshBin) {
     if (a.length > 4096) return 'command 单个参数过长（上限 4096）';
     if (/[\0\r\n]/.test(a)) return 'command 含非法字符（NUL/换行）';
   }
-  // 入口白名单：只认 node / dsh 系列（大小写不敏感以兼容 Windows；两种分隔符都切，避免依赖宿主平台）。
-  const ENTRY = new Set(['node', 'node.exe', 'dsh', 'dsh.exe', 'dsh.js', 'dsh-supervisor', 'dsh-supervisor.js']);
-  const base = String(command[0]).split(/[\\/]/).pop().toLowerCase();
-  if (ENTRY.has(base)) return null;
-  if (typeof dshBin === 'string' && dshBin && command[0] === dshBin) return null; // 配置的 DSH 可执行名（严格相等）
-  return 'command[0] 只接受 DSH/node 入口（node、dsh、dsh-supervisor 等）；需要其它可执行请走插件安装通道';
+  // 白名单：只认 node / dsh 系列（大小写不敏感以兼容 Windows；两种分隔符都切，不依赖宿主平台）。
+  const NODE_HEAD = new Set(['node', 'node.exe']);
+  // command[0] 的 dsh 族维持现行为（含 Windows 的 dsh.exe / npm 垫片 dsh.cmd/.ps1）。
+  const DSH_HEAD = new Set(['dsh', 'dsh.exe', 'dsh.js', 'dsh-supervisor', 'dsh-supervisor.js', 'dsh.cmd', 'dsh.ps1']);
+  // command[1] 是 node 的脚本参数（.js 等），故不收 .exe/.cmd 形态。
+  const DSH_ENTRY = new Set(['dsh', 'dsh.js', 'dsh-supervisor', 'dsh-supervisor.js']);
+  const baseOf = (p) => String(p).split(/[\\/]/).pop().toLowerCase();
+  const normPath = (p) => String(p).replace(/\\/g, '/');
+  // 绝对路径：POSIX /…、Windows 盘符 X:\…、UNC \\…（形态 A 的硬要求，见头注 1）。
+  const isAbsolute = (p) => /^(?:[A-Za-z]:[\\/]|[\\/])/.test(String(p));
+  // 官方 DSH 包内入口：<任意前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js —— 内核自己的
+  //   exec-path.dshJsIn()/resolveDsh() 产出的就是它，若不放行则「内核规范入口被自己拒绝」。
+  const isDshPackageEntry = (p) =>
+    baseOf(p) === 'bin.js' && normPath(p).indexOf('/node_modules/@deepseek-ai/dsh/') >= 0;
+  // 配置的 DSH 可执行名（严格相等）；但不接受把 node 自己当 DSH 入口，否则 [node, node] 会通过。
+  const isConfiguredDshBin = (p) => typeof dshBin === 'string' && dshBin !== '' && p === dshBin
+    && !NODE_HEAD.has(baseOf(dshBin));
+  const FORMS = '可用 [node, <绝对路径的 DSH 入口>, ...参数] 或 [<DSH 入口>, ...参数]';
+  if (NODE_HEAD.has(baseOf(command[0]))) {
+    const entry = command.length > 1 ? command[1] : '';
+    if (!entry || !isAbsolute(entry)) {
+      return 'command[0] 为 node 时，command[1] 必须是**绝对路径**的 DSH 入口（相对路径按沙箱 data 目录解析，已禁止）；' + FORMS;
+    }
+    if (isDshPackageEntry(entry) || DSH_ENTRY.has(baseOf(entry)) || isConfiguredDshBin(entry)) return null;
+    return 'command[0] 为 node 时 command[1] 必须是 DSH 入口（dsh / dsh.js / dsh-supervisor / dsh-supervisor.js，'
+      + '或 <前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js）；' + FORMS;
+  }
+  if (DSH_HEAD.has(baseOf(command[0])) || isConfiguredDshBin(command[0])) return null;
+  return 'command[0] 只接受 DSH/node 入口；' + FORMS + '；需要其它可执行请走插件安装通道';
 }
 
 function handle(ctx) {

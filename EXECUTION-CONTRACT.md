@@ -143,3 +143,75 @@ RT1 把 index.js 改为 **ctor 组装 + 删除这两行**。
 - **shell 域**（S1）：核心落在 `core.js`；已删除 `restart → watchdog` 反序边；测试 34/52/7/11/66 全绿。
 - **文档同步**（D1）：DS-9 取严、README 登记 `EXECUTION-CONTRACT.md`。
   → 交接：`test/directory-structure-gate-test.js` 的 DS-G3 **仍只禁 defineProperties**，由 **G0** 补 `Object.assign`。
+
+## §8 instance `command` 契约（沙箱启动命令的事实契约）
+
+> 背景：2026-09-17 复核发现 `DOMAIN-STRUCTURE-DESIGN.md` 与本文其余各处出现的 `command` 均指
+> router 的 `providers/command.js#buildCommand`（另一件事），**instance 的 `command` 在此之前没有
+> 成文定义**，事实契约只存在于下列代码位置。本节把它固化，供后续周期评估改动。
+> 本节只记录**有代码证据**的条款；未保证项与待决项单列，不发明更强承诺。
+
+### §8.1 字段形状
+
+- 位置：实例记录（`instances.json` 的一条）的 `command` 字段。
+- 取值：**字符串数组**（argv）。`src/domains/instance/model.js:41`：
+  `command: Array.isArray(payload.command) ? payload.command : []` —— 非数组一律落为 `[]`，**不做其它规范化**。
+- **缺失** 与 **空数组** 等价：都表示「用沙箱默认命令」，不报错。
+- 前端来源：`InstancesPage.tsx`（前端）:62 `fCmd.split(/\n/).map((x) => x.trim()).filter(Boolean)`
+  —— 文本框按**每行一个参数**切分；:231 标签「启动命令（每项一参数，可留空用默认）」；
+  :234 占位符 `node /usr/local/bin/dsh web`（**通用示例**，不指向沙箱安装目录）。
+
+### §8.2 写入者
+
+- 写入路径：`/instances/add` → `src/api/domains/instances.js` → `src/domains/instance/ops.js`
+  的 `addInstance(payload)` → `store.instances.push(inst)` + `store.save()`。
+- 落盘：`src/domains/instance/store.js:18`（`instancesFile = <dir>/instances.json`）与 `:50 save()`
+  （原子写 + `0o600` + 内容未变不写盘）。
+- `/instances/update` **不接收** `command`（已核），故创建之后没有 API 能改该字段。
+
+### §8.3 消费点
+
+调用链（启动期，非写时）：
+
+1. `src/domains/instance/lifecycle.js:53` `sandbox.effectiveCommand(instancesRoot, deps.dshBin, inst)`；
+2. `src/domains/instance/sandbox.js:31-34` 三分支：沙箱域且 `command` 为空 → `sandboxCommand()` 默认；
+   **`command` 非空 → 原样返回该数组**；否则 `defaultCommand()`；
+3. `src/domains/instance/lifecycle.js:60` `service.startTransient({ unit, cmd: cmdArr, env, props, workingDir })`；
+4. `src/platform/os/service.js` 的 `startTransient` 拼 `systemd-run`（仅 Linux + systemd 支持沙箱；
+   能力判定见 `src/domains/instance/sandbox.js`）。
+
+即：**非空 `command` 是「原样 argv 覆盖」语义**，守卫不再解释其内容。
+
+### §8.4 守卫当前提供的保证（写时闸）
+
+`src/api/domains/instances.js` 的 `commandShapeError()`（由 `/instances/add` 调用）：
+
+- **结构闸**：必须是字符串数组；单项非空、≤4096 字符；项数 ≤64；拒 NUL/CR/LF；非数组或空项 → 400。
+- **入口白名单**（形态 A，`command[0]` 为 node 族时）：`command[1]` 必须存在、必须是**绝对路径**，
+  且为 DSH 入口之一（官方包内入口 `<前缀>/node_modules/@deepseek-ai/dsh/lib/bin.js`、
+  `dsh` 族 basename、或配置的 `dshBin`）；否则 400。
+- **形态 B**（`command[0]` 自身为 dsh 族入口）：其后为参数。
+- 写路径另受鉴权保护：`src/api/transport/server.js` 的非回环 fail-closed 闸（无 key 或 key 不匹配 → 401）。
+
+### §8.5 已知未保证（台账，不得据此假设安全）
+
+- **basename 改名绕过**：`["node", "/tmp/evil/dsh.js"]` 与形态 B `["/tmp/evil/dsh"]` 仍会放行 ——
+  白名单本质是 basename / 路径形态判定，不是 realpath 收口。
+- **伪包内路径**：`["node", "/tmp/node_modules/@deepseek-ai/dsh/lib/bin.js"]` 可匹配「包内入口」形态。
+- 上述两项属**纵深防御**范畴：该变更路径位于**已鉴权操作者**信任域内，而该域本就具备代码执行面
+  （`/plugins/install` → npm install 后由 DSH 进程加载插件代码）。故**不新增能力**，只是更换执行入口。
+
+### §8.6 待决（不在本契约承诺内）
+
+- **运行时执行边界是否复校**：**待决**。当前闸只在**写时**校验，启动期直接消费持久化值。
+  若做启动期复校，精确挂点是 `src/domains/instance/lifecycle.js:53`（此时 `inst.id` 与
+  `sandbox.installDir(instancesRoot, inst)` 均可得，可做 realpath 包含性判定）。
+  设计草案、与既有覆盖语义的冲突证据、以及三种替代方案见
+  `design-notes/_p3-c-api-hardening.md` §8；本轮**不实施**。
+- **前置证据（有利）**：沙箱域进入 `_systemdStart` 之前，`start()` 会用
+  `src/domains/instance/lifecycle.js:92-97` 检查默认 DSH 入口是否存在，不存在则先安装并**直接返回**
+  （本次不启动）。故挂点处**默认命令**的安装根必然已存在，realpath 判定不会因「尚未安装」而 ENOENT。
+- **前置缺口（须决策）**：用户**显式** `command` 指向尚不存在路径时的语义（fail-closed 会拒
+  「先提交、后由外部创建」的用法）；非 sandbox 域（native/main）不经过上述 existsSync 前置，须单独定义；
+  以及 §8.1 记作「通用示例」的 `/usr/local/bin/dsh` 是否必须继续支持。
+
