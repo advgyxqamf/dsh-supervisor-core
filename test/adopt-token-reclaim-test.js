@@ -90,7 +90,8 @@ function removedHits(src, symbols) {
 function extractPhaseSwitch(src) {
   // ⚠ 2026-09-17 阶段六 B-2：controller.js 原地去 this 后 phase switch 变为 switch (d.state().phase())。
   //   判据改为**形态无关**：匹配任意接收者（this/d/…）的 .state().phase()。判据本意不变。
-  const m = /switch\s*\(\s*[A-Za-z_$][\w$]*\.state\(\)\.phase\(\)\s*\)/.exec(src);
+  //   兼容两种形态：this.state.phase()（state 为属性对象）与 d.state().phase()（state 为 deps 方法）。
+  const m = /switch\s*\([\w.$()]*\.phase\(\)\s*\)/.exec(src);
   if (!m) return null;
   const i = m.index;
   const open = src.indexOf('{', i);
