@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 // SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）；需读 frpc 输出，故用 piped。
 const spawnOS = require('../../platform/os/spawn');
-const { buildFrpcToml } = require('./core');
+const { buildFrpcToml, validateFrpServerSettings } = require('./core');
 const { frpPlatformTag, download, installFrpc } = require('./frp-install');
 
 class FrpManager {
@@ -112,6 +112,10 @@ class FrpManager {
 
   start() {
     if (this.child && this.child.pid) return { ok: true, already: true, pid: this.child.pid };
+    // 执行边界复校（FIX-1 同型）：serverAddr 为空时不允许 spawn frpc —— 不论配置由谁写出
+    // （旧版 frp.json enabled:true / ctl 直写 / 停用态手动 toggle），也不论全局开关状态。
+    const vs = validateFrpServerSettings(this.loadSettings());
+    if (!vs.ok) return { ok: false, error: vs.error, needServerAddr: true };
     this._intentionalStop = false; // 显式启动：清除主动停止标记
     // 稳定运行 60s 后重置重试计数。
     if (this._stableTimer) clearTimeout(this._stableTimer);

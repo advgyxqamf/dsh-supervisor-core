@@ -136,12 +136,15 @@ class ProviderBase {
   // 冻结/恢复策略（policies/freeze.js）
   _setStatus(acc, status, nextResetAt, error, autoRecover) { return freeze.setStatus(acc, status, nextResetAt, error, autoRecover, this); }
   _ensureLimit(acc) { return freeze.ensureLimit(acc); }
+  /** limit 纯只读预览（#20；不赋值、不写盘）：只读视图唯一入口。写版 _ensureLimit 保留（门禁/测试消费）。 */
+  _previewLimit(acc) { return freeze.previewLimit(acc); }
   _setLimit(acc, kind, reason, recovery) { return freeze.setLimit(acc, kind, reason, recovery, this); }
   _freezeLimited(acc, cause, reason, recovery) { return freeze.freezeLimited(acc, cause, reason, recovery, this); }
   markCreditsExhausted(acc) { return freeze.markCreditsExhausted(acc, this); }
   markQuotaExhausted(acc, cooldownMs) { return freeze.markQuotaExhausted(acc, cooldownMs, this); }
   markBanned(acc, error) { return freeze.markBanned(acc, error, this); }
-  applyDetection(acc, det) { return freeze.applyDetection(acc, det, this); }
+  // #20：状态投影完成处补齐 limit（写版 ensureLimit 从只读视图移到此）。唯一投影入口，覆盖全部 applyDetection 调用方。
+  applyDetection(acc, det) { const r = freeze.applyDetection(acc, det, this); freeze.ensureLimit(acc); return r; }
   _normalizeConsistency(acc) { return freeze.normalizeConsistency(acc, this); }
   _reconcileLock() { return freeze.reconcileLock(this); }
   _nextResetAt(q) { return quota.nextResetAt(q); }

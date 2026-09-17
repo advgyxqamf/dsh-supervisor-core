@@ -61,10 +61,12 @@ function createAppsRegistryOps(deps) {
     const targets = (getProviders() || []).filter((p) => p.kind === 'proxy' && p.proxyAppId === appId && (p.instances || []).length);
     if (!targets.length) return { ok: false, error: 'no running ' + a.name + ' instances' };
     if (jobs[appId] && jobs[appId].state === 'running') return { ok: true, jobId: appId, already: true };
-    const insts = targets.flatMap((provider) => (provider.instances || []).map((i) => ({ provider, inst: i })));
+    // #5：步骤集只快照「标签」（providerId+keyId+maskedKey）；执行时按 keyId 重取活实例，
+    //  否则常驻实例在 stop/start 之间被重建后仍用旧引用（静默空转/假成功）。
+    const insts = targets.flatMap((provider) => (provider.instances || []).map((i) => ({ providerId: provider.id, keyId: i.keyId, maskedKey: i.maskedKey })));
     const job = {
       state: 'running', startedAt: Date.now(), finishedAt: null, restarted: 0, errors: 0,
-      steps: insts.map(({ inst }) => ({ name: inst.maskedKey, state: 'pending', ts: null })),
+      steps: insts.map(({ maskedKey }) => ({ name: maskedKey, state: 'pending', ts: null, reason: null })),
     };
     jobs[appId] = job;
     let task = null;
@@ -73,7 +75,7 @@ function createAppsRegistryOps(deps) {
       tasks.start(task.id);
       tasks.log(task.id, '更新 ' + a.name + '（' + a.registry + '）');
       // 逐实例步骤登记进统一 task（前端进度事实源）；job.steps 与 task.steps 同源更新。
-      for (const { inst } of insts) tasks.step(task.id, inst.maskedKey);
+      for (const { maskedKey } of insts) tasks.step(task.id, maskedKey);
       job.taskId = task.id;
     }
     (async () => {
@@ -90,30 +92,51 @@ function createAppsRegistryOps(deps) {
           }
         }
       } catch {}
-      const setStep = (i, state) => {
+      const setStep = (i, state, reason) => {
         job.steps[i].state = state; job.steps[i].ts = Date.now();
+        if (reason) job.steps[i].reason = reason;
         if (task) { try { tasks.stepState(task.id, i, state); } catch {} }
       };
+      // #5：按 keyId 重取活实例；取不到即如实失败（不静默空转）。
+      const resolveStep = (i) => {
+        const { providerId, keyId } = insts[i];
+        const p = (getProviders() || []).find((x) => x.id === providerId);
+        const inst = p && (p.instances || []).find((x) => x.keyId === keyId);
+        if (p && inst) return { provider: p, inst };
+        if (job.steps[i].state !== 'failed') {
+          job.errors++;
+          setStep(i, 'failed', '实例已不存在（可能已被移除或重建）');
+          if (task) { try { tasks.log(task.id, '跳过 ' + insts[i].maskedKey + '：实例已不存在'); } catch {} }
+        }
+        return null;
+      };
       for (let i = 0; i < insts.length; i++) {
-        const { provider, inst } = insts[i];
+        const live = resolveStep(i);
+        if (!live) continue;
         setStep(i, 'stopping');
         // force=true：在用/常驻实例不带 force 只会挂待停标记，进程未死则随后的 startInstance
         // 因 pid 仍在返回 already:true，job 报 done 而旧进程从未重启（假成功）。
-        try { provider.stopInstance(inst, true); } catch (e) { job.errors++; setStep(i, 'failed'); }
+        try { live.provider.stopInstance(live.inst, true); } catch (e) { job.errors++; setStep(i, 'failed', (e && e.message) || '停止失败'); }
       }
       await new Promise((r) => setTimeout(r, 600));
       for (let i = 0; i < insts.length; i++) {
-        const { provider, inst } = insts[i];
-        if (!inst.key) { job.errors++; setStep(i, 'failed'); continue; }
+        const live = resolveStep(i);
+        if (!live) continue;
+        const { provider, inst } = live;
+        if (!inst.key) { job.errors++; setStep(i, 'failed', '实例缺 key'); continue; }
         setStep(i, 'starting');
         const r = await provider.startInstance(inst);
         if (r.ok) {
           job.restarted++;
           await provider._waitHealthy(inst).catch(() => false);
           setStep(i, 'done');
-        } else { job.errors++; setStep(i, 'failed'); }
+        } else { job.errors++; setStep(i, 'failed', (r && r.error) || '启动失败'); }
       }
-      for (const provider of targets) provider.proxyRunning = true;
+      // 供应商对象同样重取（targets 是创建时快照）；只对仍存在的置 proxyRunning。
+      for (const providerId of new Set(insts.map((s) => s.providerId))) {
+        const p = (getProviders() || []).find((x) => x.id === providerId);
+        if (p) p.proxyRunning = true;
+      }
       save();
       job.state = job.errors === 0 ? 'done' : 'failed';
       job.finishedAt = Date.now();
@@ -135,6 +158,10 @@ function createAppsRegistryOps(deps) {
   function proxyUpdateStatus(appId) {
     const t = tasks ? tasks.list('proxy-app').find((x) => x.target.id === appId) : null;
     if (t) {
+      // #30：此 taskState→job.state 映射与 instance/model.js 的 taskStateToView、plugin/model.js 的
+      // taskStateToJobState **三份有意平行**（各有各的状态词表：本处是代理应用更新进度，另两处分别是
+      // 实例视图态 / 插件 job 态）。跨域抽公共纯函数需三处同批改动并回归各自门禁，故此处不抽；
+      // 任一状态词表变更时，三处一并核对。
       return {
         state: (t.state === 'succeeded' || t.state === 'skipped') ? 'done' : (t.state === 'failed' || t.state === 'canceled') ? 'failed' : 'running',
         restarted: (t.steps.filter((s) => s.state === 'done')).length,
@@ -149,7 +176,7 @@ function createAppsRegistryOps(deps) {
     return {
       state: job.state, restarted: job.restarted, errors: job.errors,
       startedAt: job.startedAt, finishedAt: job.finishedAt,
-      steps: job.steps.map((s) => ({ name: s.name, state: s.state })),
+      steps: job.steps.map((s) => ({ name: s.name, state: s.state, reason: s.reason || null })),
     };
   }
 

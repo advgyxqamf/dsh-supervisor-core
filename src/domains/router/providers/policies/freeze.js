@@ -50,6 +50,23 @@ function ensureLimit(acc) {
   return acc.limit;
 }
 
+/** limit 的纯只读预览（#20）：与 ensureLimit 逐字段同逻辑、同返回形状，但**不赋值、不写盘**。
+ *  只读视图（views.listProviders）唯一入口，杜绝视图内写副作用。 */
+function previewLimit(acc) {
+  if (!acc) return null;
+  if (acc.limit && acc.limit.kind) return acc.limit;
+  const st = acc.status;
+  let kind = null, recovery = null, reason = null;
+  if (st === 'banned') { kind = 'banned'; recovery = { type: 'manual' }; reason = acc.detectError || acc.lastProbeError || '账号被封禁'; }
+  else if (st === 'frozen') {
+    const err = String(acc.detectError || acc.lastProbeError || '').toLowerCase();
+    if (err.includes('credits') || err.includes('余额不足')) { kind = 'credits'; recovery = { type: 'poll', periodMs: CREDITS_RECHECK_MS }; reason = 'credits 余额不足（充值后自动恢复）'; }
+    else { kind = 'window'; recovery = { type: 'at', at: acc.nextResetAt || null }; reason = '时间窗额度用尽'; }
+  }
+  if (kind) return { kind, since: Date.now(), reason, recovery };
+  return acc.limit;
+}
+
 /** 写 limit（保留同 kind 的证据基线 creditsAt）。 */
 function setLimit(acc, kind, reason, recovery, provider) {
   if (!acc) return null;
@@ -175,6 +192,9 @@ function applyDetection(acc, det, provider) {
           ? '额度用尽（原因：月额度，预计 ' + quota.fmtClock(at) + ' 自动恢复）'
           : '额度用尽（原因：月额度，待月度重置后自动恢复）';
         const recovery = at ? { type: 'at', at } : { type: 'poll', periodMs: CREDITS_RECHECK_MS };
+        // #15：维持分支必须补 nextResetAt，否则下拍探测时刻缺失（frozen+无时刻 -> 每 5min 探测风暴）。
+        // at 已有精确值时保持原值（不覆写已精确语义）；at=0 时以重探周期兜底。
+        acc.nextResetAt = at || Date.now() + CREDITS_RECHECK_MS;
         setLimit(acc, 'credits', reason, recovery, provider);
         acc.detectError = reason;
         provider._persist();
@@ -231,4 +251,4 @@ function reconcileLock(provider) {
   }
 }
 
-module.exports = { setStatus, ensureLimit, setLimit, freezeLimited, markCreditsExhausted, markQuotaExhausted, markBanned, applyDetection, normalizeConsistency, reconcileLock };
+module.exports = { setStatus, ensureLimit, previewLimit, setLimit, freezeLimited, markCreditsExhausted, markQuotaExhausted, markBanned, applyDetection, normalizeConsistency, reconcileLock };

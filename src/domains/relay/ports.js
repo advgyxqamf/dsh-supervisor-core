@@ -9,9 +9,6 @@ const registry = require('../../platform/service/ports').shared;
 /** 逻辑段到池范围（main 无绑定时的建议槽位派生自池定义，禁止池外硬编码）。 */
 function rangeOf(segment) { return registry.rangeOf(segment); }
 
-/** 当前注册表记录（{port, owner, segment}[]）。 */
-function list() { return registry.list(); }
-
 /**
  * 确定性申请一个 relay 槽位。
  * @param {string} segment 段名（relay）
@@ -51,4 +48,4 @@ function ensureMarked(port, owner) {
   if (!registry.isRegistered(port)) registry.allocateMark(port, 'relay', owner);
 }
 
-module.exports = { rangeOf, list, claim, releaseOwner, purgeDuplicates, ensureMarked };
+module.exports = { rangeOf, claim, releaseOwner, purgeDuplicates, ensureMarked };

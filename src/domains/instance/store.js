@@ -23,10 +23,20 @@ class InstanceStore {
   }
 
   load() {
+    let raw = null;
     try {
-      const doc = JSON.parse(fs.readFileSync(this.instancesFile, 'utf8'));
-      this._replace(Array.isArray(doc.instances) ? doc.instances : []);
-    } catch { this._replace([]); }
+      raw = fs.readFileSync(this.instancesFile, 'utf8');
+    } catch (e) {
+      // ENOENT=首启尚无文件，属合法空态（不告警/不备份）；其余读失败按损坏处理。
+      if (e && e.code === 'ENOENT') this._replace([]);
+      else this._quarantineCorrupt(e);
+    }
+    if (raw !== null) {
+      let doc = null;
+      let parsed = true;
+      try { doc = JSON.parse(raw); } catch (e) { parsed = false; this._quarantineCorrupt(e); }
+      if (parsed) this._replace(doc && Array.isArray(doc.instances) ? doc.instances : []);
+    }
     for (const inst of this.instances) {
       model.normalizeInstance(inst);
       // 唯一令牌节点：沙箱实例登记“源”（journald 单元 dsh-web@<id>），令牌获取/分发由服务统一负责。
@@ -36,6 +46,16 @@ class InstanceStore {
     }
     this.syncPorts();
     return this.instances;
+  }
+
+  /** 损坏现场隔离：先告警，再把损坏文件改名为 .corrupt-<ts> 保留现场，最后清空内存。
+   *  rename 先于清空（后续 save 会覆盖原文件）；rename 后原文件不再被覆盖。 */
+  _quarantineCorrupt(err) {
+    const bak = this.instancesFile + '.corrupt-' + Date.now();
+    this.logger && this.logger.warn && this.logger.warn('instances.json 读取/解析失败，备份后清空: ' + (err && err.message) + ' -> ' + bak);
+    try { fs.renameSync(this.instancesFile, bak); }
+    catch (e2) { this.logger && this.logger.warn && this.logger.warn('instances.json 损坏现场备份失败: ' + (e2 && e2.message)); }
+    this._replace([]);
   }
 
   /** 原地替换数组内容（**保持数组对象身份**，外部引用不失效）。 */
@@ -66,14 +86,19 @@ class InstanceStore {
 
   /** 实例端口注册表派生同步：端口真源是 instances.json（内存数组，用户配置值）；registry 的 inst:*
    *  记录是派生投影，把配置端口纳入全局冲突视图（防动态分配段撞实例端口），非记忆绑定。
-   *  全量对账：内存有而 registry 缺则 registerUser；registry 有 inst:* 而内存无对应实例则 unregister。 */
+   *  全量对账：内存有而 registry 缺则 registerUser；registry 有 inst:* 而内存无对应实例则 unregister。
+   *  同 owner 已登记端口与当前配置端口不一致（端口已变）时，先 unregister 旧登记再按新端口
+   *  registerUser——否则旧 inst:* 记录因「该 id 仍存在」而永久泄漏。 */
   syncPorts() {
     for (const inst of this.instances) {
       const id = String(inst.id || '');
       const port = Number(inst.port);
       if (!id || !Number.isInteger(port) || port <= 0) continue;
-      try { if (!ports.isRegistered(port)) ports.registerUser(port, 'inst:' + id); }
-      catch (e) { this.logger.warn && this.logger.warn('syncPorts register ' + id + ':' + port + ': ' + e.message); }
+      try {
+        const bound = ports.byOwner('inst:' + id);
+        if (bound !== null && Number(bound) !== port) ports.unregister('inst:' + id);
+        if (!ports.isRegistered(port)) ports.registerUser(port, 'inst:' + id);
+      } catch (e) { this.logger.warn && this.logger.warn('syncPorts register ' + id + ':' + port + ': ' + e.message); }
     }
     try {
       for (const rec of ports.list()) {

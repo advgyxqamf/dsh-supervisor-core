@@ -5,7 +5,14 @@
 
 const { semverCompare } = require('../../shared/version');
 
-/** 任务状态映射到前端契约（前端轮询判定 done/failed；TaskRegistry 状态为 succeeded/skipped/canceled）。 */
+/** 任务状态映射到前端契约（前端轮询判定 done/failed；TaskRegistry 状态为 succeeded/skipped/canceled）。
+ *  ⚠ 有意平行（P4-A-2 #30）：本函数与 domains/plugin/model.js 的 `taskStateToJobState`、
+ *   domains/router/ops/apps-registry.js 的 `proxyUpdateStatus` 内联同映射是三份平行实现；
+ *   三者映射分支完全一致（succeeded/skipped→done，failed/canceled→failed，余→running）。
+ *   差异只在宿主投影：plugin 侧产出作业视图的 state 字段；apps-registry 侧内联，且紧邻另算
+ *   errors = t.state === 'failed' ? 1 : 0（故 canceled 映射成 failed 而 errors 为 0）。
+ *   有意平行而非抽公共函数：三处分属 instance/plugin/router 三域，抽取须三处同批改动；本批只加注释、不改行为。
+ *   定位请按**符号名**（三处行号随注释增删漂移，写死行号会变成下一条失效引用）。 */
 function taskStateToView(s) {
   return (s === 'succeeded' || s === 'skipped') ? 'done' : (s === 'failed' || s === 'canceled') ? 'failed' : 'running';
 }

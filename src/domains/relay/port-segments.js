@@ -15,4 +15,5 @@ const SEGMENTS = {
 
 ports.registerSegment(SEGMENTS);
 
-module.exports = { SEGMENTS };
+// 零外部消费者：本模块唯一对外契约是 require 即申报的顶层副作用；SEGMENTS 仅供上面 registerSegment 使用。
+module.exports = {};

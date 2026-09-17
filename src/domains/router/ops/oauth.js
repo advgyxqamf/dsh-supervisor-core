@@ -83,6 +83,10 @@ function createOAuthOps(deps) {
     const callbackUrl = 'http://localhost:' + port + '/callback';
     const authUrl = STUDIO_BASE + '/studio/auth/cli?callback=' + encodeURIComponent(callbackUrl) + '&state=' + encodeURIComponent(state);
     const promise = new Promise((resolve, reject) => { st._ccLoginResolve = resolve; st._ccLoginReject = reject; });
+    // #16：UI 只 start 不 wait —— _ccLoginReject 打到无人 await 的 promise 上会 unhandledRejection。
+    // 这里挂一个空 catch 仅把该 rejection 标记为「已处理」，不改变 promise 本体的 settle 值：
+    // commandcodeLoginWait 用的仍是同一 promise 本体，其 await/Promise.race 依旧收到同一 reject。
+    promise.catch(() => {});
     st._ccLoginPromise = promise;
     const tmpProfile = openInBrowser(authUrl, () => {
       if (st._ccLoginReject) {

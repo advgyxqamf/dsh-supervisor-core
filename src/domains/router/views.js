@@ -80,7 +80,7 @@ function listProviders(state, deps) {
         validity: a.status,                     // 兼容字段（=status，避免旧前端读 undefined）
         usage: usageOf,                          // 纯派生（activeAccount/实例实况）
         quota: a.quota || null,
-        limit: (p._ensureLimit ? p._ensureLimit(a) : a.limit) || null, // M2：limitKind+recovery
+        limit: (p._previewLimit ? p._previewLimit(a) : a.limit) || null, // M2：limitKind+recovery（#20 纯只读预览，无写副作用）
         nextResetAt: a.nextResetAt || null,
         registeredAt: a.registeredAt,
         detectError: a.detectError || null,

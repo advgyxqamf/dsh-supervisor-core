@@ -7,7 +7,7 @@
 const managed = require('./managed');
 const portsvc = require('./ports');
 const { FrpManager } = require('./frp');
-const { validateFrpExposure, normalizeFrpSettings } = require('./core');
+const { validateFrpExposure, normalizeFrpSettings, validateFrpServerSettings } = require('./core');
 const reconcile = require('./ops/reconcile');
 const lanServers = require('./ops/lan-servers');
 
@@ -53,7 +53,7 @@ class LanManager {
   }
   /** 受管 DSH 合成清单：沙箱实例 + 原生主干 main。 */
   _allManaged() { return managed.allManaged({ instances: this.instances, mainOf: this.mainOf }); }
-  /** 合成查找：main 优先守卫视图，其余走沙箱数组。 */
+  /** 合成查找：按 id 取首个匹配（清单无同 id 项，见 managed.js#allManaged）。 */
   _findManaged(id) { return managed.findManaged(this._allManaged(), id); }
   /** frpc 子进程句柄只读访问器（daemon 优雅停机等待其退出；不暴露内部 frp 私有对象）。 */
   frpChild() { return (this.frp && this.frp.child) || null; }
@@ -126,6 +126,10 @@ class LanManager {
     if (action === 'settings') {
       const cur = this.frp ? this.frp.loadSettings() : {};
       const next = normalizeFrpSettings(j, cur);
+      // 启用路径写前拒启：serverAddr 为空不得落盘为 enabled:true（否则 daemon 冷启动会 start frpc）；
+      // 关闭方向不受闸（允许停用后清空地址）。
+      const vs = next.enabled ? validateFrpServerSettings(next) : { ok: true };
+      if (!vs.ok) return { ok: false, error: vs.error };
       if (this.frp) this.frp.saveSettings(next);
       this.syncFrpc();
       return { ok: true, ...this.frpStatus() };

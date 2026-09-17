@@ -127,7 +127,6 @@ function createSession(opts) {
 
   /** 当前派生 cookie（tunnel 的降级路径用）。 */
   function currentCookie() { return dshCookie; }
-  function hasCookie() { return !!dshCookie; }
   function hasToken() { return !!dshTokenOf(); }
   function status() { return { ...state }; }
 
@@ -138,7 +137,6 @@ function createSession(opts) {
     mergeDshCookie,
     invalidate,
     currentCookie,
-    hasCookie,
     hasToken,
     status,
   };

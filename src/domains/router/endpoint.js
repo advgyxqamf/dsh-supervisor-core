@@ -58,9 +58,15 @@ function createEndpoint(deps) {
     if (!p || p.activated !== true || !p.apiPort) return;
     if (state.providerServers[id]) return;
     const server = newServer((req, res) => handleForProvider(id, req, res));
-    server.on('error', (err) => { log('provider endpoint ' + p.name + ' error: ' + err.message); delete state.providerServers[id]; });
+    // #17：listen 前先占位，否则并发两次调用都通过上面的 guard，第二次 listen 同端口失败；
+    // 且旧 error 处理器按 id 删除会把第一个的登记删掉（登记与进程脱节，close 漏做）。
+    state.providerServers[id] = server;
+    server.on('error', (err) => {
+      log('provider endpoint ' + p.name + ' error: ' + err.message);
+      // 仅当登记的仍是本 server 才删除（身份比较），防误删后来者的登记。
+      if (state.providerServers[id] === server) delete state.providerServers[id];
+    });
     server.listen(p.apiPort, '127.0.0.1', () => {
-      state.providerServers[id] = server;
       if (events) events.append('router_provider_endpoint', { id, name: p.name, port: p.apiPort });
       log('provider endpoint ' + p.name + ' on ' + p.apiPort);
     });

@@ -1,10 +1,11 @@
 'use strict';
 
 const parseModule = require('./parse');
+const { readUpstreamBody, trackUpstreamBody } = require('./upstream-body');
 
 // 转发 IO 层（网络）：上游响应读取 + 重试循环 + 流式透传。依赖经 ctor 注入
 // （deps={log,logger,readBody,canPersist,parse,usage,inflight,switcher,events,getPricing,agents,maskKey}）；
-// 本文件只 require ./parse（纯）。两条结束路径（writeThrough 成功 / 错误中断）统一走 endInflight() 的 effects。
+// 本文件只 require ./parse 与 ./upstream-body（纯）。两条结束路径（writeThrough 成功 / 错误中断）统一走 endInflight() 的 effects。
 
 const crypto = require('node:crypto');
 const http = require('node:http');
@@ -12,21 +13,6 @@ const https = require('node:https');
 const HOP_HEADERS = new Set(['connection','proxy-connection','keep-alive','proxy-authenticate','proxy-authorization','te','trailer','transfer-encoding','upgrade']);
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-
-/** 有界读上游响应体（字节 + 时间上限；超时带部分内容 resolve，不悬挂调用方）。 */
-function readUpstreamBody(ur, maxBytes, timeoutMs) {
-  return new Promise((resolve) => {
-    let text = '';
-    let done = false;
-    const finish = () => { if (done) return; done = true; if (timer) clearTimeout(timer); resolve(text); };
-    const timer = setTimeout(() => { try { ur.destroy(); } catch {} finish(); }, timeoutMs || 15000);
-    if (timer.unref) timer.unref();
-    ur.on('data', (c) => { if (text.length < (maxBytes || 65536)) text += c; });
-    ur.on('end', finish);
-    ur.on('error', finish);
-    ur.on('close', finish);
-  });
-}
 
 function createForwarder(deps) {
   const d = deps || {};
@@ -236,16 +222,18 @@ function createForwarder(deps) {
       if (events) events.append('router_stream_aborted', { key: maskKey(acc.key), model: meta.model, bytes });
       try { res.destroy(); } catch {}
     };
-    ur.on('data', (c) => { bytes += c.length; tailText += c.toString('utf8'); if (tailText.length > 131072) tailText = tailText.slice(-65536); const okToWrite = res.write(c); if (!okToWrite) ur.pause(); });
-    res.on('drain', () => ur.resume());
-    ur.on('end', () => { finishOK(); res.end(); });
-    ur.on('aborted', () => finishAborted());
-    ur.on('error', () => finishAborted());
-    ur.on('close', () => { if (!ur.readableEnded && !completed) finishAborted(); });
+    // #2：上游体透传统一走 handlers/upstream-body.js；非流式带总时长上限（流式长流不限）。
+    const body = trackUpstreamBody(ur, {
+      res, streamRequested: meta.streamRequested,
+      onData: (c) => { bytes += c.length; tailText += c.toString('utf8'); if (tailText.length > 131072) tailText = tailText.slice(-65536); return res.write(c); },
+      onEnd: () => { finishOK(); res.end(); },
+      onAbort: () => finishAborted(),
+    });
     res.on('close', () => {
       if (completed) return;
       if (ur.readableEnded) return;
       completed = true;
+      body.cancel(); // #2：其它结束路径须清掉非流式体守卫的定时器
       endInflight(acc, prov);
       if (logger && logger.warn) logger.warn('[stream] CLIENT-ABORT key=' + maskKey(acc.key) + ' bytesSent=' + bytes + ' upstreamReadableEnded=' + !!ur.readableEnded + ' content=' + JSON.stringify((tailText || '').slice(0, 400)));
       destroyUpstream();

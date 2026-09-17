@@ -148,6 +148,17 @@ function normalizeFrpSettings(patch, current) {
   };
 }
 
+/** frp 服务器地址前置校验（纯）：serverAddr 为空时 frpc 只会连到空地址、永不建隧道。
+ *  ops.frpAction('settings') 仅在「启用」时据此拒启（关闭方向仍可保存空值）；
+ *  frp.start() 在执行边界对任何 spawn 无条件复校。 */
+function validateFrpServerSettings(settings) {
+  const s = settings || {};
+  if (!String(s.serverAddr || '').trim()) {
+    return { ok: false, error: '启用 frp 前必须填写服务器地址（serverAddr）' };
+  }
+  return { ok: true };
+}
+
 /** 公网暴露（frp）安全闸（纯）：relay 空 token 恒放行 + 回环呈现，公网可零认证触达特权 API。
  *  开启前强制要求已设访问令牌，并做端口合法性与实例间占用校验。
  *  单一事实源：app 侧 patchDshMain 与 relay 侧 setFrp 必须调用本函数，不得各写一份。
@@ -178,5 +189,6 @@ module.exports = {
   POLYFILL_SCRIPT,
   buildFrpcToml,
   normalizeFrpSettings,
+  validateFrpServerSettings,
   validateFrpExposure,
 };
