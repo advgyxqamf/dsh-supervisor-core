@@ -44,6 +44,10 @@ module.exports = {
         const host = on ? '0.0.0.0' : '127.0.0.1';
         const changed = this.config.apiHost !== host;
         this.config.apiHost = host;
+        // 落盘失败必须如实上报（与 access.js 的处理口径一致）：内存是运行期权威，故仍完成重绑与事件，
+        //   但把「未落盘」这一事实透传（api/domains/guard.js 据此回 500）。原实现只 logger.error 后
+        //   照报 ok:true —— 面板显示已切换、重启后却回旧值（AUDIT D8 的同型另一半）。
+        let persistError = null;
         if (this.configPath) {
           try {
             const doc = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
@@ -51,12 +55,19 @@ module.exports = {
             const ctmp = this.configPath + '.tmp';
             fs.writeFileSync(ctmp, JSON.stringify(doc, null, 2), { mode: 0o600 });
             fs.renameSync(ctmp, this.configPath); // 原子 + 0600
-          } catch (e) { this.logger.error('persist apiHost: ' + e.message); }
+          } catch (e) {
+            persistError = 'persist apiHost: ' + e.message;
+            this.logger.error(persistError);
+          }
         }
         if (changed && this.api && typeof this.api.close === 'function') this._apiRebind();
         if (this.events) this.events.append('lan_panel_changed', { enabled: on });
         if (this.logger && this.logger.info) this.logger.info('管家面板局域网访问 -> ' + (enabled ? '开(0.0.0.0)' : '关(127.0.0.1)'));
-        return { ok: true, ...this.lanPanelStatus() };
+        // 取一次即可（原两处各调一次）：lanPanelStatus 会枚举局域网地址（平台子进程），
+        //   且两者必须是同一份快照，否则成功/失败返回的 host/urls 可能不一致。
+        const panel = this.lanPanelStatus();
+        if (persistError) return { ok: false, error: persistError, ...panel };
+        return { ok: true, ...panel };
       } catch (e) {
         return { ok: false, error: e.message };
       }

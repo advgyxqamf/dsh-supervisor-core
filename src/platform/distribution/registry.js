@@ -96,8 +96,17 @@ async function probeRegistry(state, origin) {
   const target = policies.resolveProbe(origin, spec, platformTag());
   const start = Date.now();
   try {
-    const res = await fetch(target.url, { signal: AbortSignal.timeout(target.timeoutMs) });
-    return { ok: res.ok, latencyMs: Date.now() - start, probe: target.kind };
+    // redirect:'manual' + 显式「非 2xx 即失败」—— 本函数是 SSRF 闭环的另一半：
+    //   fetch 默认 follow，攻击者控制的公网源可 302 到内网地址，从而绕过 api 层的 host 策略
+    //   （白名单 / RFC1918 / 云元数据地址 / IPv6 / 单标签主机名）。
+    //   在 platform 层再实现一遍跳转目标校验会复制该策略、且会让 platform 反向依赖 api（违反分层），
+    //   故取「不跟随重定向」这个更简单的安全默认。
+    //   显式按状态码判定而非沿用 res.ok：把「3xx 即失败」写成意图（不同实现对 opaqueredirect
+    //   可能给 status=0，一并覆盖），避免后来者误读为巧合。
+    //   取舍：依赖 http→https 之类跳转的 registry 源从此报不可达 —— 攻击面 > 便利，可接受默认。
+    const res = await fetch(target.url, { signal: AbortSignal.timeout(target.timeoutMs), redirect: 'manual' });
+    const ok = res.status >= 200 && res.status < 300;
+    return { ok, latencyMs: Date.now() - start, probe: target.kind };
   } catch (e) {
     return { ok: false, latencyMs: Date.now() - start, probe: target.kind };
   }
