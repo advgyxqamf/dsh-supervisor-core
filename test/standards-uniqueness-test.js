@@ -71,14 +71,21 @@ const STANDARDS = {
 
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
-/** 剥注释（复用本仓既有做法）：块注释整体移除，行首 // 与 * 注释行清空。 */
+// 剥注释：**先**去行注释（到行尾），**再**去块注释，最后清空残留的 JSDoc 续行（星号开头）。
+//   顺序很重要：若先跑块注释正则，行注释里出现的 glob 形态（斜杠加两个星号，如 release 或 .github
+//   的递归 glob）会被当成**块注释开启符**，把其后直到下一个块注释**结束符**的**代码**一并吞掉
+//   —— 本门禁曾因此把 acceptance 门禁的 STD 常量与 readFileSync 调用行误删，使 U-1b 误报「不真读」。
+//   （本注释刻意不写出那两个两字符序列，避免自己触发同一问题。）
 function stripComments(src) {
-  return String(src)
+  const noLine = String(src).split(String.fromCharCode(10))
+    .map((l) => { const i = l.indexOf('//'); return i >= 0 ? l.slice(0, i) : l; })
+    .join(String.fromCharCode(10));
+  return noLine
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split(String.fromCharCode(10))
     .map((l) => {
       const t = l.trim();
-      if (t.startsWith('//') || t.startsWith('*')) return '';
+      if (t.startsWith('*')) return '';
       return l;
     })
     .join(String.fromCharCode(10));
