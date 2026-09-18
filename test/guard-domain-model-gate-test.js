@@ -96,16 +96,18 @@ function methodBody(src, name) {
   return close < 0 ? null : src.slice(open + 1, close);
 }
 
-/** 取 lan 分支：从守护判入口 this.lanDaemonEnabled() 到函数体末尾（lan 是最后一段）。 */
+/** 取 lan 分支：从守护判入口（.enabled() / lanDaemonEnabled()，形态无关）到函数体末尾（lan 是最后一段）。 */
 function lanBranchOf(fnBody) {
-  const i = fnBody.search(/this\.(?:daemons\.enabled|lanDaemonEnabled)\(\)/);
+  // ⚠ 2026-09-17 阶段六 B-6：supervise.js 去 this 后 lan 闸变为 d.daemons().enabled()。
+  //   判据改为**形态无关**（匹配任意接收者的 .enabled() 或 lanDaemonEnabled()）；判据本意不变。
+  const i = fnBody.search(/(?:\.enabled\(\)|lanDaemonEnabled\(\))/);
   return i < 0 ? null : fnBody.slice(i);
 }
 
 /** 取 router 分支：从 kind === 'router' 判分到 lan 分支起点。 */
 function routerBranchOf(fnBody) {
   const i = fnBody.search(/kind\s*===\s*['"]router['"]/);
-  const j = fnBody.search(/this\.(?:daemons\.enabled|lanDaemonEnabled)\(\)/);
+  const j = fnBody.search(/(?:\.enabled\(\)|lanDaemonEnabled\(\))/);
   if (i < 0) return null;
   return fnBody.slice(i, j > i ? j : fnBody.length);
 }
