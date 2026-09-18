@@ -188,7 +188,7 @@ const readDomain = (dir) => fs.readdirSync(path.join(ROOT, dir)).filter((f) => f
   check('J-f _readBinarySelfVersion 用 updatable 而非 form 硬判',
     /if \(!dep\.updatable \|\| !dep\.runningTarget\) return null;/.test(sv), '已改');
   check('J-f status 的磁盘版本读取用 updatable 判定',
-    /if \(dep\.updatable\) diskVersion = this\._readBinarySelfVersion\(\);/.test(sv), '已改');
+    /if \(dep\.updatable\) diskVersion = [\w.$]*readBinarySelfVersion\(\);/.test(sv), '已改');
   // 反向：剥离注释后不得再有 `form === 'sea-binary'` 的**代码**判定
   const codeOnly = sv.split(String.fromCharCode(10))
     .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*'); })

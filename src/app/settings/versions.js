@@ -4,6 +4,9 @@ const srcpath = require('../../platform/util/srcpath');
 
 // 内核自更新状态 / 管家自身版本检查门面。
 // 导出形态 { methods }，方法经 this 协作。
+//
+// 阶段六 B-5：直接调用与属性访问去 this（改经按 host 缓存的**惰性 deps**）。方法名/{ methods }/
+// 逐字体保留；round8-fixes 的源码形态钉子同批改为按符号名。
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
@@ -13,6 +16,26 @@ const matrix = require('../../platform/contract/matrix');
 const { semverCompare } = require('../../shared/version');
 const deploy = require('../../platform/contract/deploy'); // 自更新形态判定（deploy.detect）
 
+const DEPS = new WeakMap();
+function depsOf(host) {
+  let d = DEPS.get(host);
+  if (!d) {
+    d = {
+      config: () => host.config,
+      dist: () => host.dist,
+      events: () => host.events,
+      guardVersion: () => host.guardVersion,
+      // 同模块兄弟方法经 host 上的既有安装转发（等价于原经 this 的调用）。
+      guardCorePkg: () => host.guardCorePkg(),
+      readBinarySelfVersion: () => host._readBinarySelfVersion(),
+      vcsRoot: () => host._vcsRoot(),
+      guardVersionLocal: () => host.guardVersionLocal(),
+    };
+    DEPS.set(host, d);
+  }
+  return d;
+}
+
 module.exports = {
   methods: {
     // ---- 内核更新（单写入者契约：安装/重启归桌面壳）----
@@ -21,7 +44,8 @@ module.exports = {
 
     /** 内核 npm 子包名（按当前平台/架构）。corePackageName 可为显式常量或含 {os}/{arch} 占位的模板。 */
     guardCorePkg() {
-      const raw = this.config.corePackageName;
+      const d = depsOf(this);
+      const raw = d.config().corePackageName;
       if (!raw) return null;
       return String(raw).replace(/{os}/g, matrix.osTag()).replace(/{arch}/g, matrix.current().arch) || null;
     },
@@ -31,9 +55,10 @@ module.exports = {
      *  rollback -> canary -> latest；latest 缺失才回落最高），与本机 guardVersion 比较。
      *  本方法不写任何东西：面板据此显示可更新，实际安装由桌面壳 kernel_update_apply 执行。 */
     async guardSelfUpdateStatus() {
-      const pkg = this.guardCorePkg();
+      const d = depsOf(this);
+      const pkg = d.guardCorePkg();
       if (!pkg) return { ok: false, error: '未配置内核包（corePackageName）' };
-      if (!this.dist || typeof this.dist.fetchLatestVersion !== 'function') return { ok: false, error: '发布服务未初始化' };
+      if (!d.dist() || typeof d.dist().fetchLatestVersion !== 'function') return { ok: false, error: '发布服务未初始化' };
       // 部署形态判定：源码开发形态（bin 壳 require 源码目录）不适用 npm 分发的版本口径——显式说明。
       const dep = deploy.detect();
       if (!dep.updatable) {
@@ -41,11 +66,11 @@ module.exports = {
       }
       try {
         // authoritative：查官方 registry——镜像同步延迟会把新版本误判为『已是最新』。
-        const latest = await this.dist.fetchLatestVersion(pkg, this.config.releaseChannel || 'npm', { authoritative: true });
-        const installed = this.guardVersion;
+        const latest = await d.dist().fetchLatestVersion(pkg, d.config().releaseChannel || 'npm', { authoritative: true });
+        const installed = d.guardVersion();
         if (!latest) return { ok: false, error: '官方源不可达或未查询到版本' };
         const updateAvailable = semverCompare(latest, installed) > 0;
-        if (this.events) this.events.append('guard_self_update_checked', { installed, latest, updateAvailable });
+        if (d.events()) d.events().append('guard_self_update_checked', { installed, latest, updateAvailable });
         return { ok: true, pkg, installed, latest, updateAvailable, form: dep.form, updatable: true };
       } catch (e) { return { ok: false, error: e.message }; }
     },
@@ -88,7 +113,8 @@ module.exports = {
 
     /** 本地视角（无网络 I/O，同步安全）：commit + 是否配了 upstream。 */
     guardVersionLocal() {
-      const root = this._vcsRoot();
+      const d = depsOf(this);
+      const root = d.vcsRoot();
       let commit = null;
       commit = (ex.runOut('git', ['-C', root, 'rev-parse', '--short', 'HEAD']) || '').trim() || null;
       let upstream = 'local';
@@ -98,7 +124,7 @@ module.exports = {
       } catch {}
       // version = 进程运行版本（启动时固化，打包态为编译期常量）。
       // 磁盘实况版本（runningVersion vs diskVersion 的 updatePending 判定）在 async guardVersionCheck。
-      return { version: this.guardVersion, runningVersion: this.guardVersion, commit, updateAvailable: false, upstream, latest: this.guardVersion };
+      return { version: d.guardVersion(), runningVersion: d.guardVersion(), commit, updateAvailable: false, upstream, latest: d.guardVersion() };
     },
 
     /**
@@ -107,9 +133,10 @@ module.exports = {
      * 这里用 execFile（异步）+ 10s 超时；fetch 失败/超时只降级为「本地视图」，不抛错。
      */
     async guardVersionCheck() {
-      const base = this.guardVersionLocal();
+      const d = depsOf(this);
+      const base = d.guardVersionLocal();
       if (base.upstream !== 'git-repo') return base;
-      const root = this._vcsRoot();
+      const root = d.vcsRoot();
       const fetchOk = await new Promise((resolve) => {
         let settled = false;
         const done = (ok) => { if (!settled) { settled = true; resolve(ok); } };
@@ -129,8 +156,8 @@ module.exports = {
       const dep = deploy.detect();
       let diskVersion = null;
       // launcher 形态同样有运行位自报版本（见 _readBinarySelfVersion 说明）。
-      if (dep.updatable) diskVersion = this._readBinarySelfVersion();
-      const updatePending = !!(diskVersion && diskVersion !== this.guardVersion);
+      if (dep.updatable) diskVersion = d.readBinarySelfVersion();
+      const updatePending = !!(diskVersion && diskVersion !== d.guardVersion());
       return { ...base, diskVersion, updatePending };
     },
   },

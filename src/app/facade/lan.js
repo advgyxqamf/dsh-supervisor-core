@@ -4,6 +4,18 @@
 // app/domain-actions/lan.js）。只读白名单（DG-14 强制）：listLan（读触发对账，见
 // FACADE_EXCEPTIONS）/ frpStatus；daemon 模式经 43108 ctl 委托，内嵌模式走 LanManager
 // 只读方法。导出契约：module.exports = { methods }，方法内部走 this。
+//
+// 阶段六 B-1 补齐：属性级去 this（改经按 host 缓存的**惰性 deps**）。方法名/{ methods }/
+// 逐字体保留；DG-14 的 facadeWriteViolations 与 token-boundary 的 host._lanCtlCall 覆写面不变。
+const DEPS = new WeakMap();
+function depsOf(host) {
+  let d = DEPS.get(host);
+  if (!d) {
+    d = { daemons: () => host.daemons, ctl: () => host.ctl, lan: () => host.lan };
+    DEPS.set(host, d);
+  }
+  return d;
+}
 
 module.exports = { methods: {
 
@@ -13,6 +25,7 @@ module.exports = { methods: {
   // 直出 dshToken 会把 DSH 会话令牌泄漏给局域网；权威仍在 DshTokenService（relay 经
   // tokenOf 内部读取，无需经此透传）。返回形如 {items,addresses}。
   listLan() {
+    const d = depsOf(this);
     // 白名单外显：只放行结构字段与注入状态 inject；任何令牌字段都不外传。
     const sanitize = (r) => {
       if (!r || !r.items) return r;
@@ -38,12 +51,13 @@ module.exports = { methods: {
         return out;
       }), addresses: r.addresses || [] };
     };
-    if (this.daemons.enabled() /* daemon 启用即 ctl */) return this.ctl.lanCall('list').then(sanitize).catch(() => ({ items: [], addresses: [] }));
-    try { return sanitize(this.lan.list()); } catch { return { items: [], addresses: [] }; }
+    if (d.daemons().enabled() /* daemon 启用即 ctl */) return d.ctl().lanCall('list').then(sanitize).catch(() => ({ items: [], addresses: [] }));
+    try { return sanitize(d.lan().list()); } catch { return { items: [], addresses: [] }; }
   },
 
   frpStatus() {
-    if (this.daemons.enabled() /* daemon 启用即 ctl */) return this.ctl.lanCall('frpStatus');
-    return this.lan.frpStatus();
+    const d = depsOf(this);
+    if (d.daemons().enabled() /* daemon 启用即 ctl */) return d.ctl().lanCall('frpStatus');
+    return d.lan().frpStatus();
   },
 } };
