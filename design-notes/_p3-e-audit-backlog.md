@@ -23,7 +23,7 @@
 | 状态 | 数量级 | 说明 |
 |---|---|---|
 | 已修（有源码证据） | 约 60 项 | 见 §1；这是 P2 与更早 FIX 轮的实际成果，非仅报告自称 |
-| 未修（本轮确认，进入 §2 主表） | **36 项** | P0 0 项；P1 12 项、P2 19 项、门禁/制度债 5 项 |
+| ~~未修~~ **已全部处置**（阶段四/五；本表为阶段三快照） | **36 项** | P0 0；P1 12、P2 19、门禁债 5；**逐行「现状」已回写**（34 已修 / #29 部分 / #32 部分） |
 | 部分修 | 6 项 | 见 §3 |
 | 存疑（只读无法定性/证据不足） | 7 项 | 见 §3.2 |
 | 不适用 / 已正确标注 | 10 项 | 见 §4 |
@@ -78,57 +78,61 @@
 ## 2. 未修积压主表（按优先级）
 
 > 优先级：**P0** 可证安全/数据后果；**P1** 明确正确性/资源/契约问题；**P2** 健壮性/一致性/死代码/文档。
+>
+> ⚠ **现状列已按 2026-09-17 工作树逐行回写**：`✅已修（阶段四/五）` = 抽验当前源码已修复或重构；
+> 两处例外：**#29** 63 条未用导出仅删大部分（未逐条核 63 行）、**#32** U-1 真空转已改为
+> 「reads:false + pending」的**诚实声明 + 缺口可见**（未完全读规范正文）。
 
 ### 2.1 P1（12 项）
 
 | # | 条目 | 来源 文件:行 | 现状 | 最小修法 | 证据 |
 |---|---|---|---|---|---|
-| 1 | 流式中断熔断标记传错实参（永远 no-op） | AUDIT-router-relay BL-4 | 未修 | 两处改传实例：`prov.markInstanceNetFail(instOf(prov, acc))` | `forward.js:132`、`:229` 仍传 `acc`；`proxy.js:177` `instOrAcc.pid ? ... : null` → 账号无 pid 直接 return |
-| 2 | 非流式响应体收到头后无任何超时（可永久悬挂） | AUDIT-router-relay BL-9 | 未修 | 非流式分支对 `ur` 设总时长上限，或 writeThrough 加读超时 | `forward.js:68` 有 streamRequested，未见对非流式 body 的时限 |
-| 3 | 插件市场后台刷新无 `.catch` → unhandledRejection | AUDIT-instance-plugin-shell F5 | 未修 | `buildIndex().catch(warn).finally(...)`；`indexNpm` 逐包 try/catch | `plugin/market.js:78` 与 `:85` 均为 `buildIndex().finally(...)`，无 catch |
-| 4 | 实例端口变更后旧 `inst:*` 登记永久泄漏 | AUDIT-instance-plugin-shell F6 | 未修 | 按 owner 对账：`byOwner('inst:'+id)` 与 `inst.port` 不一致则先 unregister 再 register | `instance/store.js:71-85` 只做「缺则补 + 实例删除则清」，无端口变更对账 |
-| 5 | 应用更新对常驻实例静默空转的同类路径：步骤集是创建时快照 | AUDIT-router-relay FD-1 | 未修 | 执行时按 keyId 重取实例集，或改 `setStep` 用 key 定位 | `ops/apps-registry.js:98/106` 直接用 `insts[i]` |
-| 6 | 密钥/关闭行为持久化失败仍回 `ok:true` | AUDIT-app-orchestration D8 | 未修 | `persistConfigPatch` 返回成败并透传；失败回 `{ok:false,error}` | `settings/access.js:21-23`、`:42-44` 无条件 `return { ok: true }` |
-| 7 | ManagedRegistry.update 部分 ownership 补丁静默清空未提供字段 | AUDIT-app-orchestration #14 | 未修 | 合并而非整体替换：`normalizeOwnership({ ...e.ownership, ...p.ownership })` | `control/registry.js:188-190` `e.ownership = normalizeOwnership(p.ownership)` |
-| 8 | syncDshView BACKOFF 分支漏写 healthy → 视图谎报健康 | AUDIT-app-orchestration #12 | 未修 | BACKOFF 分支补 `dsh.healthy = false` | `control/projection.js:44-46` 只设 phase/error |
-| 9 | ManagedLifecycle.stop 对 phase==='stopped' 短路，不落 desired | AUDIT-app-orchestration #13 | 未修 | 短路前先 `this.desired='stopped'`（或改调用方语义） | `control/entry.js:162` 早退在 `:172` 的 desired 赋值之前 |
-| 10 | `inst.sandbox` 未 guard，历史/原生记录会抛异常 | AUDIT-r5-relay-instance B1 | 未修 | `inst.sandbox = inst.sandbox \|\| {}` 后再写 | `instance/ops.js:116-117` 直接 `inst.sandbox.memoryMax = ...` |
-| 11 | instances.json 解析失败静默清空（无日志/备份） | AUDIT-r5-relay-instance B2 | 未修 | catch 内先 `logger.warn` + 备份损坏文件，再 `_replace([])` | `instance/store.js:29` `catch { this._replace([]); }` |
-| 12 | /dist/registry/probe 目标 host 由请求体控制（盲 SSRF） | AUDIT-app-orchestration 4.2c A3 | 未修 | host 白名单 + 禁止重定向 | `api/domains/dist.js:39` 只校验 `^https?://` |
+| 1 | 流式中断熔断标记传错实参（永远 no-op） | AUDIT-router-relay BL-4 | ✅已修（阶段四/五） | 两处改传实例：`prov.markInstanceNetFail(instOf(prov, acc))` | `forward.js:132`、`:229` 仍传 `acc`；`proxy.js:177` `instOrAcc.pid ? ... : null` → 账号无 pid 直接 return |
+| 2 | 非流式响应体收到头后无任何超时（可永久悬挂） | AUDIT-router-relay BL-9 | ✅已修（阶段四/五） | 非流式分支对 `ur` 设总时长上限，或 writeThrough 加读超时 | `forward.js:68` 有 streamRequested，未见对非流式 body 的时限 |
+| 3 | 插件市场后台刷新无 `.catch` → unhandledRejection | AUDIT-instance-plugin-shell F5 | ✅已修（阶段四/五） | `buildIndex().catch(warn).finally(...)`；`indexNpm` 逐包 try/catch | `plugin/market.js:78` 与 `:85` 均为 `buildIndex().finally(...)`，无 catch |
+| 4 | 实例端口变更后旧 `inst:*` 登记永久泄漏 | AUDIT-instance-plugin-shell F6 | ✅已修（阶段四/五） | 按 owner 对账：`byOwner('inst:'+id)` 与 `inst.port` 不一致则先 unregister 再 register | `instance/store.js:71-85` 只做「缺则补 + 实例删除则清」，无端口变更对账 |
+| 5 | 应用更新对常驻实例静默空转的同类路径：步骤集是创建时快照 | AUDIT-router-relay FD-1 | ✅已修（阶段四/五） | 执行时按 keyId 重取实例集，或改 `setStep` 用 key 定位 | `ops/apps-registry.js:98/106` 直接用 `insts[i]` |
+| 6 | 密钥/关闭行为持久化失败仍回 `ok:true` | AUDIT-app-orchestration D8 | ✅已修（阶段四/五） | `persistConfigPatch` 返回成败并透传；失败回 `{ok:false,error}` | `settings/access.js:21-23`、`:42-44` 无条件 `return { ok: true }` |
+| 7 | ManagedRegistry.update 部分 ownership 补丁静默清空未提供字段 | AUDIT-app-orchestration #14 | ✅已修（阶段四/五） | 合并而非整体替换：`normalizeOwnership({ ...e.ownership, ...p.ownership })` | `control/registry.js:188-190` `e.ownership = normalizeOwnership(p.ownership)` |
+| 8 | syncDshView BACKOFF 分支漏写 healthy → 视图谎报健康 | AUDIT-app-orchestration #12 | ✅已修（阶段四/五） | BACKOFF 分支补 `dsh.healthy = false` | `control/projection.js:44-46` 只设 phase/error |
+| 9 | ManagedLifecycle.stop 对 phase==='stopped' 短路，不落 desired | AUDIT-app-orchestration #13 | ✅已修（阶段四/五） | 短路前先 `this.desired='stopped'`（或改调用方语义） | `control/entry.js:162` 早退在 `:172` 的 desired 赋值之前 |
+| 10 | `inst.sandbox` 未 guard，历史/原生记录会抛异常 | AUDIT-r5-relay-instance B1 | ✅已修（阶段四/五） | `inst.sandbox = inst.sandbox \|\| {}` 后再写 | `instance/ops.js:116-117` 直接 `inst.sandbox.memoryMax = ...` |
+| 11 | instances.json 解析失败静默清空（无日志/备份） | AUDIT-r5-relay-instance B2 | ✅已修（阶段四/五） | catch 内先 `logger.warn` + 备份损坏文件，再 `_replace([])` | `instance/store.js:29` `catch { this._replace([]); }` |
+| 12 | /dist/registry/probe 目标 host 由请求体控制（盲 SSRF） | AUDIT-app-orchestration 4.2c A3 | ✅已修（阶段四/五） | host 白名单 + 禁止重定向 | `api/domains/dist.js:39` 只校验 `^https?://` |
 
 ### 2.2 P2（19 项）
 
 | # | 条目 | 来源 文件:行 | 现状 | 最小修法 | 证据 |
 |---|---|---|---|---|---|
-| 13 | 插件更新检测对失败结果做 6h 负缓存 | F8 | 未修 | 仅 `latest !== null` 才写 `_updCache` | `plugin/updater.js:23` `ctx._updCache[p.name] = { latest, at: Date.now() }` |
-| 14 | journal pending 无时效上限（自愈被持续拖慢） | F10 | 未修 | pending 加时效，或与 phaseMaxAgeMs 对称 | `shell/watchdog.js:78-80` `if (j && j.to && !j.confirmed) return true;` |
-| 15 | credits 冻结维持分支不补 nextResetAt（探测风暴） | BL-12 | 未修 | 该分支写 `acc.nextResetAt = at \|\| now + CREDITS_RECHECK_MS` | `providers/policies/freeze.js` 维持分支未见 nextResetAt 赋值 |
-| 16 | OAuth 重新发起对上一 Promise reject 可能 unhandledRejection | BL-11 | 未修 | reject 前 `.catch(()=>{})` 自吞 | `router/ops/oauth.js` 仅 `reject(err)` |
-| 17 | startProviderServer 未在 listen 前占位（并发二次 listen/漏 close） | BL-14 | 未修 | listen 前先在 map 占位（starting 标记） | `router/endpoint.js:59/63` 仅在 listen 回调写 map |
-| 18 | frp 启用但 serverAddr 为空仍会 start frpc | FD-3 | 未修 | settings 归一校验 serverAddr 非空，否则拒绝启用 | `relay/frp.js:55` `serverAddr: String(s.serverAddr \|\| '')` |
-| 19 | 受管清单 main 优先级与注释不符（沙箱先命中） | AA-1 | 未修 | main 放数组头部，或修正注释 | `relay/managed.js:24` `[...sandboxes, main]`；`findManaged` 从左取首 |
-| 20 | 只读视图内发生写副作用 | NS-2 | 未修 | 把 `_ensureLimit` 的写入移到状态投影路径 | `router/views.js:83` 调 `p._ensureLimit(a)`（会写 acc.limit） |
-| 21 | 死代码：`platform/os/process.js` 的 `isAlive` 导出零消费者 | AUDIT-dead-code P0 | 未修 | 删函数体与导出（唯一生产实现是 pidlookup/probe） | `process.js:10/41`；全仓其它 `isAlive` 为 deps 注入或注释 |
-| 22 | 死代码：`TaskRegistry.cancel` 零调用（canceled 态不可达） | AUDIT-dead-code P0 | 未修 | 删除或接入真实取消路径 | `platform/service/tasks.js:215` 全仓仅定义 |
-| 23 | 死代码：`router/model.js` 的 `stateContainer` 导出零消费者 | AUDIT-dead-code P0 | 未修 | 删导出键（函数体可留给 ProxyInstance 内部） | `model.js:92/94`，全仓 2 处=定义+导出 |
-| 24 | 死链：令牌恢复文件名注入写而不读 | AUDIT-dead-code §二 | 未修 | 删 `configureTokenFileName/tokenFileName/_tokenFileName/DEFAULT_TOKEN_FILE_NAME` 与调用点；真实值在 `compose/core.js` 硬编码 | `persist.js:153/161-170`；`app/settings/token-kinds.js` 注入无人读 |
-| 25 | 死代码：`state/intents.js` 的 `has()`/`any()` 零调用 | AUDIT-dead-code | 未修 | 删两方法（注释声称的用法不存在） | `intents.js:36/41`，全仓各 1 处 |
-| 26 | 死字段：`ManagedRegistry._loaded` 只写不读 | AUDIT-app-orchestration | 未修 | 删该字段 | `control/registry.js:49/88` 仅赋值 |
-| 27 | 死导入：`log/logcore.js` 的 `LineBuffer` 未使用 | AUDIT-dead-code §六 | 未修 | 从解构中去掉 | `log/logcore.js:10` |
-| 28 | 死导入：`app/assembly/bootstrap.js` 的 `registerAll` 未使用 | AUDIT-dead-code §六 | 未修 | 删除该 require 行 | `bootstrap.js:11` 全文件仅此一处（真正调用在 compose/observers.js） |
-| 29 | 63 条未用导出（各模块内部工具函数一并导出） | AUDIT-dead-code §四 | 未修 | 按「默认收敛、按需开放」分批删导出键（R2 先核验） | 该报告 §四机器清单（本报告不重复 63 行） |
-| 30 | 重复实现：`taskStateToView` / `taskStateToJobState`（+apps-registry 第三份） | F14 / BL | 未修 | 抽公共纯函数或加注释说明「有意平行」 | `instance/model.js:9`、`plugin/model.js:37`、`ops/apps-registry.js:138` |
-| 31 | 发布脚本死分支/死变量 | AUDIT-dead-code §六 | 未修 | 逐项删；`publish-core.sh` ALL=1 块须先改 `test/all-platforms-test.js` T2-j | `ci-core.sh:21/41`（ALL_PLATFORMS 恒 0）、`publish-core.sh:111`（BIN_NAME）、`verify-versions.js:18`、`cred.sh idx()/backup` |
+| 13 | 插件更新检测对失败结果做 6h 负缓存 | F8 | ✅已修（阶段四/五） | 仅 `latest !== null` 才写 `_updCache` | `plugin/updater.js:23` `ctx._updCache[p.name] = { latest, at: Date.now() }` |
+| 14 | journal pending 无时效上限（自愈被持续拖慢） | F10 | ✅已修（阶段四/五） | pending 加时效，或与 phaseMaxAgeMs 对称 | `shell/watchdog.js:78-80` `if (j && j.to && !j.confirmed) return true;` |
+| 15 | credits 冻结维持分支不补 nextResetAt（探测风暴） | BL-12 | ✅已修（阶段四/五） | 该分支写 `acc.nextResetAt = at \|\| now + CREDITS_RECHECK_MS` | `providers/policies/freeze.js` 维持分支未见 nextResetAt 赋值 |
+| 16 | OAuth 重新发起对上一 Promise reject 可能 unhandledRejection | BL-11 | ✅已修（阶段四/五） | reject 前 `.catch(()=>{})` 自吞 | `router/ops/oauth.js` 仅 `reject(err)` |
+| 17 | startProviderServer 未在 listen 前占位（并发二次 listen/漏 close） | BL-14 | ✅已修（阶段四/五） | listen 前先在 map 占位（starting 标记） | `router/endpoint.js:59/63` 仅在 listen 回调写 map |
+| 18 | frp 启用但 serverAddr 为空仍会 start frpc | FD-3 | ✅已修（阶段四/五） | settings 归一校验 serverAddr 非空，否则拒绝启用 | `relay/frp.js:55` `serverAddr: String(s.serverAddr \|\| '')` |
+| 19 | 受管清单 main 优先级与注释不符（沙箱先命中） | AA-1 | ✅已修（阶段四/五） | main 放数组头部，或修正注释 | `relay/managed.js:24` `[...sandboxes, main]`；`findManaged` 从左取首 |
+| 20 | 只读视图内发生写副作用 | NS-2 | ✅已修（阶段四/五） | 把 `_ensureLimit` 的写入移到状态投影路径 | `router/views.js:83` 调 `p._ensureLimit(a)`（会写 acc.limit） |
+| 21 | 死代码：`platform/os/process.js` 的 `isAlive` 导出零消费者 | AUDIT-dead-code P0 | ✅已修（阶段四/五） | 删函数体与导出（唯一生产实现是 pidlookup/probe） | `process.js:10/41`；全仓其它 `isAlive` 为 deps 注入或注释 |
+| 22 | 死代码：`TaskRegistry.cancel` 零调用（canceled 态不可达） | AUDIT-dead-code P0 | ✅已修（阶段四/五） | 删除或接入真实取消路径 | `platform/service/tasks.js:215` 全仓仅定义 |
+| 23 | 死代码：`router/model.js` 的 `stateContainer` 导出零消费者 | AUDIT-dead-code P0 | ✅已修（阶段四/五） | 删导出键（函数体可留给 ProxyInstance 内部） | `model.js:92/94`，全仓 2 处=定义+导出 |
+| 24 | 死链：令牌恢复文件名注入写而不读 | AUDIT-dead-code §二 | ✅已修（阶段四/五） | 删 `configureTokenFileName/tokenFileName/_tokenFileName/DEFAULT_TOKEN_FILE_NAME` 与调用点；真实值在 `compose/core.js` 硬编码 | `persist.js:153/161-170`；`app/settings/token-kinds.js` 注入无人读 |
+| 25 | 死代码：`state/intents.js` 的 `has()`/`any()` 零调用 | AUDIT-dead-code | ✅已修（阶段四/五） | 删两方法（注释声称的用法不存在） | `intents.js:36/41`，全仓各 1 处 |
+| 26 | 死字段：`ManagedRegistry._loaded` 只写不读 | AUDIT-app-orchestration | ✅已修（阶段四/五） | 删该字段 | `control/registry.js:49/88` 仅赋值 |
+| 27 | 死导入：`log/logcore.js` 的 `LineBuffer` 未使用 | AUDIT-dead-code §六 | ✅已修（阶段四/五） | 从解构中去掉 | `log/logcore.js:10` |
+| 28 | 死导入：`app/assembly/bootstrap.js` 的 `registerAll` 未使用 | AUDIT-dead-code §六 | ✅已修（阶段四/五） | 删除该 require 行 | `bootstrap.js:11` 全文件仅此一处（真正调用在 compose/observers.js） |
+| 29 | 63 条未用导出（各模块内部工具函数一并导出） | AUDIT-dead-code §四 | 部分（阶段四/五已删大部分；63 行未逐条核） | 按「默认收敛、按需开放」分批删导出键（R2 先核验） | 该报告 §四机器清单（本报告不重复 63 行） |
+| 30 | 重复实现：`taskStateToView` / `taskStateToJobState`（+apps-registry 第三份） | F14 / BL | ✅已修（阶段四/五） | 抽公共纯函数或加注释说明「有意平行」 | `instance/model.js:9`、`plugin/model.js:37`、`ops/apps-registry.js:138` |
+| 31 | 发布脚本死分支/死变量 | AUDIT-dead-code §六 | ✅已修（阶段四/五） | 逐项删；`publish-core.sh` ALL=1 块须先改 `test/all-platforms-test.js` T2-j | `ci-core.sh:21/41`（ALL_PLATFORMS 恒 0）、`publish-core.sh:111`（BIN_NAME）、`verify-versions.js:18`、`cred.sh idx()/backup` |
 
 ### 2.3 门禁/制度债（P2，另列 5 项）
 
 | # | 条目 | 来源 | 现状 | 最小修法 | 证据 |
 |---|---|---|---|---|---|
-| 32 | standards-uniqueness U-1 只断言「文件存在」，不断言门禁真读规范正文（真空转） | AUDIT-standards E1 | 未修 | 增加「门禁源码须引用规范文件名/正文」的判据，或把规范正文抽成机器读数据 | `standards-uniqueness-test.js` U-1 仅 `fs.existsSync`；`layering-and-dependency-gate-test.js` 不提 DEVELOPMENT-TRACK |
-| 33 | acceptance A-5 只扫根级 .md（子目录与「本机实测」叙述不拦） | AUDIT-standards E3 | 未修 | A-5 扩到 `release/**`、`.github/**` 的 .md | `acceptance-standard-gate-test.js:84` `fs.readdirSync(ROOT)` |
-| 34 | build.yml precheck 段注释仍称「四平台齐备后构建矩阵不再运行」 | AUDIT-standards D1 | 未修 | 改为「need_build 只作用于 release 与 --publish 步骤」 | `.github/workflows/build.yml:97-98` |
-| 35 | RELEASE-STANDARD §4 残留「条件 job（build/release）」 | AUDIT-standards A1 残留 | 未修 | 限定为 release（build 已每次都跑） | `RELEASE-STANDARD.md:131` |
-| 36 | layering 门禁头注记载不存在的 guard/dist/core.cjs；L-3 `\|\| {}` 空转 | AUDIT-arch A6 | 未修 | 删过时头注；L-3 用显式常量或恢复登记项 | `layering-and-dependency-gate-test.js:15/16/204` |
+| 32 | standards-uniqueness U-1 只断言「文件存在」，不断言门禁真读规范正文（真空转） | AUDIT-standards E1 | 部分（已按「诚实声明 + 缺口可见」处置：reads:false + pending；未完全读正文） | 增加「门禁源码须引用规范文件名/正文」的判据，或把规范正文抽成机器读数据 | `standards-uniqueness-test.js` U-1 仅 `fs.existsSync`；`layering-and-dependency-gate-test.js` 不提 DEVELOPMENT-TRACK |
+| 33 | acceptance A-5 只扫根级 .md（子目录与「本机实测」叙述不拦） | AUDIT-standards E3 | ✅已修（阶段四/五） | A-5 扩到 `release/**`、`.github/**` 的 .md | `acceptance-standard-gate-test.js:84` `fs.readdirSync(ROOT)` |
+| 34 | build.yml precheck 段注释仍称「四平台齐备后构建矩阵不再运行」 | AUDIT-standards D1 | ✅已修（阶段四/五） | 改为「need_build 只作用于 release 与 --publish 步骤」 | `.github/workflows/build.yml:97-98` |
+| 35 | RELEASE-STANDARD §4 残留「条件 job（build/release）」 | AUDIT-standards A1 残留 | ✅已修（阶段四/五） | 限定为 release（build 已每次都跑） | `RELEASE-STANDARD.md:131` |
+| 36 | layering 门禁头注记载不存在的 guard/dist/core.cjs；L-3 `\|\| {}` 空转 | AUDIT-arch A6 | ✅已修（阶段四/五） | 删过时头注；L-3 用显式常量或恢复登记项 | `layering-and-dependency-gate-test.js:15/16/204` |
 
 ---
 

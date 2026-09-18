@@ -7,7 +7,9 @@ const stateRoot = require('../service/state-root');
 // 能力矩阵为纯函数 + 工具探测；service 是 Provider 分派（linux->systemd / darwin->launchd /
 // win32->windows-service / 未知->none，未实现能力抛 CapabilityError）；其余模块函数内按平台
 // 分支、三端接口一致。
-// TODO(P2)：servicehost/sandbox 的完整 Provider 化（bin install 迁移、多实例 Provider 切换）。
+// 历史 TODO（已撤销，勿据以派单）：原记「servicehost/sandbox 的完整 Provider 化」。核验：**无 servicehost 模块**；
+//   service 早已是 PROVIDERS[PLATFORM] 真 Provider 分派；sandbox 属 domains/instance（非 os 层）。其余 os 模块
+//   按平台分支、三端接口一致，是**有意设计**而非待办。
 
 const os = require('node:os');
 const path = require('node:path');

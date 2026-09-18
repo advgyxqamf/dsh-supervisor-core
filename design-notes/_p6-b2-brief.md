@@ -1,5 +1,8 @@
 # P6-B-2 下级作业单：main 工厂化（单文件）
 
+> ⚠ **已作废（superseded）**：`src/app/main/**` 已于 2026-09-17 全部完成原地去 this（141->0），
+> 见 `_p6-b2-main-inplace.md`。本文保留仅作历史方案记录，**不要再按此文派工**。
+
 > 由 P6-B-2 生成。**先读**：`design-notes/_workorder-phase6.md` §0/§3、`_workorder-phase4.md` §0/§1、`_p6-b-shards.md`。
 
 ## 0. 硬约束（与上游一致，违反即作废）
