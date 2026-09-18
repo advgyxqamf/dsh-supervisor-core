@@ -2,8 +2,13 @@
 'use strict';
 
 // API 契约面强制测试（P3 断点修复）：
-//   断言「源码中出现的每个路由」都在 src/api/surface.js 登记，且登记的每个路由都真实存在
+//   断言「源码中出现的每个路由」都在 src/api/contract.js 登记，且登记的每个路由都真实存在
 //   （双向一致）。新增路由若不登记 → 本测试失败；删除路由若不清理清单 → 也失败。
+//
+// ⚠ 步骤 9（DIRECTORY-STRUCTURE-DESIGN §3）：路由实现已平移至 src/api/domains/，
+//   契约面元数据 surface.js 改名为 contract.js。本测试的扫描目录随之扩展为
+//   「api/ 顶层 + api/domains/」两处——只扫顶层会让 10 个域的路由**全部漏检**
+//   （双向一致退化为空转），那正是本门禁要防的失效模式。
 // 目的：把「端点是否有消费者 / 是否属于对外面」从一次性审计升级为**常驻不变量**。
 
 const fs = require('node:fs');
@@ -13,14 +18,21 @@ const API_DIR = path.join(ROOT, 'src', 'api');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 
-const { SURFACE, PREFIXES, CATEGORIES, summary } = require(path.join(API_DIR, 'surface'));
+const { SURFACE, PREFIXES, CATEGORIES, summary } = require(path.join(API_DIR, 'contract'));
 
-// ── 从源码提取路由（排除 index.js 与 surface.js 自身）──
+// ── 从源码提取路由 ──
+// 范围：api/ 顶层（排除网关 index.js 与契约 contract.js 自身）∪ api/domains/*.js。
+//   其余顶层基础件（security/static/router-table/deps/identity）无路由定义，被扫到也无副作用。
 function extract() {
   const exact = new Map();   // path -> Set(file)
   const prefix = new Map();  // prefix -> Set(file)
-  for (const f of fs.readdirSync(API_DIR).filter((x) => x.endsWith('.js') && x !== 'index.js' && x !== 'surface.js')) {
-    const s = fs.readFileSync(path.join(API_DIR, f), 'utf8');
+  const scan = [
+    ...fs.readdirSync(API_DIR).filter((x) => x.endsWith('.js') && x !== 'index.js' && x !== 'contract.js').map((x) => path.join(API_DIR, x)),
+    ...(() => { try { return fs.readdirSync(path.join(API_DIR, 'domains')).filter((x) => x.endsWith('.js')).map((x) => path.join(API_DIR, 'domains', x)); } catch { return []; } })(),
+  ];
+  for (const fp of scan) {
+    const f = fp;
+    const s = fs.readFileSync(fp, 'utf8');
     let m;
     const re = /pathname === '([^']+)'/g;
     while ((m = re.exec(s))) { if (!exact.has(m[1])) exact.set(m[1], new Set()); exact.get(m[1]).add(f); }
@@ -64,7 +76,7 @@ check('internal 条目说明内部消费者', SURFACE.filter((e) => e.category =
   JSON.stringify(SURFACE.filter((e) => e.category === 'internal').map((e) => e.path)));
 
 console.log('== 已删除的冗余端点不得复活 ==');
-const lifeSrc = fs.readFileSync(path.join(API_DIR, 'lifecycle.js'), 'utf8');
+const lifeSrc = fs.readFileSync(path.join(API_DIR, 'domains', 'lifecycle.js'), 'utf8');
 check('/logs/events-tail 已删除（与 /events 语义重复）', !/pathname === '\/logs\/events-tail'/.test(lifeSrc), 'ok');
 
 const failed = results.filter((r) => !r);

@@ -2,12 +2,11 @@
 
 > 单产品：dsh-supervisor 控制面板（本目录 `ui/` 即其前端源码；历史名 `skiff-original` 已废弃——原独立 skiff 清理工具 App 已删除，2026-09-02 起为 dsh-supervisor 面板，2026-09-06 更名迁入 `dsh-supervisor/ui/`）。
 > 技术栈：React 19 + TypeScript 7 + Vite 8（Rolldown）+ Tailwind 4 + Radix UI + lucide-react + sonner + next-themes。
-> 宿主（一源双出口，2026-09 Phase 3）：① 守卫托管——dsh-supervisor 内核 HTTP API（127.0.0.1:3100）同源托管
-> `ui-react` 镜像（GET / → supervisor.html，浏览器/局域网）；② Tauri 完整壳——frontend 内嵌同份产物（壳内导航），
-> API 经 `api_proxy`（Rust 转发守卫 3100）。前端按环境自动切换通路（见 services/supervisor/client.ts）。
-> ③ 窗口形态（2026-09 Phase 3b 完整自定义窗口）：Tauri 壳窗口 decorations:false + transparent（无边框）；壳内 frontend 页走
-> AppShell `custom-titlebar` 形态（40px 自绘标题栏 WindowTitlebar + 圆角卡片）；浏览器/守卫托管维持 `web` 形态。
-> 宿主判定见 services/supervisor/host.ts（isTauriHost/isShellFrontend/isWebRuntime）；窗口控制经 `win_ctl` IPC。
+> 宿主（一源双出口，2026-09 Phase 3）：① 守卫托管——dsh-supervisor 内核 HTTP API（默认 127.0.0.1:36360，实际以 config.json 的 apiPort 为准）同源托管
+> `ui-react` 镜像（GET / → supervisor.html，浏览器/局域网）；② Tauri 桌面壳——壳窗口 `decorations:false + transparent`，
+> 内容区以 iframe 导航**守卫托管的面板 URL**（壳 `go_panel` 按 config.json 的 apiPort 动态给出），面板与守卫 API **同源直连**。
+> 前端因此只有**一条**通路（`BASE=""` 同源 fetch，见 services/supervisor/client.ts），无 Tauri IPC 分支；
+> 窗口形态（2026-09 Phase 3b）：壳窗口无边框，浏览器/守卫托管维持 `web` 形态。
 
 ---
 
@@ -43,8 +42,8 @@ src/
 
 ## 2. 数据流
 
-- **服务端**：dsh-supervisor `src/api/index.js`（127.0.0.1:3100）——HTML 由 `ui-react`（发布）/ `ui/dist`（开发）解析；API 同源。
-- **双环境通路**：浏览器/守卫托管 = 同源 fetch（BASE=""）；Tauri 完整壳 = 检测 `window.__TAURI__` 后经 `invoke("api_proxy")` 由 Rust 转发（守卫零 CORS 边界不变），分支收敛在 client.ts http() 一处。
+- **服务端**：dsh-supervisor `src/api/index.js`（默认 127.0.0.1:36360，被占自动顺延并持久化 apiPort）——HTML 由 `ui-react`（发布）/ `ui/dist`（开发）解析；API 同源。
+- **单通路（同源）**：面板无论浏览器直开还是壳内 iframe，都**同源 fetch**（`BASE=""`）——壳导航的 URL 就是守卫 API 基址，故守卫零 CORS 边界不变。前端**不**检测 Tauri、**不**经 `api_proxy` IPC。
 - **前端轮询**：`polling.ts` 每 2s 并行拉运行态 + 增量事件（after=seq），写入不可变快照并广播；
   页面经 `useSupervisorData()` 订阅渲染；写操作经 `supervisorApi.*` → `store.refresh()` 立即同步。
 - **UI 文案**：硬编码中文（单一语言产品）。设计令牌定义浅/深主题，暗色经 `next-themes` 跟随系统切换。
@@ -75,5 +74,5 @@ src/
 
 ### 4.4 版本控制
 - 前端源码入外层 git 仓（2026-09-05 commit 3f87482 以 `skiff-original/` 纳入；2026-09-06 迁至 `dsh-supervisor/ui/`）；dist/ node_modules/ 不入库。
-- `ui-react/` 为构建镜像（统一入口 `release/scripts/build-ui.sh` 从 `ui/` 构建生成；release.sh/build-sea.sh/CI 均经它），gitignore 不入库；`ui/dist`（构建临时产物）亦不入库。
+- `ui-react/` 为构建镜像（统一入口 `release/scripts/build-ui.sh` 从 `ui/` 构建生成；release.sh 与 CI 均经它），gitignore 不入库；`ui/dist`（构建临时产物）亦不入库。
 

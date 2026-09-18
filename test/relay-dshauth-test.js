@@ -70,12 +70,12 @@ async function main() {
   const r3 = await req(relayPort, 'GET', '/', { Cookie: 'dsh-auth-mock=abcdef123' });
   check('场景2: 客户端自带 DSH cookie 仍 200', r3.code === 200, String(r3.code));
 
-  // ── 场景 3：lanToken 门卫与 DSH 桥可并存 ──
+  // ── 场景 3：remoteToken 门卫与 DSH 桥可并存 ──
   const relay3 = createRelay('127.0.0.1', targetPort, { token: 'lan-secret', dshToken: LAUNCH });
   await new Promise((r) => relay3.listen(0, '127.0.0.1', r));
   const p3 = relay3.address().port;
   const r3a = await req(p3, 'GET', '/');
-  check('场景3: 无 lanToken → 401', r3a.code === 401, String(r3a.code));
+  check('场景3: 无 remoteToken → 401', r3a.code === 401, String(r3a.code));
   const r3b = await req(p3, 'GET', '/?token=lan-secret');
   check('场景3: ?token=lan-secret → 302 种 lan cookie', r3b.code === 302 && /dsh_lan_token=/.test(r3b.headers['set-cookie'] ? r3b.headers['set-cookie'].join(';') : ''), r3b.code + ' ' + JSON.stringify(r3b.headers['set-cookie']));
   const r3c = await req(p3, 'GET', '/', { Cookie: 'dsh_lan_token=lan-secret' });

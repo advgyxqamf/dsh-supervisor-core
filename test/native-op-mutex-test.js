@@ -14,7 +14,7 @@
 //   · 两者共享 task key `('native','main')`，故互斥**完全依赖** `tasks.isBusy()` 这一**可选**依赖。
 //
 // 生产中 `tasks` 总被注入（supervisor.js:328-334）故当前成立；但：
-//   · API 层 `/native/upgrade` 只查 `busy()`，**不查 `installing`**（api/native.js:41）；
+//   · API 层 `/native/upgrade` 只查 `busy()`，**不查 `installing`**（api/domains/native.js）；
 //   · 未注入 tasks 时（嵌入/测试/将来重构）install 与 upgrade 会**并发跑两个
 //     `npm install -g`** —— 同前缀并发写 npm 全局目录，结果不可预期。
 //
@@ -32,8 +32,8 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const src = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'), 'utf8');
-const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'));
+const src = fs.readFileSync(path.join(ROOT, 'src', 'app', 'native', 'installer.js'), 'utf8');
+const { NativeManager } = require(path.join(ROOT, 'src', 'app', 'native', 'installer.js'));
 
 const bodyOf = (name) => {
   const m = src.match(new RegExp('async ' + name + '\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}'));

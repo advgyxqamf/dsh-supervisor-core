@@ -1,46 +1,24 @@
 'use strict';
 
-// ★ 平台化「本机局域网可访问地址」枚举（2026-09-11，修 K8 平台泄漏）★
-//
-// ## 修复的缺陷
-//
-// 原实现在 `guard/supervisor/settings-view.js::lanPanelStatus()` 里**直接**调用
-// `execFileSync('ip', [...])` —— 这是 **Linux (iproute2) 专有**命令。
-// 在 macOS / Windows 上：
-//
-//   · `ip` 不存在 → execFileSync 抛异常 → 被 catch 吞掉 → `ips` 保持空数组
-//   · → 面板的「局域网访问」显示**没有任何可访问地址**（urls: []）
-//   · 且**不报错**（静默降级），用户只看到「开着开关但没有地址」
-//
-// 这同时是**两处**违约：平台差异泄漏到业务层（应在 platform/os/），
-// 以及裸 execFileSync 无超时（应经 platform/exec）。
-//
-// ## 平台实现
-//
-//   linux   `ip route show default` + `ip -o addr show`
-//   darwin  `route -n get default`（取 interface）+ `ifconfig <iface>`
-//   win32   PowerShell `Get-NetRoute` / `Get-NetIPAddress`
-//
-// 统一语义：返回「局域网内设备真正能访问」的 IPv4 列表 ——
-//   · 取走默认路由的**真实出口网卡**（优先）
-//   · 过滤虚拟网桥（virbr/veth/docker/vmnet/br-/lo）与回环/链路本地
-//   · 同网卡有多个地址时静态优先（DHCP 动态地址优先排除）
-//
-// 全部经 `platform/exec`（默认 15s 硬超时 + SIGKILL）。
-// ═══════════════════════════════════════════════════════════════════════════
+// 平台化「本机局域网可访问地址」枚举（修平台泄漏：原实现在业务层直调 Linux 专有的 ip，
+// 在 mac/win 上静默返回空且不报错）。
+// 平台实现：linux 用 ip route / ip -o addr；darwin 用 route -n get default + ifconfig；
+// win32 用 PowerShell Get-NetRoute / Get-NetIPAddress。
+// 统一语义：返回局域网内设备真正能访问的 IPv4 —— 取默认路由的真实出口网卡（优先），
+// 过滤虚拟网桥（virbr/veth/docker/vmnet/br-/lo）与回环/链路本地，同网卡静态地址优先。
+// 全部经 platform/util/exec（默认 15s 硬超时 + SIGKILL）。
 
-const ex = require('../exec');
+const ex = require('../util/exec');
 
 const PLATFORM = process.platform;
 
-/** 虚拟/环回网卡前缀（LAN 地址枚举应排除）。 */
 const VIRTUAL_IFACE = /^(virbr|veth|docker|vmnet|br-|lo|vEthernet)/;
 
 function usable(addr) {
   return !!addr && !addr.startsWith('127.') && !addr.startsWith('169.254.');
 }
 
-/** 从若干 (iface, addr, dyn) 记录里挑地址：默认路由网卡优先，同网卡静态优先。 */
+/** 从 (iface, addr, dyn) 记录里挑地址：默认路由网卡优先，同网卡静态优先。 */
 function pick(records, dev) {
   const byIface = {};
   for (const r of records) {
@@ -58,7 +36,6 @@ function pick(records, dev) {
   return out;
 }
 
-/* ── Linux：iproute2 ── */
 function linux() {
   let dev = null;
   const def = ex.runOut('ip', ['route', 'show', 'default']);
@@ -74,7 +51,6 @@ function linux() {
   return pick(records, dev);
 }
 
-/* ── macOS：route + ifconfig ── */
 function darwin() {
   let dev = null;
   const def = ex.runOut('route', ['-n', 'get', 'default']);
@@ -94,7 +70,7 @@ function darwin() {
   return pick(records, dev);
 }
 
-/* ── Windows：PowerShell（JSON 输出，避免解析本地化文本）── */
+/* Windows：PowerShell（JSON 输出，避免解析本地化文本） */
 function win32() {
   const ps = [
     '$ErrorActionPreference = "SilentlyContinue"',
@@ -120,8 +96,6 @@ function win32() {
 const IMPL = { linux, darwin, win32 };
 
 /**
- * 枚举本机局域网可访问 IPv4 地址。
- *
  * @returns {string[]} 已去重的地址列表（**任何平台都不抛异常**；失败返回空数组）
  */
 function lanAddresses() {

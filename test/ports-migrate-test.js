@@ -17,7 +17,9 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 
 (async () => {
-  const { PortRegistry } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports'));
+  const { PortRegistry } = require(path.join(ROOT, 'src', 'platform', 'service', 'ports'));
+  // DS-G4 §4.2（反转法）：owner 前缀是**域知识**，platform 只做通用前缀迁移 → 由本域申报。
+  const { OWNER_PREFIXES } = require(path.join(ROOT, 'src', 'domains', 'router', 'port-segments'));
   const ports = new PortRegistry({ file: path.join(TMP, 'unused.json') });
 
   const oldF = path.join(TMP, 'mig-old.json');
@@ -30,7 +32,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     { port: 3080, role: 'dsh-main', owner: 'system:dsh-main' },
     { port: 3081, role: 'user', owner: 'inst:main' },
   ] }, null, 2));
-  const moved = ports.migrateRouterSegment(oldF, newF);
+  const moved = ports.migrateByOwnerPrefix(oldF, newF, OWNER_PREFIXES);
   const oldDoc = JSON.parse(fs.readFileSync(oldF, 'utf8'));
   const newDoc = JSON.parse(fs.readFileSync(newF, 'utf8'));
   const isRouterRec = (r) => String((r && r.owner) || '').startsWith('proxy:') || String((r && r.owner) || '').startsWith('providerApi:');
@@ -39,7 +41,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   check('MIG-3 新文件含 2 条 router 段', newDoc.records.length === 2 && newDoc.records.every(isRouterRec), JSON.stringify(newDoc.records));
 
   // 幂等：旧文件已无 router 段 → 二次迁移 0 条
-  const moved2 = ports.migrateRouterSegment(oldF, newF);
+  const moved2 = ports.migrateByOwnerPrefix(oldF, newF, OWNER_PREFIXES);
   check('MIG-4 幂等（无 router 段时迁移 0 条）', moved2 === 0, String(moved2));
 
   // 目标已有记录时合并去重
@@ -48,7 +50,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     { port: 3080, role: 'dsh-main', owner: 'system:dsh-main' },
   ] }, null, 2));
   fs.writeFileSync(newF, JSON.stringify({ records: [{ port: 28140, role: 'proxyInstance', owner: 'proxy:k1' }] }, null, 2));
-  const moved3 = ports.migrateRouterSegment(oldF, newF);
+  const moved3 = ports.migrateByOwnerPrefix(oldF, newF, OWNER_PREFIXES);
   const newDoc3 = JSON.parse(fs.readFileSync(newF, 'utf8'));
   check('MIG-5 目标合并去重（新增 28141，保留既有 28140）', moved3 === 1 && newDoc3.records.length === 2, 'moved=' + moved3 + ' recs=' + newDoc3.records.length);
 

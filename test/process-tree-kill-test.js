@@ -33,8 +33,21 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const processSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'os', 'process.js'), 'utf8');
-const mainProc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'supervisor', 'main-process.js'), 'utf8');
-const osIndex = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'os', 'index.js'), 'utf8');
+// ⚠ 2026-09-16 步骤7：main-process.js 拆为 app/main/{process,signals}.js；
+//   判据须读**两者**（进程机制 + 信号序列），否则拆分即静默失去覆盖面。
+const mainProc = ['process.js', 'signals.js']
+  .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'app', 'main', f), 'utf8'))
+  .join(String.fromCharCode(10));
+// 2026-09-16（§4.5 测试指针同步）：os/index.js 已缩为平台分派门面，
+//   能力档位纯数据下沉到 os/capability-profile.js —— 聚合整个 os/ 目录，覆盖面不缩小。
+const _osDir = path.join(ROOT, 'src', 'platform', 'os');
+const osIndex = (function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).map((e) => {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) return walk(p);
+    return e.name.endsWith('.js') ? fs.readFileSync(p, 'utf8') : '';
+  }).join(String.fromCharCode(10));
+})(_osDir);
 
 const pc = require(path.join(ROOT, 'src', 'platform', 'os', 'process.js'));
 
@@ -48,7 +61,7 @@ check('G-b main-process 定义 _killTree 并调用 platform killTree',
   /_killTree\(child/.test(mainProc) && /pc\.killTree\(/.test(mainProc),
   '已接入');
 check('G-b SIGKILL 升级路径改用 _killTree（不再是 signalProcess）',
-  /this\._killTree\(child, 'SIGKILL'\)/.test(mainProc), '已改');
+  /killTree\(child, 'SIGKILL'\)/.test(mainProc), '已改');
 
 // ── G-c：接管实例（无 child 句柄）──
 //   ⚠ 不能用 indexOf('_killAdopted') 切片：'stopProcess' 里**先**出现调用/提及，
@@ -71,15 +84,15 @@ check('G-d processTreeKill 的注释指向实现（防再次「声明无产物�
   const m = mainProc.match(/\n  _killSequence\(child\) \{[\s\S]*?\n  \}/);
   check('G-e 定位到 _killSequence 函数体', !!m, m ? m[0].length + ' 字符' : '（未找到）');
   const seq = m ? m[0] : '';
-  const iTerm = seq.indexOf("_signalChild(child, 'SIGTERM')");
-  const iTree = seq.indexOf('_killTree(child');
+  const iTerm = seq.indexOf("signalChild(child, 'SIGTERM')");
+  const iTree = seq.indexOf('killTree(child');
   check('G-e 先 SIGTERM 再（超时后）_killTree',
     iTerm >= 0 && iTree >= 0 && iTerm < iTree, 'term@' + iTerm + ' tree@' + iTree);
 }
 
 // ── 反向：不得把所有停止都改成整树（那会丢掉优雅期语义）──
 check('反向：优雅期仍用 signalProcess（非整树）',
-  /this\._signalChild\(child, 'SIGTERM'\)/.test(mainProc), '保留');
+  /signalChild\(child, 'SIGTERM'\)/.test(mainProc), '保留');
 
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

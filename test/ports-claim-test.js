@@ -17,7 +17,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 const RANGE = { base: 28130, count: 50 };
 
 (async () => {
-  const { PortRegistry } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports'));
+  const { PortRegistry } = require(path.join(ROOT, 'src', 'platform', 'service', 'ports'));
   const ports = new PortRegistry({ file: path.join(TMP, 'ports.json') });
   const claim = (owner, pref, extra) => ports.claimSlot('relay', owner, Object.assign({ range: RANGE }, pref ? { preferred: pref } : {}, extra || {}));
 

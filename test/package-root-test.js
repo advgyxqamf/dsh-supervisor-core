@@ -5,7 +5,7 @@
 //
 // == 为什么独立成测（从壳仓迁回） ==
 //
-// 这两项断言**测的是内核代码**（`bin/dsh-supervisor`、`src/platform/config.js`），
+// 这两项断言**测的是内核代码**（`bin/dsh-supervisor`、`src/platform/service/config.js`），
 // 但原先寄居在壳仓的 `tests/bootstrap_flow.rs` 里，用 `../../` 跨仓读取 ——
 // 那是双仓隔离未彻底的残留：壳仓一旦独立，`../../` 必然指向不存在的位置。
 // 迁回内核仓后，断言与它验证的代码在同一个仓，不再有跨仓耦合。
@@ -51,7 +51,7 @@ console.log('== P1 内核包根解析（发行态正确性）==');
 // ── P2 镜像目录：**归壳**，内核只留最小兜底（2026-09-11 契约化）──
 console.log('== P2 镜像目录契约化（目录归壳，内核留最小兜底）==');
 {
-  const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'config.js'), 'utf8');
+  const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'config.js'), 'utf8');
   const arr = (cfg.match(/registries:\s*\[([\s\S]*?)\]/) || [])[1] || '';
   const listed = (arr.match(/https?:\/\/[^'\"]+/g) || []).map((x) => x.trim());
 
@@ -65,7 +65,7 @@ console.log('== P2 镜像目录契约化（目录归壳，内核留最小兜底�
   check('P2-c 标注了「目录归壳 / 契约」', /契约|壳/.test(cfg) && /最小兜底|兜底/.test(cfg), 'ok');
   check('P2-c 指向契约读取器', /registry-contract/.test(cfg) || /registry\.json/.test(cfg), 'ok');
   // P2-d：契约读取器必须存在且导出 read()。
-  const rcPath = path.join(ROOT, 'src', 'platform', 'registry-contract.js');
+  const rcPath = path.join(ROOT, 'src', 'platform', 'contract', 'registry.js');
   check('P2-d 契约读取器存在', fs.existsSync(rcPath), rcPath);
   if (fs.existsSync(rcPath)) {
     const rc = require(rcPath);
@@ -77,7 +77,7 @@ console.log('== P2 镜像目录契约化（目录归壳，内核留最小兜底�
     check('P2-e 契约缺失时降级而非抛错', r1.ok === false && !r1.threw, JSON.stringify(r1.reason || r1.threw));
   }
   // P2-f：内核侧不得再出现「三份副本」中的任一份完整集合特征。
-  const distSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+  const distSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'distribution', 'index.js'), 'utf8');
   check('P2-f dist 不再持有完整 6 条目录（无华为/腾讯/中科大/cnpmjs 硬编码数组）',
     !/const REGISTRY_PRESETS = \[/.test(distSrc), 'ok');
   // 实测不可用的源不得出现在 **registries 数组**里。

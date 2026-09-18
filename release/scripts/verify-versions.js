@@ -15,7 +15,7 @@ function coreCheck() {
   }
   if (!bad.length) console.log('内核版本 OK: ' + pkg.version + '（package.json 单源）');
 }
-if (mode === '--core' || mode === '--all') {
+if (mode === '--core') {
   coreCheck();
 } else {
   console.error('未知模式: ' + mode + '（本仓只支持 --core；壳版本校验见壳仓 scripts/verify-shell-versions.js）');

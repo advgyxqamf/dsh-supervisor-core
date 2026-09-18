@@ -18,7 +18,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
 (async () => {
   const { Supervisor } = require(path.join(ROOT, 'src', 'supervisor'));
-  const { registerAll } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'adapters'));
+  const { registerAll } = require(path.join(ROOT, 'src', 'app', 'control', 'adapters'));
   const cfg = {
     command: ['node', '-e', '0'],
     healthUrl: 'http://127.0.0.1:1/',
@@ -71,26 +71,44 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     try { const e = sup.managedObjects.get('router-daemon'); e.lastObserved = null; sup._syncRouterLifecycleView({}); check('M6b 目录无观测安全降级', true, ''); } catch (err) { check('M6b 目录无观测安全降级', false, String(err)); }
   }
 
-  // M7 守护开关（2026-09 收敛定稿）：router/lan 恒开；dsh/instances/plugins 默认关（跟开关走，dsh-main.json 持久化）
+  // M7 守护开关（契约 GUARD-DOMAIN-MODEL §2 域模型，2026-09-16 归位）：
+  //   域 A（dsh/instances）guardian 跟用户开关走（默认关）；
+  //   域 B 基础设施（router-daemon/lan-daemon）**不设 guardian**（无用户意图轴，由保活路径无条件拉起）。
+  //   ⚠ 旧断言为「router/lan 恒开」——那是把基础设施硬套用户意图模型的错位形态，已按 G-1 删除。
   const gRouter = sup.lifecycleManager.get('router');
   const gLan = sup.lifecycleManager.get('lan');
   const gDsh = sup.lifecycleManager.get('dsh');
   const gInst = sup.lifecycleManager.get('instances');
-  check('M7 守护开关：router/lan 恒开，dsh/instances 默认关',
-    gRouter.guardian === true && gLan.guardian === true && gDsh.guardian !== true && gInst.guardian !== true,
+  check('M7 域模型：基础设施(router/lan)不设 guardian，域 A(dsh/instances) 默认为关',
+    gRouter.guardian !== true && gLan.guardian !== true && gDsh.guardian !== true && gInst.guardian !== true,
     JSON.stringify({ router: gRouter.guardian, lan: gLan.guardian, dsh: gDsh.guardian, instances: gInst.guardian }));
 
-  // M8 守护动作事件（阶段四，事件脊）：guardian_action 带 resource/action/restartCount；未知资源安全
+  // M8 域 A 的真实守护计数链路（2026-09-16 域模型收口，替换旧 M8）。
+  //   ⚠ 旧 M8 直接调用 sup._guardianEvent(...) 断言「guardian_action 事件形状」。
+  //     断言对象本身是死代码：router/lan 归域 B 后该函数全仓 src/ 零调用者，事件无生产者
+  //     （详见 control-view.js 删除说明与 GUARD-DOMAIN-MODEL §2）——故旧块随函数一并删除。
+  //   代之以契约 §2 域 A 的**真实链路**（无需任何死代码）：
+  //     · dsh（原生）：崩溃/故障收敛走 _beginRestart(reason, {countCrash:true})
+  //       → 发 restart_triggered 事件 且 restartCount +1；
+  //     · 计划内重启（manual / countCrash:false）发事件但不计数。
+  //   本用例直接驱动 _beginRestart（最小 cfg，无定时器副作用），验证事件与计数成对。
   const evs = [];
   const origAppend = sup.events.append.bind(sup.events);
-  sup.events.append = (type, data) => { if (type === 'guardian_action') evs.push(data); return origAppend(type, data); };
-  sup._guardianEvent('router', 'pull', { pid: 123 });
-  sup._guardianEvent('lan', 'skip-guardian-off');
-  sup._guardianEvent('nope', 'pull', { pid: 1 });
+  sup.events.append = (type, data) => { if (type === 'restart_triggered') evs.push(data); return origAppend(type, data); };
+  const rcBefore = sup.restartCount;
+  sup._beginRestart('exit:1', { countCrash: true });
   sup.events.append = origAppend;
-  check('M8 guardian_action 事件带 resource/action/restartCount',
-    evs.length === 3 && evs[0].resource === 'router' && evs[0].action === 'pull' && evs[0].pid === 123 && typeof evs[0].restartCount === 'number' && evs[1].action === 'skip-guardian-off' && evs[2].resource === 'nope' && evs[2].restartCount === undefined,
-    JSON.stringify(evs));
+  check('M8 dsh 崩溃收敛：restart_triggered 带 reason 且 restartCount +1（域 A 真实计数链路）',
+    evs.length === 1 && evs[0].reason === 'exit:1' && sup.restartCount === rcBefore + 1,
+    JSON.stringify({ evs, before: rcBefore, after: sup.restartCount }));
+  // M8b 计划内重启不计入守护计数（计数只回答「用户开的守护触发了几次」）
+  const evs2 = [];
+  sup.events.append = (type, data) => { if (type === 'restart_triggered') evs2.push(data); return origAppend(type, data); };
+  sup._beginRestart('manual', { countCrash: false });
+  sup.events.append = origAppend;
+  check('M8b 计划内重启（manual）发 restart_triggered 但不计入 restartCount',
+    evs2.length === 1 && evs2[0].reason === 'manual' && sup.restartCount === rcBefore + 1,
+    JSON.stringify({ evs2, count: sup.restartCount }));
 
   const failed = results.filter((x) => !x);
   console.log('\n结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

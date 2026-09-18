@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 内核发布产线（CI 核心逻辑单源）—— .github/workflows/build.yml 的 test job 与四平台 build 矩阵都调用。
+# 内核发布产线（CI 核心逻辑单源）—— .github/workflows/build.yml 的四平台 build 矩阵调用（test job 自跑等价步骤）。
 # 硬标准（2026-09-13）：**所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。**
 # 用法: release/scripts/ci-core.sh [--publish] [--all-platforms]
 #   - 无 --publish      = 只验证（verify:versions → 前端 verify → npm test → build:launcher → 子包 dry-run）
@@ -18,7 +18,6 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 PUBLISH=0
-ALL_PLATFORMS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --publish) PUBLISH=1 ;;
@@ -36,9 +35,6 @@ if [ "$PUBLISH" = 1 ] && [ "${GITHUB_ACTIONS:-}" != 'true' ]; then
   echo '拒绝：真发布（--publish）只允许在 GitHub CI 内运行（GITHUB_ACTIONS=true）。' >&2
   exit 2
 fi
-
-PLAT_ARGS=()
-if [ "$ALL_PLATFORMS" = 1 ]; then PLAT_ARGS=(--all-platforms); fi
 
 echo "=== [0/5] 版本自洽校验（内核 package.json 单源；壳版本互锁已随壳仓剥离） ==="
 npm run verify:versions
@@ -94,16 +90,16 @@ else
 fi
 
 echo "=== [3/5] 构建内核 launcher（build:launcher：esbuild bundle + node 启动脚本，全平台统一） ==="
-npm run build:launcher -- ${PLAT_ARGS[@]+"${PLAT_ARGS[@]}"}
+npm run build:launcher --
 
 echo "=== [4/5] 内核子包 dry-run（组装 + 打包审计，不发） ==="
-npm run publish:core -s -- ${PLAT_ARGS[@]+"${PLAT_ARGS[@]}"}
+npm run publish:core -s --
 ls -lh dist/npm/
 
 if [ "$PUBLISH" = 1 ]; then
   echo "=== [5/5] 真发布内核子包（官方 registry；认证由 publish-core.sh 单源处理） ==="
   export DSH_PUBLISH_REGISTRY="${DSH_PUBLISH_REGISTRY:-https://registry.npmjs.org/}"
-  npm run publish:core -- --publish ${PLAT_ARGS[@]+"${PLAT_ARGS[@]}"}
+  npm run publish:core -- --publish
 else
   echo "=== [5/5] （跳过真发布：加 --publish 即发官方 registry） ==="
 fi

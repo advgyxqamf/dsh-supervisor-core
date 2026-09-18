@@ -53,10 +53,6 @@ function makeConfig(apiPort, targetPort, overrides = {}) {
     crashWindowMs: 10000,
     crashBurst: 4,
     backoff: [1500, 3000, 6000],
-    // adopt 令牌接管观察窗拉满：mock 目标从不打印 DSH 启动令牌，adopt 场景若用默认 20s 窗
-    // 会在场景停留期内误触发 adopt_token_reclaim 重建（搅乱 adopted/无 spawn 断言）；
-    // 令牌重建逻辑由 test/adopt-token-reclaim-test.js 用短窗专门覆盖，冒烟链路保持确定性。
-    tokenReclaimGraceMs: 3600000,
     apiHost: '127.0.0.1',
     apiPort,
     stateFile: path.join(TMP, `state-${apiPort}.json`),

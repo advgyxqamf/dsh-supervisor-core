@@ -9,26 +9,37 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 
 | 文档 | 性质 | 说明 |
 |---|---|---|
-| **`RELEASE-STANDARD.md`** | **规范（唯一事实源）** | **发布/构建流程**：硬标准（构建/发布一律经 CI）、8 阶段、平台矩阵、CI 放行、验证、回滚、红线。由 `test/release-spec-consistency-test.js` 机器校验 |
+| **`RELEASE-STANDARD.md`** | **规范（唯一事实源）** | **发布/构建流程**：硬标准（构建/发布一律经 CI）、9 阶段（S0–S8）、平台矩阵、CI 放行、验证、回滚、红线。由 `test/release-spec-consistency-test.js` 机器校验 |
 | **`CREDENTIALS-STANDARD.md`** | **规范（唯一事实源）** | **凭据管理**：规范库、四铁律、轮换步骤。由 `test/credential-hygiene-test.js` 校验 |
 | **`DEVELOPMENT-TRACK.md`** | **规范（唯一事实源）** | **改代码规则**：分层边界、跨层依赖登记、测试补齐、注入验证、不可逆操作纪律 |
 | [ARCHITECTURE-CONTRACT-phase0.md](ARCHITECTURE-CONTRACT-phase0.md) | 规范（契约） | 阶段 0 契约：会话生命周期 · 所有权矩阵 · 状态机 · 时序 |
 | [KERNEL-DAEMON-CONTRACT.md](KERNEL-DAEMON-CONTRACT.md) | 规范（契约） | 内核守护进程契约（D1–D9）：被壳拉起时必须提供什么；配套 `test/kernel-daemon-contract-test.js` |
+| [NO-CONSOLE-WINDOW-STANDARD.md](NO-CONSOLE-WINDOW-STANDARD.md) | **规范（唯一事实源，两仓共遵）** | **无控制台窗口**：壳启动内核全链路不得弹终端；统一 spawn 封装 + 门禁（W1–W5） |
+| [DSH-TOKEN-CONTRACT.md](DSH-TOKEN-CONTRACT.md) | 规范（契约） | **令牌唯一事实源**：7 类令牌各自策略；令牌是基础组件非域；令牌恒存在、不驱动生命周期（TK-1..8 + 门禁） |
+| [RELEASE-CHANNEL-CONTRACT.md](RELEASE-CHANNEL-CONTRACT.md) | **规范（唯一事实源）** | **发布通道与选版唯一事实源**：canary/beta/rc/latest/rollback 五通道；选版算法冻结；紧急回退用显式 rollback 标签（RC-1..6 + 门禁）。由 `test/release-channel-gate-test.js` 机器校验（RC-G3/G4/G5；RC-G1/G2 在壳仓） |
+| [DIRECTORY-STRUCTURE-DESIGN.md](DIRECTORY-STRUCTURE-DESIGN.md) | **规范（唯一事实源）** | **目录结构与分层唯一事实源**：五层（shared/platform/domains/app/api）+ 依赖矩阵 + 完整目录树 + 12 条不变量（DS-1..DS-12）+ 门禁升级（DS-G1..G8）+ 10 步迁移计划 + 10 项决策记录。由四路审计 + 三路设计交叉验证后定版 |
+| [DOMAIN-STRUCTURE-DESIGN.md](DOMAIN-STRUCTURE-DESIGN.md) | **规范（唯一事实源）** | **域内结构唯一事实源**（与上一份互补）：域内分层判据 DF-1..DF-7（门面 ≤150 / 单文件 ≤300 / 零隐式 this / DAG）+ 三消解手法 + 五域与 app 的**逐文件目标结构** + R1..R12 裁决 + 10 批迁移计划 + DG-1..DG-16 门禁 + **迁移时须同步改的 10 处门禁**。由 12 份设计文档（design-notes/，6085 行）合并定版。**状态：执行中（2026-09-17 起，12+ 子代理并行施工，批 0–10）** |
+| [ACCEPTANCE-STANDARD.md](ACCEPTANCE-STANDARD.md) | **规范（唯一事实源）** | **验收与测试唯一事实源**：`硬标准` —— **所有测试不得在本机执行，验收只能由推送后的 CI 四平台矩阵裁决**；本机不得产生发布产物。含 CI 实际执行步骤、四平台矩阵、“逻辑门禁与原生行为的边界”、禁止/允许事项、违规判定。由 test/acceptance-standard-gate-test.js 机器校验 |
+| [HANDOFF.md](HANDOFF.md) | 过程文档（交接） | **会话交接文档**：现状、未完成清单（提交与 CI / 注释精简 / 死代码普查 / 规范收敛 / 第三波缺陷）、硬约束、已知陷阱、建议接手顺序。**新会话接手先读此文件** |
+| [ARCHITECTURE-ACCEPTANCE.md](ARCHITECTURE-ACCEPTANCE.md) | **终验收报告** | **三轮架构归一化改造的终验收记录**：全部门禁严格模式结果 + 物理结构终态（最大单文件 298 / 门面 ≤150 / 原型挂载 0 / 内核零依赖）+ DF-1..DF-9 逐条达成 + 全量回归（125 条，唯一失败为既存环境项）+ 最根部拆解清单。**数字均为实跑结果** |
+| [EXECUTION-CONTRACT.md](EXECUTION-CONTRACT.md) | 执行契约（并行施工接口冻结书） | **域结构改造的执行契约**：DF-1..DF-7 判据 + 硬约束（禁 daemon / 公共导出面冻结 / 禁新跨层边）+ 冻结的内部接口契约（router 域逐文件导出面与依赖）+ 迁移纪律 + 子代理派生授权。所有执行子代理必须逐条遵守；权威依据仍是 `DOMAIN-STRUCTURE-DESIGN.md`（SSOT）与 `design-notes/*.md` |
+| [PROVIDER-GATEWAY-ARCHITECTURE.md](PROVIDER-GATEWAY-ARCHITECTURE.md) | **规范（唯一事实源）** | **供应商网关（原智能路由）架构唯一事实源**：正名与定位（不做跨供应商路由）、两类供应商本质不对称、四层职责、**有进程侧深度设计**（实例四态 / 热备池 maxHot·maxWarm / 双预算切换 / 预热规范化）、能力契约与 ctl 白名单（A1–A7 + B1–B7 决策记录）。由 `test/provider-gateway-gate-test.js` 机器校验（PG-1..PG-8）|
+| [GUARD-DOMAIN-MODEL.md](GUARD-DOMAIN-MODEL.md) | **规范（唯一事实源）** | **守护域模型唯一事实源**：两域（域 A 用户意图 / 域 B 基础设施）+ 铁律 G-1..G-6；基础设施保活无守护计数（`guardian_action` 事件已随其唯一生产者 `_guardianEvent` 删除）。由 `test/guard-domain-model-gate-test.js` 机器校验（GD-1..GD-5） |
 | [NATIVE-DSH-TAKEOVER-CONTRACT.md](NATIVE-DSH-TAKEOVER-CONTRACT.md) | 规范（契约） | 原生 DSH 接管契约（N1–N5）：检测→绑定→单管线接管；配套 `test/native-dsh-binding-test.js` |
 | [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) | 规范（能力矩阵） | 跨平台能力矩阵（14 项 × 3 平台）+ 证据 + 缺口；配套 `test/platform-capability-audit-test.js` |
 | [RELEASE-AND-UPDATE-MECHANISM.md](RELEASE-AND-UPDATE-MECHANISM.md) | 论证（原理） | 发布与更新机制**为何这样设计**（流程见 RELEASE-STANDARD） |
 | [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 论证（方案） | 跨平台构建与自更新方案论证（流程见 RELEASE-STANDARD） |
 | [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划（历史） | 会话生命周期重构的根因级计划（已完成） |
 | [INCIDENT-2026-09-13-credential-overwrite.md](INCIDENT-2026-09-13-credential-overwrite.md) | 事故复盘 | 凭据被覆盖事故：时间线 / 根因四层 / 加固与重放验证 |
+| [INCIDENT-2026-09-18-exit-manager-relaunch.md](INCIDENT-2026-09-18-exit-manager-relaunch.md) | 事故复盘 | 退出管家后桌面壳被自动重新拉起：壳 /End 计划任务 + 内核看护门未持久化；修复与残留清单 |
 | [CHANGELOG.md](CHANGELOG.md) | 记录 | 版本变更 |
-| [archive/](archive/) | 归档 | 已完成/被取代的历史文档（见 [archive/README.md](archive/README.md)）|
 
 > **文档可信度不变量**（2026-09-11 确立）：能力声明必须由**可执行断言**支撑；
 > 本仓的文字（注释/审计/文档）**不构成证据**。新增能力请同步 `test/platform-capability-audit-test.js`。
 
-## 桌面面板（原生 Linux 应用）
+## 运维面板（守卫内置，浏览器直接打开）
 
-守卫内置一个运维面板（`http://127.0.0.1:3100/`，浏览器可直接打开），并用 **Tauri** 打包成原生桌面应用（~10MB，无 Electron 大壳）：
+守卫内置一个运维面板（默认 `http://127.0.0.1:36360/`；被占时自动顺延 +1..+50 并把实际端口写回 config.json）。桌面壳（Tauri 原生应用，源码在**壳仓**）另行打包该面板：
 
 - 实时状态：阶段 / 期望状态 / DSH 与守卫进程 / 最近探测 / 重启次数 / 最近故障
 - **版本信息**：顶栏徽标显示守卫版本，「更新日志」一键查看每次版本变更内容
@@ -49,17 +60,16 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
   （含设置/Agent 预设/模型/插件等全部功能面）。实现为守卫内置反向代理（0.0.0.0:3088 → 127.0.0.1:3080），
   并对 `/api` 与 WebSocket 握手做**回环呈现**（Origin/Referer 改写为回环权威），
   使 DSH 的浏览器信任围栏将其视为本机流量——该语义与官方生态插件一致，但执行在反代层，
-  **不改动 DSH 的任何源码、配置文件，也不安装任何插件**。可选 `lanToken` 访问令牌
-  （配置文件设置；首次凭 `?token=` 进入自动种 HttpOnly Cookie），令牌永远只存在于反代层。
+  **不改动 DSH 的任何源码、配置文件，也不安装任何插件**。可选 `remoteToken` 访问令牌
+  （由用户在面板设置；首次凭 `?token=` 进入自动种 HttpOnly Cookie），令牌永远只存在于反代层。
 
 启动方式（二选一）：
 
 ```bash
-dsh-supervisor-gui          # 桌面窗口（GNOME 应用菜单里也有「dsh-supervisor」）
-xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
+xdg-open http://127.0.0.1:36360/   # 浏览器直接开面板（默认端口；实际端口见 config.json 的 apiPort）
 ```
 
-桌面应用源码在 `src-tauri/`（Rust + WebKitGTK），重新编译：`cd src-tauri && cargo build --release`。
+桌面壳（Tauri 原生应用）源码在**壳仓** `wasi7mglns/dsh-supervisor-launcher`（MIT）的 `src-tauri/`，本仓不持有 `src-tauri/`。
 
 ## 内核发布：Node launcher 统一形态（2026-09 定案：全平台弃 SEA）
 
@@ -78,7 +88,7 @@ xdg-open http://127.0.0.1:3100/   # 或浏览器直接开面板
   本仓库为内核（私有，`advgyxqamf/dsh-supervisor-core`）。两仓**完全独立**——
   本仓不持有任何壳资产（无 `src-tauri/`、无片面的壳打包工具/设计文档），
   壳相关工具与文档均在壳仓自身。
-- **跨仓协作方式**：内核侧仅保留**对接代码**（`src/domains/shell/`、`src/api/shell.js` ——
+- **跨仓协作方式**：内核侧仅保留**对接代码**（`src/domains/shell/`、`src/api/domains/shell.js` ——
   内核需展示桌面版本并观测壳健康，属内核职责）；壳的构建、签名、发布、测试全部由壳仓自持。
 - **发布工程单源**：全部发布/构建自动化收拢于 `release/`（`release/scripts/ci-core.sh` 产线核心 + `release/runbooks/` 操作手册 + `release/README.md` 索引）。**流程唯一事实源见 `RELEASE-STANDARD.md`**；**构建与发布一律经 GitHub CI**（本地不得产生发布产物）。
 
@@ -136,11 +146,11 @@ dsh-supervisor uninstall   # 卸载（守卫退出，DSH 不受影响）
 
 **DSH 升级流程**：日常用 `dsh-supervisor upgrade`（内部即"stop → 安装 → start"，失败自动回滚旧版）；手工流程为 `dsh-supervisor stop` → 升级 DSH → `dsh-supervisor start`。
 
-## 本地 API（默认 127.0.0.1:3100）
+## 本地 API（默认 127.0.0.1:36360）
 
-> **权威清单**：`src/api/surface.js`（机器可校验的单一事实源——每个路由的分类/方法/消费者/用途），
+> **权威清单**：`src/api/contract.js`（机器可校验的单一事实源——每个路由的分类/方法/消费者/用途），
 > 由 `test/api-surface-test.js` 强制「源码 ↔ 清单」双向一致：**新增路由不登记即测试失败**。
-> 下表为分类速览；完整字段以 surface.js 为准。
+> 下表为分类速览；完整字段以 contract.js 为准。
 
 ```
 # 核心状态与生命周期
@@ -225,7 +235,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 | `portReleaseWaitMs` | 10000 | 重启前等端口释放 |
 | `crashWindowMs` / `crashBurst` | 600000 / 5 | 崩溃窗口与阈值 |
 | `backoff` | 30s…10m | 指数退避序列 |
-| `apiHost` / `apiPort` | 127.0.0.1 / 3100 | 本地 API |
+| `apiHost` / `apiPort` | 127.0.0.1 / 36360 | 本地 API（3100 等常用端口易冲突，故用高位段；被占则自动顺延并持久化） |
 | `stateFile` / `logFile` | ~/.dsh/supervisor/… | 状态文件 / 事件日志（有内置默认，缺省也能跑） |
 | `eventsMaxBytes` | 5242880 | 事件日志轮转阈值（保留一代 .1 备份） |
 | `supervisorLogFile` / `dshLogFile` / `upgradeLogFile` | ~/.dsh/supervisor/… | 守卫运行日志 / DSH 输出 / 升级输出 |
@@ -274,10 +284,13 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 
 `npm test` 使用 mock 目标跑通设计文档 §12 的全部用例及安全边界（Host/Origin 校验、控制结果透传、日志轮转、端口占用不硬抢、守卫崩溃幂等、接管实例可停止、升级先停后装与回滚），**不触碰真实 DSH 与真实 npm**。
 
-> **卸载类测试不进入自动链（政策，2026-08-31）**：`test/native-test.js`（原生 DSH 卸载全量清理）、
-> `test/api-contract-test.js`（含 `POST /native/uninstall` 契约断言）、`test/plugin-change-restart-test.js`（含插件卸载场景）
-> 已从 `npm test` 排除，仅允许作为独立脚本显式单独调用（`node test/<file>` 或
-> `npm run test:native-uninstall` / `test:plugin-change-restart` / `test:api-contract`）。除非用户明确指令，不得擅自运行。
+> **卸载类测试现状（2026-09-13 起，与 2026-08-31 政策原文已有出入，以此为准）**：
+> 当前仅 `test/native-test.js`（原生 DSH 卸载全量清理）仍在 `npm test` 链外 —— 见
+> `test/test-chain-completeness-test.js` 的显式排除表（理由：需真实原生卸载环境），
+> 经 `npm run test:native-uninstall` 按需运行。原政策同时排除的 `test/api-contract-test.js`
+> （含 `POST /native/uninstall` 契约断言）与 `test/plugin-change-restart-test.js`（含插件卸载场景）
+> 已**重新入链**（2026-09-13 `ab071f5`：二者此前从未在 CI 执行）；它们仍各有独立 npm script
+> （`test:api-contract` / `test:plugin-change-restart`）供单独调用。
 >
 > ⚠ **补充（2026-09-12，P1-F 事故后定规）**：需要验证卸载逻辑的行为时，
 > **必须经构造期依赖注入**（`new NativeManager({ npmBin: <假可执行> })`），
@@ -291,10 +304,10 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 ## 桌面产品：环境引导 + 内核更新（单写入者 = 桌面壳）
 
 ### 安装即用（免预装 Node）
-- Tauri 桌面壳（src-tauri）是**引导器 + 面板壳**（Phase 3 一源双出口：完整壳内嵌面板产物，公开壳为 MIT 引导器）；
+- Tauri 桌面壳（源码在**壳仓** `src-tauri/`）是**引导器 + 面板壳**（Phase 3 一源双出口：完整壳内嵌面板产物，公开壳为 MIT 引导器）；
   - 缺失 → 壳内引导页 → **一键安装官方最新 Node.js LTS**（Windows .msi / macOS .pkg / Linux 官方 tar.xz→/usr/local，均经官方 SHASUMS256 校验 + 一次系统授权）；
-  - 就绪 → 壳拉起守卫（daemon）→ 完整壳（embedded-panel feature 默认）导航**壳内面板**（frontend 内嵌 supervisor.html），API 经 Rust `api_proxy` command 转发守卫 3100（绕浏览器 CORS，守卫零 CORS 边界不变）；公开壳（导出仓）导航守卫 3100 托管面板。
-- **前端一源双出口**：源码唯一 `ui/`，构建一次 → `ui-react` 镜像（守卫托管/浏览器出口）+ 壳 frontend 内嵌（桌面出口）；统一入口 `release/scripts/build-ui.sh`（release.sh/build-sea.sh/CI 均经它）。
+  - 就绪 → 壳拉起守卫（daemon）→ 完整壳（embedded-panel feature 默认）导航**壳内面板**（frontend 内嵌 supervisor.html），API 经 Rust `api_proxy` command 转发守卫 API 端口（默认 36360）（绕浏览器 CORS，守卫零 CORS 边界不变）；公开壳（导出仓）导航守卫 API 端口（默认 36360） 托管面板。
+- **前端一源双出口**：源码唯一 `ui/`，构建一次 → `ui-react` 镜像（守卫托管/浏览器出口）+ 壳 frontend 内嵌（桌面出口）；统一入口 `release/scripts/build-ui.sh`（release.sh 与 CI 均经它）。
 - 守卫保持零第三方依赖（node: 内置即可运行）；shell 提供无头冒烟入口：`dsh-supervisor-gui --node-plan`。
 
 ### 内核更新（单写入者 = 桌面壳；2026-09-15 A 方案）
@@ -302,8 +315,8 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
   启动门 2（`core_apply`）与面板请求（壳 `kernel_update_apply`，经面板→壳 postMessage 桥）**共用同一实现**。
 - 守卫只提供**只读**状态：`GET /self-update/status`；写端点 `POST /self-update/apply`、`POST /self-update/restart-guard`
   已下架（`410 KERNEL_UPDATE_SINGLE_WRITER`）。守卫重启（应用新内核）由壳经服务管理器完成（守卫从不重启自己）。
-- 旧 manifest 通道（`selfUpdateManifestUrl`/`selfUpdateDir` + `src/domains/dist/self-update.js`）**已删除**。
-- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）；推荐一键：`CI（tag 触发）` / `CI（tag 触发，四平台各自 ci-core.sh --publish）`。
+- 旧 manifest 通道（`selfUpdateManifestUrl`/`selfUpdateDir` 与实现它的自更新模块）**已删除**。
+- 内核发布：`npm run build:launcher` + `npm run publish:core`（Node launcher + npm 平台子包，见「内核发布」节）。发布由 tag 触发 CI：`build` 矩阵四平台各自执行 `ci-core.sh --publish`。
 - 环境状态：`GET /env/status`（node/npm/git 探针 + 壳写入的 runtime.json）、`GET /env/dsh`（DSH 本体安装/纳管判定）。
 
 ### 跨平台打包（**已移至壳仓**）
@@ -315,7 +328,7 @@ POST /shutdown               已由 POST /session/stop 取代（保留供旧版�
 `macos-15-intel` x64 / `windows-latest`）→ Tauri bundle → GitHub Release + npm 壳包 +
 `shell-manifest.json`（Tauri updater 静态清单）。详见壳仓 `README.md`。
 
-桌面实机验收清单：`release/runbooks/verify-desktop.md`（内核侧视角）。
+桌面壳实机验收清单：见壳仓 `docs/DESKTOP-ACCEPTANCE.md`（属壳资产，不在本仓）。
 
 ## 边界与非目标（v1）
 

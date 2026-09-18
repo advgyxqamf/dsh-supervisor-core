@@ -21,7 +21,11 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  ← ' + x : '')); };
 
 (async () => {
-  const { PortRegistry, DEFAULT_POOLS, SEGMENT_POOL } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports'));
+  const { PortRegistry, DEFAULT_POOLS, SEGMENT_POOL } = require(path.join(ROOT, 'src', 'platform', 'service', 'ports'));
+  // DS-G4 §4.2（反转法）：段名/独立池是**域知识**，platform 不再硬编码 → 测试显式申报
+  // （等价于生产由 router/relay 域装配期注入；未申报时未注册段回退通用池 managed）。
+  require(path.join(ROOT, 'src', 'domains', 'router', 'port-segments'));
+  require(path.join(ROOT, 'src', 'domains', 'relay', 'port-segments'));
 
   // 1) 选址：默认池必须完全避开 OS 动态端口范围，且在合法端口区间
   console.log('== 1) 池选址（RFC 6335 / 避开 OS ephemeral）==');
@@ -61,7 +65,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
   // 4) 池满 → 显式错误（绝不静默 null）
   console.log('== 4) 池满显式错误 ==');
-  const small = new PortRegistry({ file: path.join(TMP, 'small.json'), pools: { providerApi: { base: 27000, count: 4 } } });
+  const small = new PortRegistry({ file: path.join(TMP, 'small.json'), pools: Object.assign({}, DEFAULT_POOLS, { providerApi: { base: 27000, count: 4 } }) });
   for (let i = 0; i < 4; i++) await small.allocate('providerApi', 's' + i);
   const full = await small.claimSlot('providerApi', 'overflow');
   check('池满 claimSlot 返回显式 conflict/ErrFull', full && full.conflict === true && full.error === 'port-pool-exhausted', JSON.stringify(full));
@@ -71,7 +75,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
   // 5) 可配置池（工业标准：范围是配置项）
   console.log('== 5) portPools 可配置 ==');
-  const custom = new PortRegistry({ file: path.join(TMP, 'custom.json'), pools: { providerApi: { base: 28000, count: 8 } } });
+  const custom = new PortRegistry({ file: path.join(TMP, 'custom.json'), pools: Object.assign({}, DEFAULT_POOLS, { providerApi: { base: 28000, count: 8 } }) });
   check('configurePools 生效（自定义 base/count）', custom.rangeOf('providerApi').base === 28000 && custom.rangeOf('providerApi').count === 8, JSON.stringify(custom.rangeOf('providerApi')));
   const cp = await custom.allocate('providerApi', 'x');
   check('自定义池内分配正确', cp >= 28000 && cp < 28008, String(cp));
@@ -94,13 +98,13 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   //    此处做源码级守卫，防止该硬编码回归。
   console.log('== 7) 回归守卫：relay main 偏好不得池外硬编码 ==');
   {
-    const mgrSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'manager.js'), 'utf8');
+    const mgrSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'ops.js'), 'utf8');
     const codeOnly = mgrSrc
       .split('\n')
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
       .join('\n');
-    check('relay/manager.js 无裸 28120 硬编码（已派生自池 base）', !/\b40000\b/.test(codeOnly), 'ok');
-    check('relay/manager.js 的 main 偏好取自 relay 段池', /rangeOf\('relay'\)/.test(codeOnly), 'ok');
+    check('relay/ops.js 无裸 40000 硬编码（已派生自池 base）', !/\b40000\b/.test(codeOnly), 'ok');
+    check('relay/ops.js 的 main 偏好取自 relay 段池', /rangeOf\('relay'\)/.test(codeOnly), 'ok');
   }
 
   const failed = results.filter((r) => !r);

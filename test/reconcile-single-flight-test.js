@@ -35,7 +35,7 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 // 源码级：reconcile 是单飞包装，主体为 _reconcileOnce
-const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'manager.js'), 'utf8');
+const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'ops.js'), 'utf8');
 check('S8-a 存在单飞字段 _reconcileInFlight', /_reconcileInFlight/.test(src), '有');
 check('S8-a reconcile 命中在途即复用',
   /if \(this\._reconcileInFlight\) return this\._reconcileInFlight;/.test(src), '有');
@@ -47,7 +47,7 @@ check('S8-a 主体已拆为 _reconcileOnce', /async _reconcileOnce\(\)/.test(src
 //   说明：reconcile 依赖 this.instances/_allManaged/logger 等；
 //   此处只验证**单飞包装本身**，故用一个最小对象复用其原型方法。
 {
-  const { LanManager } = require(path.join(ROOT, 'src', 'domains', 'relay', 'manager.js'));
+  const { LanManager } = require(path.join(ROOT, 'src', 'domains', 'relay', 'ops.js'));
   const proto = LanManager.prototype;
 
   const makeHarness = (impl) => {

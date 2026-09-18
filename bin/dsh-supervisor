@@ -10,7 +10,7 @@ const http = require('node:http');
 //   而 G9 门禁只扫 `src/`，**看不见 `bin/`** —— 故这些调用长期绕过统一执行器。
 //   现经 `src/platform/exec` 统一入口（有界 + SIGKILL + maxBuffer）；
 //   需要用户看到输出的场合传 `stdio: 'inherit'`（exec.js 支持透传）。
-const ex = require('../src/platform/exec');
+const ex = require('../src/platform/util/exec');
 // systemctl / loginctl 是用户级操作，给足时间但**有上限**（挂起时如实报错而非卡死）。
 const CLI_SVC_TIMEOUT_MS = 30000;
 
@@ -41,24 +41,27 @@ function findPackageRoot(start) {
 }
 const ROOT = findPackageRoot(__dirname);
 // 产品状态根（独立于 DSH 的 ~/.dsh）——单一事实源 = src/platform/state-root.js。
-const stateRoot = require('../src/platform/state-root');
+const stateRoot = require('../src/platform/service/state-root');
 const SUPERVISOR_DIR = stateRoot.supervisorDir();
 const USER_CONFIG = path.join(SUPERVISOR_DIR, 'config.json');
 
 // 内嵌默认配置（发行态唯一模板源）：发布物不再依赖 ROOT/config.json 外置文件（fresh-HOME 自举必需）。
 // command 用 PATH 查找的 'dsh'（用户本机路径由 install/壳写入用户配置；nativeCommand 会注入 --port）。
-// 配置单一事实源 = src/infra/config.js 的 DEFAULTS；此处仅补充 DEFAULTS 未含的「模板必填项」
+// 配置单一事实源 = platform/service/config 的默认值；此处仅补充默认值未含的「模板必填项」
 // command（DSH 启动命令）与 healthUrl（探活地址）——避免默认配置在多处复制漂移（2026-09 收敛）。
+//
+// ⚠ DS-G4（§4.2 反转法）：业务域配置键（如 daemon 控制通道端口 / 启用意图）**不在** platform
+//   的模块级 DEFAULTS 里（那会让平台源码带域名词）。此处是**进程入口**，向 app/settings 取
+//   注入声明后经 buildDefaults 合成完整默认值 —— 落盘模板与反转前逐字一致（键名/值/键序均不变）。
+const { buildDefaults } = require('../src/platform/service/config');
+const { extension: domainConfigExtension } = require('../src/app/settings/domain-config');
 const DEFAULT_CONFIG = Object.assign(
   {},
-  require('../src/platform/config').DEFAULTS,
+  buildDefaults(domainConfigExtension()),
   { command: ['node', 'dsh', 'web'], healthUrl: 'http://127.0.0.1:3080/' }
 );
 const STATE_FILE = path.join(SUPERVISOR_DIR, 'state.json');
 const EVENTS_FILE = path.join(SUPERVISOR_DIR, 'events', 'guard.events.log');
-const UNIT_PATH = path.join(os.homedir(), '.config', 'systemd', 'user', 'dsh-supervisor.service');
-const AUTOSTART_TEMPLATE = path.join(ROOT, 'desktop', 'dsh-supervisor-gui-autostart.desktop');
-const AUTOSTART_FILE = path.join(os.homedir(), '.config', 'autostart', 'dsh-supervisor-gui-autostart.desktop');
 // 跨平台命令行入口（P1 审计修复）：
 //   Unix    ：~/.local/bin/dsh-supervisor（软链到包内脚本，无扩展名）。
 //   Windows ：%APPDATA%\npm 下的 .cmd 垫片——Windows 可执行须有扩展名，且创建**符号链接**
@@ -140,7 +143,7 @@ function printSelfVersion() {
   // 统一走 infra/version.guardVersion()：SEA 形态由 esbuild --define 注入 __DSH_VERSION__，
   // 任意 cwd 自报正确版本；源码形态回退读仓库 package.json。独立读 ROOT/package.json 会让
   // SEA 二进制 --version 恒报 vunknown（2026-09 实证修复）。
-  const { guardVersion } = require('../src/platform/version');
+  const { guardVersion } = require('../src/platform/service/version');
   console.log('dsh-supervisor v' + guardVersion());
 }
 
@@ -396,52 +399,32 @@ function cmdInstall() {
 }
 
 function cmdGuiAutostart(onoff) {
-  if (onoff === 'on') {
-    if (!fs.existsSync(AUTOSTART_TEMPLATE)) {
-      console.error('未找到自启模板: ' + AUTOSTART_TEMPLATE);
-      process.exitCode = 1;
-      return;
-    }
-    fs.mkdirSync(path.dirname(AUTOSTART_FILE), { recursive: true });
-    const entry = fs.readFileSync(AUTOSTART_TEMPLATE, 'utf8').replace(/@HOME@/g, os.homedir());
-    fs.writeFileSync(AUTOSTART_FILE, entry);
-    console.log('[gui-autostart] 已开启：登录时自动打开监管面板 → ' + AUTOSTART_FILE);
-  } else if (onoff === 'off') {
-    try {
-      fs.unlinkSync(AUTOSTART_FILE);
-      console.log('[gui-autostart] 已关闭。');
-    } catch {
-      console.log('[gui-autostart] 本来就未开启。');
-    }
-  } else {
+  if (onoff !== 'on' && onoff !== 'off') {
     console.log('用法: dsh-supervisor gui-autostart on|off');
     process.exitCode = 1;
+    return;
   }
+  // **单一实现**：GUI 自启的模板与写入逻辑归 `platform/os/autostart.js`（模板已内嵌，
+  //   不依赖外置 desktop/ 目录——launcher 发行态不携带它）。CLI 只做委托，不再重复一份。
+  const r = require('../src/platform/os/autostart').setGuiAutostart(onoff === 'on');
+  if (!r || r.ok === false) {
+    console.error('[gui-autostart] 设置失败: ' + ((r && (r.error || (r.errors && r.errors.join('; ')))) || '未知错误'));
+    process.exitCode = 1;
+    return;
+  }
+  console.log('[gui-autostart] ' + (onoff === 'on' ? '已开启：登录时自动打开监管面板' : '已关闭')
+    + '（' + (r.via || r.kind || 'ok') + '）');
 }
 
 function cmdUninstall() {
-  try {
-    execInherit('systemctl', ['--user', 'stop', 'dsh-supervisor.service']);
-  } catch {}
-  try {
-    execInherit('systemctl', ['--user', 'disable', 'dsh-supervisor.service']);
-  } catch {}
-  try {
-    fs.unlinkSync(UNIT_PATH);
-    console.log('[uninstall] 已移除 systemd unit: ' + UNIT_PATH);
-  } catch {}
+  // 服务定义 / 开机自启 / linger 的所有者是**桌面壳**（D6）：内核卸载只移除自己的命令行入口，
+  //   绝不触碰壳建立或持有的服务定义与自启项（否则与壳争夺所有权）。
+  //   状态目录（config/日志/端口）**故意保留** —— 卸载不应销毁用户数据。
   try {
     fs.unlinkSync(BIN_PATH);
     console.log('[uninstall] 已移除命令行: ' + BIN_PATH);
   } catch {}
-  try {
-    execInherit('loginctl', ['disable-linger', os.userInfo().username]);
-    console.log('[uninstall] loginctl disable-linger 已撤销');
-  } catch {}
-  try {
-    execInherit('systemctl', ['--user', 'daemon-reload']);
-  } catch {}
-  console.log('[uninstall] 完成。DSH 自身不受影响。');
+  console.log('[uninstall] 完成。服务定义/自启由桌面壳负责；DSH 自身不受影响。');
 }
 
 function cmdEvents() {
@@ -570,13 +553,13 @@ function usage() {
   console.log('用法: dsh-supervisor <command> [options]');
   console.log('');
   console.log('命令:');
-  console.log('  daemon [-c <config>]      启动守护进程（由 systemd 调用）');
+  console.log('  daemon [-c <config>]      启动守护进程（由桌面壳/服务管理器调用）');
   console.log('  status [-c <config>]      查看当前状态');
   console.log('  start [-c <config>]       设置 desired=running 并启动 DSH');
   console.log('  stop [-c <config>]        设置 desired=stopped 并停止 DSH');
   console.log('  restart [-c <config>]     立即重启一次（不改变 desired）');
-  console.log('  install                   安装：config + systemd unit + enable-linger');
-  console.log('  uninstall                 卸载：移除 systemd unit 与命令行链接');
+  console.log('  install                   安装：内嵌 config + 命令行入口（服务定义由桌面壳负责）');
+  console.log('  uninstall                 卸载：移除命令行入口（不触碰壳的服务定义）');
   console.log('  events [N]                显示最近 N 条事件日志（默认 50）');
   console.log('  logs [supervisor|dsh|upgrade|events] [N]');
   console.log('                            查看对应运行日志末尾（默认 supervisor 50 行）');
@@ -623,7 +606,7 @@ switch (cmd) {
   case 'self-check':
     // 发布物内核冒烟：纯逻辑自检（不依赖资产目录/网络），供每平台构建后验证产物可自举。
     {
-      const { guardVersion } = require('../src/platform/version');
+      const { guardVersion } = require('../src/platform/service/version');
       console.log('dsh-supervisor core self-check');
       console.log('guardVersion=' + (typeof guardVersion === 'function' ? guardVersion() : 'unknown'));
       console.log('node=' + process.version);

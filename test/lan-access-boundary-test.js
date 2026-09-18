@@ -6,7 +6,7 @@
 //
 // ## 缺陷（注释与行为相反）
 //
-// `api/index.js` 头部**明文声称**：
+// `api/security.js`（步骤9 由 index.js 拆出）头部**明文声称**：
 //   「只允许本机(回环)与 RFC1918 私有 IP 的 Host/Origin → 外部/公网主机被拒」
 // 而闸①（Host）与闸②（Origin）此前只查 `LOOPBACK_HOSTS`。
 //
@@ -79,16 +79,21 @@ check('E-f 边界：192.169.x（非私有）→ DENY', allow({ host: '192.169.0.
 
 // ── E-g：复用同一份实现（防「再写一份 RFC1918」）──
 check('E-g identity 导出 isPrivateIpv4', typeof identity.isPrivateIpv4 === 'function');
-// 断言「确实从 identity 取了 isPrivateIpv4」——按**语义**而非格式（解构可能跨行/带注释）。
+// ⚠ 步骤 9（DIRECTORY-STRUCTURE-DESIGN §3）：Host/Origin 闸实现从 api/index.js 迁至
+//   api/security.js，本判据随之指向**真实归属处**（否则断言对着网关空转——门禁失效）。
+//   断言「确实从 identity 取了 isPrivateIpv4」——按**语义**而非格式（解构可能跨行/带注释）。
+const SEC = path.join(ROOT, 'src', 'api', 'security.js');
 {
-  const idx = fs.readFileSync(path.join(ROOT, 'src', 'api', 'index.js'), 'utf8');
-  const m = idx.match(/const\s*\{([^}]*)\}\s*=\s*require\(['"]\.\/identity['"]\)/);
-  check('E-g index.js 从 identity 解构出 isPrivateIpv4',
+  const sec = fs.readFileSync(SEC, 'utf8');
+  const m = sec.match(/const\s*\{([^}]*)\}\s*=\s*require\(['"]\.\/identity['"]\)/);
+  check('E-g security.js 从 identity 解构出 isPrivateIpv4',
     !!m && /isPrivateIpv4/.test(m[1]), m ? m[1].replace(/\s+/g, ' ').trim() : '（未找到解构）');
 }
-check('E-g index.js 不再有第二份 isPrivateIpv4 定义',
+// 网关与安全模块都不得自带第二份 RFC1918 判定（凡消费方都须复用 identity/ip 的实现）。
+check('E-g 全 api/ 无第二份 isPrivateIpv4 定义',
   !/function\s+isPrivateIpv4\s*\(/.test(
-    fs.readFileSync(path.join(ROOT, 'src', 'api', 'index.js'), 'utf8')
+    fs.readFileSync(path.join(ROOT, 'src', 'api', 'index.js'), 'utf8') +
+    fs.readFileSync(SEC, 'utf8')
   ));
 
 const failed = results.filter((r) => !r);

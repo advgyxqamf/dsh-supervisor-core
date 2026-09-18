@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// ⛔ 卸载类测试（项目政策，2026-08-31）：本脚本含 POST /native/uninstall（控制面板对 DSH 原生卸载）契约断言，
-// 已从 npm test 自动测试链排除，仅允许作为独立脚本显式单独调用（node test/api-contract-test.js 或 npm run test:api-contract）；
-// 除非用户明确指令，禁止擅自运行。
+// 卸载类测试（项目政策，2026-08-31）：本脚本含 POST /native/uninstall（控制面板对 DSH 原生卸载）契约断言，
+// 已纳入 npm test（CI）自动测试链执行；测试结论只能由 CI 裁决，本地不单独复跑
+// （如需排查，可显式执行 node test/api-contract-test.js 或 npm run test:api-contract）。
 
 // API 契约断言测试：对 createServer 的响应对未来回归设防。
 // 覆盖审计修复的关键契约：202 异步受理带 ok、key/use 路由 await（Promise 序列化回归）、
@@ -37,6 +37,9 @@ const routerApi = () => ({ switchToKey: async () => ({ ok: true, selected: 'k1' 
 const instances = {
   stopInstance: (id) => ({ ok: true, id: typeof id === 'object' ? id.id : null }),
   list: () => [{ id: 'main', port: 3080, name: '主实例', domain: 'native' }],
+  // DG-11 查询接口（消费方不再直读 .instances.instances）
+  find: (id) => [{ id: 'main', port: 3080, name: '主实例', domain: 'native' }].find((x) => x.id === id),
+  all: () => [],
 };
 const pluginManager = { install: async () => ({ ok: true }) };
 const lan = { list: () => ({ items: [], addresses: [] }) };
@@ -122,14 +125,18 @@ function req(method, p, body, hostHeader, extraHeaders, via) {
   check('跨站 Origin 写请求拒绝 403', evil === 403, String(evil));
 
   // F1 授权收口契约（2026-09 审计修复）：/instances 的 authUrl 仅回环 Host 请求带 DSH token，
-  // LAN/私网 Host 访问不下发 token（只给免认证 lanUrl）——token 永不出本机。
+  // LAN 分支的语义已在 P3-C（fail-closed，FIX-1 B2 执行侧）变更：
+  //   原契约「LAN/私网访问 200 放行但不下发 token」是**漏洞形态** —— 未配置 apiAccessKey 时
+  //   整层鉴权被跳过，LAN 上任意设备可零认证驱动写 API；现为「LAN 未配置密钥一律 401」。
+  //   故 F1 的 LAN 分支断言 401；「token 永不出本机」这条安全属性**转移**到 F2 的已认证 LAN 路径
+  //   （带正确 key 请求 /instances → 200 且不下发 token）——覆盖面不因修漏洞而丢失。
   // 概念清分（2026-09-06）：响应拆两级——instances[]=沙箱、native=原生主干 main；F1 对 main（native 字段）断言。
   let instR = await req('GET', '/instances');
   const instLoopback = instR.body.native;
   check('F1 回环 Host /instances 下发含 token authUrl', !!instLoopback && instLoopback.authUrl.indexOf('token=dsh-session-token-abc123') >= 0 && instLoopback.tokenPresent === true, JSON.stringify(instLoopback && instLoopback.authUrl));
-  instR = LAN_IP ? await req('GET', '/instances', null, LAN_IP + ':' + API_PORT, null, 'lan') : { body: {} };
-  const instLan = instR.body && instR.body.native;
-  check('F1 LAN（真实非回环 socket）/instances 不下发 token', !LAN_IP || (!!instLan && instLan.authUrl.indexOf('token=') < 0 && instLan.tokenPresent === false), JSON.stringify(instLan && instLan.authUrl));
+  instR = LAN_IP ? await req('GET', '/instances', null, LAN_IP + ':' + API_PORT, null, 'lan') : { code: 0, body: {} };
+  check('F1 LAN（真实非回环 socket）未配置密钥 → 401（fail-closed）',
+    !LAN_IP || instR.code === 401, LAN_IP ? (instR.code + '') : '（无 LAN 地址，跳过）');
 
   // F2 出回环访问密钥契约（2026-09 定案）：配置 apiAccessKey 后，LAN/私网 Host 请求必须带
   // Authorization: Bearer <key> 或 ?access_key=<key>（401 否则）；回环 Host 豁免（CLI/面板语义）。
@@ -178,6 +185,13 @@ function req(method, p, body, hostHeader, extraHeaders, via) {
   check('F2 LAN ?access_key= 正确 → 放行 200', kr.code === 200, kr.code + '');
   kr = await reqKey('GET', '/status'); // 默认 127.0.0.1 连接 = socket 回环身份
   check('F2 回环身份豁免（无 key 放行）', kr.code === 200, kr.code + '');
+  // 自 F1 转移而来的安全属性：**已认证**的 LAN 路径上，响应仍不得包含 DSH token。
+  //   （原断言依赖「LAN 未认证也能 200」这一漏洞前提；现改在带 key 的合法路径上验证。）
+  kr = await reqKey('GET', '/instances', null, { Authorization: 'Bearer ' + KEY }, 'lan');
+  const instLanAuthed = kr.body && kr.body.native;
+  check('F2 已认证 LAN GET /instances → 200 且不下发 token（安全属性转移自 F1）',
+    !LAN_IP || (kr.code === 200 && !!instLanAuthed && instLanAuthed.authUrl.indexOf('token=') < 0 && instLanAuthed.tokenPresent === false),
+    LAN_IP ? (kr.code + ' ' + JSON.stringify(instLanAuthed && instLanAuthed.authUrl)) : '（无 LAN 地址，跳过）');
   serverKey.close();
 
   server.close();

@@ -34,7 +34,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const { PortRegistry } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports.js'));
+const { PortRegistry } = require(path.join(ROOT, 'src', 'platform', 'service', 'ports', 'index.js'));
 
 const results = [];
 const check = (n, c, x) => {
@@ -84,7 +84,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13prt-'));
   walk(path.join(ROOT, 'src'));
   const offenders = [];
   for (const f of files) {
-    if (f.endsWith(path.join('lifecycle', 'ports.js'))) continue; // 定义处
+    if (f.endsWith(path.join('ports', 'pool.js'))) continue; // 定义处（EXEC3 拆分：实现已移入 pool.js）
     const src = fs.readFileSync(f, 'utf8');
     // ⚠ 必须同时剥离 `*` 开头的**块注释续行** —— 本仓注释里会写
     //   「PortRegistry.release() 现已支持 ownerId」这类**说明文字**，
@@ -119,7 +119,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13prt-'));
   const nNull = newOrder.indexOf('if (!rec)');
   check('R-d 反向：修复后的顺序不被误报', nNull >= 0 && nOwner >= 0 && nNull < nOwner, 'ok');
   // 源码级：实际实现必须是新顺序
-  const code = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports.js'), 'utf8')
+  const code = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'ports', 'pool.js'), 'utf8')
     .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
   const iN = code.indexOf('if (!rec) return false;', code.indexOf('release(port, ownerId)'));
   const iO = code.indexOf('rec.owner !== ownerId', code.indexOf('release(port, ownerId)'));

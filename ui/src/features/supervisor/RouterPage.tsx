@@ -506,14 +506,8 @@ function AccountRow({ a, p, busy, onAction }: { a: ProviderAccount; p: RouterPro
   const stats = formatCount(a.requests || 0) + " 次 · " + formatCount(a.totalTokens || 0) + " tok";
   const [quotaOpen, setQuotaOpen] = useState(false);
   let actionBtn: React.ReactNode;
-  if (status === "review") {
-    actionBtn = (
-      <>
-        <Button disabled={busy} onClick={() => void onAction("in", () => supervisorApi.providerAccountConfirm(p.id, a.keyId).then(() => undefined), "已入池")} size="chip" variant="outline">入池</Button>
-        <Button className="h-[26px]" disabled={busy} onClick={() => void onAction("out", () => supervisorApi.providerAccountDiscard(p.id, a.keyId).then(() => undefined), "已作废")} size="chip" variant="destructive">作废</Button>
-      </>
-    );
-  } else if (limited && !isActive) {
+  // ⚠ review 分支已删除（Phase 5 / 决策 A6）：该状态无写入方，账号入库即终态。
+  if (limited && !isActive) {
     actionBtn = (
       <Button size="chip" variant="outline" className="w-[70px] gap-1 px-1.5" onClick={() => setQuotaOpen(true)} title={limitHint ?? "查看该账号限额情况"}>
         <Ban className="size-3.5" />限额

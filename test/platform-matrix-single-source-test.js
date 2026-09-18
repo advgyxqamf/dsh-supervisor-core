@@ -9,13 +9,13 @@
 // os/arch → 标签 这一事实曾散落 **5 处**：
 //   ① src/platform/os/*                  （正确位置）
 //   ② domains/relay/frpmgr.js            { linux, darwin, win32 } → { linux, darwin, windows }
-//   ③ domains/dist/index.js              { darwin, win32, linux } → { darwin, win, linux }
+//   ③ domains/dist/index.js（步骤3 上移 platform/distribution） { darwin, win32, linux } → { darwin, win, linux }
 //   ④ guard/supervisor/settings-view.js  { win32, linux, darwin } → { win, linux, darwin }
-//   ⑤ domains/plugin/plugins.js          process.platform !== 'win32'
+//   ⑤ domains/plugin/ops.js（原 plugins.js）  process.platform !== 'win32'
 // 5 份副本必然漂移；且业务域持有的平台知识**在非本平台上不会被校验** ——
 // 这正是「内部业务开发悄悄破坏跨平台构建」的机制。
 //
-// 现全部收口到 `src/platform/matrix.js`。
+// 现全部收口到 `src/platform/contract/matrix.js`。
 //
 // ## 锁定不变量
 //   M-a  矩阵成员与 package.json#npmPublish.packages **逐项一致**（跨源一致性）
@@ -27,7 +27,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const matrix = require(path.join(ROOT, 'src', 'platform', 'matrix.js'));
+const matrix = require(path.join(ROOT, 'src', 'platform', 'contract', 'matrix.js'));
 
 const results = [];
 const check = (n, c, x) => {
@@ -96,14 +96,14 @@ const check = (n, c, x) => {
   const offenders = [];
   for (const f of files) {
     const rel = path.relative(ROOT, f).replace(/\\/g, '/');
-    if (rel.endsWith('src/platform/matrix.js')) continue;   // 唯一合法位置
+    if (rel.endsWith('src/platform/contract/matrix.js')) continue;   // 唯一合法位置
     const code = fs.readFileSync(f, 'utf8')
       .split(String.fromCharCode(10))
       .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
       .join(String.fromCharCode(10));
     if (mapRe.test(code)) offenders.push(rel);
   }
-  check('M-c src/ 中除 platform/matrix.js 外无 os/arch 映射对象字面量',
+  check('M-c src/ 中除 platform/contract/matrix.js 外无 os/arch 映射对象字面量',
     offenders.length === 0, offenders.length ? offenders.join(', ') : '未发现');
 }
 

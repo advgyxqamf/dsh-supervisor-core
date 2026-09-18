@@ -38,10 +38,16 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+// ⚠ 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：shell/plugin 两域已拆为
+//   index/journal/restart 与 index/ops/store/market。本套源码级断言的**对象是「域」**
+//   （restartShell 的 'error' 监听、插件 CLI 的 detached 杀树、市场重定向协议），
+//   与文件切分无关 —— 故按域聚合读取，避免把判据搬走而静默失去覆盖面。
+const readDomain = (dir) => fs.readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.js')).sort()
+  .map((f) => read(dir + '/' + f)).join(String.fromCharCode(10));
 
 // ── J-a：deploy launcher 形态识别 ──
 {
-  const dep = require(path.join(ROOT, 'src', 'platform', 'deploy.js'));
+  const dep = require(path.join(ROOT, 'src', 'platform', 'contract', 'deploy.js'));
   check('J-a 导出 isLauncherForm', typeof dep.isLauncherForm === 'function', typeof dep.isLauncherForm);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'depj-'));
   // ① 发布布局：<pkg>/bin/dsh-supervisor + <pkg>/core.cjs
@@ -62,14 +68,14 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   check('J-a 源码布局（无 core.cjs）→ 不误判', dep.isLauncherForm(t2) === false, 'false');
   fs.rmSync(tmp, { recursive: true, force: true });
   // 反向：注释不得再声称产品形态是 SEA
-  const srcTxt = read('src/platform/deploy.js');
+  const srcTxt = read('src/platform/contract/deploy.js');
   check('J-a 头部注释已校正（不再称 SEA 为标准形态）',
     /弃 SEA|不再是 SEA/.test(srcTxt), '已校正');
 }
 
 // ── J-b：DaemonLifecycle 标记派生 ──
 {
-  const { DaemonLifecycle } = require(path.join(ROOT, 'src', 'guard', 'proc', 'daemon-lifecycle.js'));
+  const { DaemonLifecycle } = require(path.join(ROOT, 'src', 'app', 'daemons', 'process.js'));
   const script = path.join(ROOT, 'src', 'domains', 'router', 'daemon.js');
   const lc = new DaemonLifecycle({
     name: 'router', script, args: ['-c', '/x/cfg.json'], ctlPort: 43107,
@@ -92,7 +98,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     lc._cmdMarks.some((m) => m && norm(realCmd).indexOf(m) >= 0),
     'realCmd=' + realCmd.slice(0, 70));
   // 反向：确认旧写法（只用 this.cmdMark）已不在匹配点
-  const dlSrc = read('src/guard/proc/daemon-lifecycle.js');
+  const dlSrc = read('src/app/daemons/process.js');
   check('J-b _ctlOwnerPid 用 _cmdMarks 匹配', /_cmdMarks\.some/.test(dlSrc), '已改');
 
   // -- J-b-2: cmdline 与标记的分隔符归一化（2026-09-13 新增，锁真实产品缺陷）--
@@ -102,13 +108,15 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   //     认不出自己的 router/lan daemon（可能误判端口异主或重复拉起）。
   //   修法：pidlookup 导出 normCmdline，三处比较点先归一化。
   //   本节在 Linux 上也能拦住该回归（不依赖 Windows runner）。
-  const pidSrc = read('src/platform/os/pidlookup.js');
+  // ⚠ 2026-09-17 域结构改造：pidlookup 已拆为 pidlookup/{index,probe,norm}.js —— 按目录聚合读取。
+  const pidSrc = readDomain('src/platform/os/pidlookup');
   check('J-b-2 pidlookup 导出 normCmdline',
     /module\.exports\s*=\s*\{[^}]*normCmdline[^}]*\}/.test(pidSrc), '已导出');
   for (const [f, label] of [
-    ['src/guard/proc/daemon-lifecycle.js', 'daemon-lifecycle._ctlOwnerPid'],
-    ['src/guard/supervisor/supervise-view.js', 'supervise-view._routerDaemonActive'],
-    ['src/guard/supervisor/control-view.js', 'control-view lan daemon 判定'],
+    ['src/app/daemons/process.js', 'daemon-lifecycle._ctlOwnerPid'],
+    ['src/app/daemons/probe.js', 'supervise-view._routerDaemonActive'],
+    // ⚠ 2026-09-16 步骤7：lan daemon 判定（_lanDaemonActive）与 router 判定同归 app/daemons/probe.js
+    ['src/app/daemons/probe.js', 'control-view lan daemon 判定'],
   ]) {
     const src = read(f);
     check('J-b-2 ' + label + ' 比较前归一化 cmd',
@@ -117,7 +125,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     check('J-b-2 ' + label + ' 未回退为裸 readCmdline', !bare, bare ? '**发现裸用法**' : 'ok');
   }
   {
-    const { normCmdline } = require(path.join(ROOT, 'src', 'platform', 'os', 'pidlookup.js'));
+    const { normCmdline } = require(path.join(ROOT, 'src', 'platform', 'os', 'pidlookup'));
     const B = String.fromCharCode(92);
     const winCmd = 'C:' + B + 'a' + B + 'src' + B + 'domains' + B + 'router' + B + 'daemon.js -c x';
     check('J-b-2 Windows 风格 cmdline 归一化后可被标记命中',
@@ -131,7 +139,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 // ── J-c：semverCompare 规范符合性 ──
 {
-  const { semverCompare } = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
+  const { semverCompare } = require(path.join(ROOT, 'src', 'platform', 'distribution', 'index.js'));
   const cases = [
     ['1.0.0-beta-2', '1.0.0-beta-1', '>'],   // 连字符后不再被截断
     ['1.0.0-rc-10', '1.0.0-rc-2', '<'],      // 非纯数字标识符 → 字典序（规范）
@@ -148,14 +156,14 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   }
   check('J-c semverCompare 全部符合规范（含连字符 prerelease）', bad === 0, bad + ' 处不符');
   // 反向：确认旧的 split('-') 写法已消失
-  const dsrc = read('src/domains/dist/index.js');
+  const dsrc = readDomain('src/platform/distribution');
   check('J-c 不再用 split(\'-\') 解构 core/pre',
     !/const \[core, pre\] = clean\.split\('-'\)/.test(dsrc), '已改');
 }
 
 // ── J-e：daemon _spawn 的缺陷防护 ──
 {
-  const dl = read('src/guard/proc/daemon-lifecycle.js');
+  const dl = read('src/app/daemons/process.js');
   const m = dl.match(/_spawn\(\) \{[\s\S]*?\n  \}/);
   const body = m ? m[0] : '';
   check('J-e 定位到 _spawn', !!m, m ? 'ok' : '未找到');
@@ -166,7 +174,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     body.lastIndexOf('_writeIdentity') > body.indexOf('if (!child.pid)'),
     'write@' + body.lastIndexOf('_writeIdentity') + ' check@' + body.indexOf('if (!child.pid)'));
   // 壳拉起的同类缺陷（P0-1 of shell）
-  const sh = read('src/domains/shell/index.js');
+  const sh = readDomain('src/domains/shell');
   check("J-e shell.restartShell 也监听 'error'", /child\.on\('error'/.test(sh), '有');
   check('J-e shell.restartShell 校验 child.pid', /if \(!child\.pid\)/.test(sh), '有');
 }
@@ -175,11 +183,12 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 //   若只看 form==='sea-binary'，则真实 launcher 用户读不到磁盘版本、
 //   updatePending 恒 false、面板永不提示「已装好待重启」。
 {
-  const sv = read('src/guard/supervisor/settings-view.js');
+  // ⚠ 2026-09-16 步骤7：settings-view.js 拆为 6 模块，_readBinarySelfVersion 归 app/settings/versions.js。
+  const sv = read('src/app/settings/versions.js');
   check('J-f _readBinarySelfVersion 用 updatable 而非 form 硬判',
     /if \(!dep\.updatable \|\| !dep\.runningTarget\) return null;/.test(sv), '已改');
   check('J-f status 的磁盘版本读取用 updatable 判定',
-    /if \(dep\.updatable\) diskVersion = this\._readBinarySelfVersion\(\);/.test(sv), '已改');
+    /if \(dep\.updatable\) diskVersion = [\w.$]*readBinarySelfVersion\(\);/.test(sv), '已改');
   // 反向：剥离注释后不得再有 `form === 'sea-binary'` 的**代码**判定
   const codeOnly = sv.split(String.fromCharCode(10))
     .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*'); })
@@ -190,8 +199,9 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 // ── J-g：插件域的两个 P1 ──
 {
-  const pm = read('src/domains/plugin/pluginmarket.js');
-  const pg = read('src/domains/plugin/plugins.js');
+  // 域改造后 HTTP 原语（getJson/getText）落在 market-net.js（SSOT §5.4）。
+  const pm = read('src/domains/plugin/market-net.js');
+  const pg = readDomain('src/domains/plugin');
   // P1-3：重定向目标必须校验协议（file:// 会让 http.get 同步抛 → uncaughtException）
   const guards = (pm.match(/重定向到不支持的协议/g) || []).length;
   check('J-g getJson/getText 均校验重定向协议', guards >= 2, guards + ' 处');
@@ -227,7 +237,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 //   超时是唯一的失败信号，此前被丢弃：仍 return ok:true 且抹掉身份 →
 //   对 SIGTERM 无响应的 daemon 成为「无人知道 pid」的孤儿。
 {
-  const dl = read('src/guard/proc/daemon-lifecycle.js');
+  const dl = read('src/app/daemons/process.js');
   const m = dl.match(/async stop\(\) \{[\s\S]*?\n  \}/);
   const body = m ? m[0] : '';
   check('J-h 定位到 stop', !!m, m ? 'ok' : '未找到');
@@ -254,7 +264,9 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
     iClear > iGuard && iGuard >= 0, 'clear@' + iClear + ' guard@' + iGuard);
   check('J-h 失败时记事件供面板可见', /daemon_stop_timeout/.test(body), '有');
   // 配套：调用方必须消费返回值（否则记录又丢了）
-  const sup = read('src/supervisor.js');
+  // ⚠ 2026-09-16 步骤7：shutdownAll 已从 supervisor.js 下沉 app/session/shutdown.js
+  //   （薄壳后 supervisor.js 不再持有业务方法体）。判据对象随之更新。
+  const sup = read('src/app/session/shutdown.js');
   check('J-h shutdownAll 消费 stop() 返回值',
     /r\.ok === false/.test(sup) && /shutdown_daemon_stop_incomplete/.test(sup), '已改');
 }
@@ -262,9 +274,12 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 // ── J-i：插件 CLI 超时必须杀**整棵树**（P1-7）──
 //   原实现只 child.kill() 直接子进程 → pnpm 的孙进程成孤儿，占 profile/store 锁。
 {
-  const pg = read('src/domains/plugin/plugins.js');
+  const pg = readDomain('src/domains/plugin');
+  // 2026-09-16（SSOT NO-CONSOLE-WINDOW-STANDARD W1）：插件 CLI 的 spawn 已收口到
+  //   platform/os/spawn.js 的 piped({detached:true}) —— windowsHide 由封装固定，不再出现在调用点。
+  //   本断言的**意图不变**（插件 CLI 必须自成进程组），故改为断言「经统一封装 + 显式 detached:true」。
   check('J-i 插件 CLI spawn 用 detached（自成进程组）',
-    /spawn\(argv0, \[\.\.\.argvPrefix, \.\.\.cliArgs, \.\.\.args\], \{ env, stdio: \['ignore', 'pipe', 'pipe'\], windowsHide: true, detached: true \}/.test(pg),
+    /spawn\.piped\(argv0, \[\.\.\.argvPrefix, \.\.\.cliArgs, \.\.\.args\], \{ env, detached: true \}\)/.test(pg),
     '已改');
   check('J-i 超时经 killTree（POSIX 杀进程组 -pid）',
     /process\.kill\(-child\.pid, sig\)/.test(pg), '有');
@@ -274,7 +289,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   check('J-i 超时分支不再只用 child.kill（单进程）',
     !/try \{ child\.kill\('SIGTERM'\); \} catch \{\}/.test(pg), '已改');
   // 对照：dist/index.js 的 npm 安装早已用同模式（证明这才是本仓的既有正确做法）
-  const dist = read('src/domains/dist/index.js');
+  const dist = readDomain('src/platform/distribution');
   check('对照：dist 的 npm 安装早已用 detached + -pid',
     /detached: o\.detached !== false/.test(dist) && /process\.kill\(-child\.pid, 'SIGKILL'\)/.test(dist), '是');
 }
@@ -283,17 +298,16 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 //   该文件所有权在壳（registry-contract.js 声明），壳也会读回（core.rs:150）；
 //   内核若整份覆盖，会抹掉 catalog/probe/selected，削弱壳的镜像解析。
 {
-  const dmSrc = read('src/domains/dist/index.js');
-  const m = dmSrc.match(/_saveRegistryConfig\(\) \{[\s\S]*?\n  \}/);
-  const body = m ? m[0] : '';
-  check('J-j 定位到 _saveRegistryConfig', !!m, m ? 'ok' : '未找到');
-  check('J-j 写前读回原文档（保留未知字段）', /readFileSync\(f, 'utf8'\)/.test(body), '有');
+  const dmSrc = readDomain('src/platform/distribution');
+  const m = dmSrc.match(/function saveRegistryConfig\([\s\S]*?\n\}/);
+  check('J-j 定位到 saveRegistryConfig', !!m, m ? 'ok' : '未找到');
+  check('J-j 写前读回原文档（保留未知字段）', /readFileSync\(f, 'utf8'\)/.test(dmSrc), '有');
   check('J-j 只覆盖内核拥有的三键',
-    /doc\.mode = /.test(body) && /doc\.origins = /.test(body) && /doc\.manualOrigin = /.test(body), '有');
+    /doc\.mode = /.test(dmSrc) && /doc\.origins = /.test(dmSrc) && /doc\.manualOrigin = /.test(dmSrc), '有');
   check('J-j 不再整份序列化 registryConfig',
-    !/JSON\.stringify\(this\.registryConfig, null, 2\)/.test(body), '已改');
+    !/JSON\.stringify\(this\.registryConfig, null, 2\)/.test(dmSrc), '已改');
   // 行为级：壳字段必须存活，内核字段必须更新
-  const { DistributionManager } = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
+  const { DistributionManager } = require(path.join(ROOT, 'src', 'platform', 'distribution', 'index.js'));
   const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'regj-'));
   const rf = path.join(tmpR, 'registry.json');
   fs.writeFileSync(rf, JSON.stringify({

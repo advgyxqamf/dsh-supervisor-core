@@ -37,7 +37,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const ex = require(path.join(ROOT, 'src', 'platform', 'exec.js'));
+const ex = require(path.join(ROOT, 'src', 'platform', 'util', 'exec.js'));
 const osIdx = require(path.join(ROOT, 'src', 'platform', 'os', 'index.js'));
 
 const results = [];

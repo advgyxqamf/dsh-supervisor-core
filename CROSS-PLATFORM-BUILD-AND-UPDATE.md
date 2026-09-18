@@ -196,7 +196,7 @@ $ bash ci/check-glibc.sh <binary> 2.35
 
 ---
 
-## 四、完整构建矩阵（GitHub，三平台）
+## 四、完整构建矩阵（GitHub；壳**四平台**（linux/mac arm64/mac x64/win），见壳仓 `docs/RELEASE-STANDARD.md`）
 
 ### 4.1 目标产物矩阵
 
@@ -347,7 +347,7 @@ $ bash ci/check-glibc.sh <binary> 2.35
 | **F3** | 无 macOS 签名/公证 | ⏸ **暂缓**（用户定案 2026-09-11：暂无证书）。不阻塞构建与手动安装（有拦截提示，用户可手动放行）；自动更新链路由 minisign 保障完整性，与此无关 |
 | **F4** | 无 Windows 代码签名；MSI 需管理员 | ⏸ **暂缓**（同上，无证书）。CI 已改主推 NSIS per-user（免提权）；无签名时 SmartScreen 会提示，用户可继续 |
 | **F5** | CI 触发为 `push main + tags`（浪费构建） | ✅ **已修**：改为仅 `tags: ['v*']` + `workflow_dispatch` |
-| **F6** | 内核 `desktop/` 模板路径与 deb 实况不符 | 以 deb `/usr/bin` 为准修正，保留用户级回退 |
+| **F6** | 内核 `desktop/` 模板路径与 deb 实况不符 | ✅ **已修（2026-09-16）**：模板内嵌进 `autostart.js`，Exec/Icon 按实际安装解析；外置 `desktop/` 目录已删 |
 | **F7** | 壳零落盘日志、无版本上报 | P0.1 / P0.2（执行方案） |
 
 ---

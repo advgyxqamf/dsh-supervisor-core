@@ -5,9 +5,9 @@
 
 ## 变更类型（勾选，决定你需要补哪些测试）
 
-- [ ] 业务逻辑（`src/domains/**`、`src/guard/**`、`src/api/**`）
+- [ ] 业务逻辑（`src/domains/**`、`src/app/**`、`src/api/**`）
 - [ ] 平台能力（`src/platform/**`）
-- [ ] 跨仓契约（`registry.json` / `identity.json` / `update-guard.json` / `update-journal.json`）
+- [ ] 跨仓契约（`registry.json` / `identity.json` / `update-journal.json`）
 - [ ] 发布工程（`release/**`、`.github/workflows/**`）
 - [ ] 门禁/测试（`test/**`）
 - [ ] 文档
@@ -19,8 +19,7 @@
 - [ ] **新增测试已进链**：新测试文件已加入 `package.json#scripts.test`，或已写进排除表并说明理由
 - [ ] **注入验证**：新增/修改的门禁我都做了「注入缺陷 -> 确认 FAIL -> 还原（sha256 校验）-> 确认 PASS」
 - [ ] **未引入假绿**：判据不依赖默认值兜底 / 不靠夹具顺序巧合 / 不与自己的说明文字匹配（见 DEVELOPMENT-TRACK 第 3 节）
-- [ ] **本机全量通过**：`npm test` 绿
-- [ ] **CI 等价预演通过**：`bash release/scripts/ci-core.sh` 绿（本仓自包含，不依赖壳仓源码）
+- [ ] **验收状态：待 CI 裁决**（按 ACCEPTANCE-STANDARD，测试一律不在本机执行；不得以本机结果作结论）
 
 ## 跨仓影响（若涉及契约）
 

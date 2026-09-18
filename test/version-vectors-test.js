@@ -23,7 +23,7 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const dist = require(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'));
+const dist = require(path.join(ROOT, 'src', 'platform', 'distribution', 'index.js'));
 // VERSION_RE 与 semverCompare 由 dist 导出（内核侧的**唯一**实现）。
 const { VERSION_RE, semverCompare } = dist;
 

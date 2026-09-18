@@ -9,7 +9,7 @@ const os = require('node:os');
 const fs2 = require('node:fs');
 const ROOT = path.join(__dirname, '..');
 const TMP = fs2.mkdtempSync(path.join(os.tmpdir(), 'mreg-'));
-const { ManagedRegistry, PHASES, DESIRED, MANAGED_KINDS } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'objects'));
+const { ManagedRegistry, PHASES, DESIRED, MANAGED_KINDS } = require(path.join(ROOT, 'src', 'app', 'control', 'registry'));
 
 let failures = 0;
 // ⚠ 2026-09-13（P3 测试基建缺陷）：本文件原以**硬编码常量**报告总数 ——

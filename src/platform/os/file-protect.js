@@ -1,23 +1,15 @@
 'use strict';
 
-// ★ 跨平台文件/目录访问保护（P1 修复）★
-//
-// 问题：产品大量使用 `fs.writeFileSync(f, data, { mode: 0o600 })` 保护敏感文件
-// （config.json 含 lanToken、dsh-main-token.log 含 DSH 访问令牌、registry.json、state.json）。
-// 但 **POSIX mode 在 Windows 被忽略**（NTFS 用 ACL，与 mode 无关）→ 这些文件对同机其他用户可读。
-//
-// 跨平台规范：
-//   Unix   ：chmod（文件 0600 / 目录 0700）——进程内 POSIX mode 有效。
-//   Windows：icacls —— 移除继承（/inheritance:r）并仅授予当前用户；目录用 (OI)(CI) 让内部文件继承。
-//
-// 工业级要点：**保护目录一次**即可让后续新建文件继承约束（比逐文件 icacls 快且不漏）；
-// 逐文件保护用于「目录已存在、文件为历史遗留」的场景。全部 best-effort：失败不阻断主流程，
-// 但结果可观测（返回值）。
+// 跨平台文件/目录访问保护。
+// POSIX mode 在 Windows 被忽略（NTFS 用 ACL），故含 apiAccessKey/remoteToken/会话令牌的文件
+// 必须另行收紧：Windows 用 icacls 移除继承并仅授当前用户（目录用 (OI)(CI) 让内部文件继承）。
+// 保护目录一次即可让后续新建文件继承约束，逐文件保护用于目录已存在、文件为历史遗留的场景。
+// 全部 best-effort：失败不阻断主流程，但经返回值可观测。
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const ex = require('../exec');
+const ex = require('../util/exec');
 
 const IS_WINDOWS = process.platform === 'win32';
 let _icacls = null; // 缓存 icacls 可用性
@@ -25,13 +17,8 @@ let _icacls = null; // 缓存 icacls 可用性
 function hasIcacls(platform) {
   if ((platform || process.platform) !== 'win32') return false;
   if (_icacls !== null) return _icacls;
-  // 经统一执行器（`icacls /?` 退出码非 0 即视为不可用）。
-  // ⚠ 2026-09-13（P0 修复）：改用 runOut —— 同 platform/os/index.js hasTool 的缺陷：
-  //   execFileSync 在 stdio:'ignore' 下**成功也返回 null**，故旧的 '!== null' 判据恒为 false
-  //   → hasIcacls() 在 Windows 上恒 false → 所有敏感文件/目录的 icacls 收紧**静默失效**
-  //     （protectFile/protectDir/writePrivate 一律返回 {ok:false, mode:'none'}，
-  //      只落一行警告，用户与审计都看不到权限没收紧）。runOut 下 null 只可能是失败。
-  //   注：runDetail 在 stdio:'ignore' 下不受影响 —— 它以「是否抛异常」判 ok，不依赖返回值。
+  // 经统一执行器。必须用 runOut：execFileSync 在 stdio ignore 下成功也返回 null，
+  // 用 !== null 判可用会恒 false，导致 icacls 收紧静默失效。
   _icacls = ex.runOut('icacls', ['/?'], { timeoutMs: 3000 }) !== null;
   return _icacls;
 }
@@ -74,28 +61,14 @@ function protectDir(dir) {
     : { ok: false, mode: 'icacls-dir', reason: r.error || ('退出码 ' + r.code) };
 }
 
-/** 确保目录存在并施加保护（创建 + 保护一步到位）。 */
 function ensurePrivateDir(dir) {
   try { fs.mkdirSync(dir, { recursive: true }); } catch (e) { return { ok: false, mode: 'mkdir', reason: e.message }; }
   return protectDir(dir);
 }
 
-/** 写入敏感文件并施加保护（原子写 + 保护；避免「写完到保护之间」的可读窗口）。
- *
- *  ⚠ P2-1 修复（2026-09-12）：**保护失败必须如实返回 `ok:false`**。
- *
- *    缺陷：此前两处 `protectFile(...)` 的返回值被**丢弃**，末尾无条件 `return {ok:true}` ——
- *      Windows 上 `icacls` 不可用/被策略拦截时，文件最终保持继承 ACL 可读，
- *      而调用方拿到「已 0600 写入」的假成功（本仓禁忌「catch 后当成功」）。
- *
- *    ⚠ 该函数当前**生产零调用点**（唯一调用方是 cross-platform-test）——
- *      也就是说这条事故链目前被「功能未接线」挡住；但同目录的 `protectDir`
- *      （`supervisor.js` 对 swDir/supervisorDir 调用）**是真正生效的那一半**，
- *      其失败同样只 `console.warn`（见 `supervisor.js` 的调用点）。
- *      这里先把 `writePrivate` 的契约修正确，避免将来接线时踩坑。
- *
- *  @param {string} file 目标文件（自动创建父目录）
- *  @param {string|Buffer} data
+/** 写入敏感文件并施加保护（原子写 + 保护，避免写完到保护之间的可读窗口）。
+ *  保护失败必须如实返回 ok:false；当前生产零调用点（唯一调用方是 cross-platform-test），
+ *  但同目录 protectDir 是真正生效的那一半。
  *  @returns {{ok:boolean, reason?:string, mode?:string}} */
 function writePrivate(file, data) {
   try {

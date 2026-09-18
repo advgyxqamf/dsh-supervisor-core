@@ -26,7 +26,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // 匹配 systemctl 调用且参数含 dsh-supervisor 的 stop/restart（自停）
   const selfStopRe = /systemctl'[^\n]*\[\s*'--user'\s*,\s*'(?:stop|restart)'\s*,\s*'dsh-supervisor'/;
   check('INV-X1a supervisor.js 无 systemctl stop/restart dsh-supervisor 自停', !selfStopRe.test(supSrc), selfStopRe.test(supSrc) ? '发现自停调用' : 'ok');
-  const daemonLifecycleSrc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'proc', 'daemon-lifecycle.js'), 'utf8');
+  const daemonLifecycleSrc = fs.readFileSync(path.join(ROOT, 'src', 'app', 'daemons', 'process.js'), 'utf8');
   check('INV-X1b daemon-lifecycle 无守卫单元自停', !/dsh-supervisor/.test(daemonLifecycleSrc), 'ok');
 
   // ── 2) 会话状态机基础 ──
@@ -75,6 +75,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   check('shutdownAll 返回回执 { ok, sessionState:stopped }', r1 && r1.ok === true && r1.sessionState === 'stopped', JSON.stringify(r1));
   check('会话态 = stopped', sup.sessionState() === 'stopped', sup.sessionState());
   check('_sessionHalting() = true', sup._sessionHalting() === true);
+  check('退出后 _shellHalted=true（跨守卫重启抑制看护）', sup._shellHalted === true, String(sup._shellHalted));
+  check('statusSummary 暴露 shellHalted', sup.statusSummary().shellHalted === true, JSON.stringify(sup.statusSummary().shellHalted));
   const r2 = await sup.shutdownAll();
   check('shutdownAll 幂等（already 回执）', r2 && r2.ok === true && r2.already === true && r2.sessionState === 'stopped', JSON.stringify(r2));
 
@@ -139,7 +141,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 
   // ── 6) /session API 契约 ──
   console.log('== /session API ==');
-  const lifecycleApi = require(path.join(ROOT, 'src', 'api', 'lifecycle'));
+  const lifecycleApi = require(path.join(ROOT, 'src', 'api', 'domains', 'lifecycle'));
   check('lifecycle.owns(/session/status)', lifecycleApi.owns('/session/status') === true);
   check('lifecycle.owns(/session/stop)', lifecycleApi.owns('/session/stop') === true);
 
@@ -147,6 +149,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   console.log('== 阶段 3 会话态贯通 ==');
   {
     const s3 = new Supervisor(cfg);
+    check('P3-G shellHalted 跨守卫重启继承（新守卫读回）', s3._shellHalted === true, String(s3._shellHalted));
     const snap = s3.statusSummary();
     check('P3-A statusSummary 暴露 sessionState', snap.sessionState === 'starting', JSON.stringify(snap.sessionState));
     s3._setSessionState('stopping');
@@ -178,14 +181,14 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // ── 8) 阶段 4：遗留债清零 ──
   console.log('== 阶段 4 遗留债 ==');
   {
-    const lifecycleSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'lifecycle.js'), 'utf8');
+    const lifecycleSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'domains', 'lifecycle.js'), 'utf8');
     // 单读路径：/events 不应再有 `if (sup.eventHub) {...} else {...}` 双分支（降级适配器统一）
     const dualBranch = /if \(sup\.eventHub\) \{[\s\S]{0,400}?\} else \{[\s\S]{0,400}?sup\.events\.readSince/.test(lifecycleSrc);
     check('P4-A /events 已消除 hub/fallback 双读分支', !dualBranch, 'ok');
     check('P4-B lifecycle 引用统一读接口 eventHub', lifecycleSrc.includes('hub.readVisible') && lifecycleSrc.includes('const hub = sup.eventHub'), 'ok');
 
     // 空对象适配器：接口完备 + 与 EventHub 同源（共用共享实现）
-    const { EventReader } = require(path.join(ROOT, 'src', 'platform', 'loghub'));
+    const { EventReader } = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'hub'));
     const fakeEvents = { seq: 7, readAll: () => ([{ seq: 1, type: 'a' }, { seq: 2, type: 'shadow_beat' }]), readSince: (a, l) => [{ seq: 1, type: 'a' }] };
     const rd = new EventReader(fakeEvents);
     const ifaceOk = ['seq', 'read', 'readVisible', 'readFiltered', 'tailLog', 'exportLines', 'metrics', 'sync']
@@ -200,8 +203,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   // ── 9) P2：B1 能力元数据执法 + C1/A5 前端接线 ──
   console.log('== P2 B1 能力执法 ==');
   {
-    const { LifecycleManager } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'index'));
-    const { registerAll } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'adapters'));
+    const { LifecycleManager } = require(path.join(ROOT, 'src', 'app', 'control', 'manager'));
+    const { registerAll } = require(path.join(ROOT, 'src', 'app', 'control', 'adapters'));
     const mgr = new LifecycleManager({});
     registerAll(mgr, {
       router: { start: async () => ({ ok: true }), stop: async () => ({ ok: true }), status: () => ({}) },
@@ -223,8 +226,9 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
       r1.ok === false && r2.ok === false && r3.ok === false && /不可启停/.test(r1.error || ''), JSON.stringify(r1));
     check('B1-f 可启停模块仍放行', (await mgr.start('router')).ok === true, 'ok');
     // 能力声明单一源：adapters 从 MANAGED_KINDS 取（改表即生效）
-    const adaptersSrc = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'adapters.js'), 'utf8');
-    check('B1-g adapters 从 MANAGED_KINDS 取能力（单一源）', adaptersSrc.includes('capsOf(') && adaptersSrc.includes("require('./objects')"), 'ok');
+    const adaptersSrc = fs.readFileSync(path.join(ROOT, 'src', 'app', 'control', 'adapters.js'), 'utf8');
+    // ⚠ 2026-09-16 步骤6：guard/lifecycle/objects.js → app/control/registry.js（编排层重组）
+    check('B1-g adapters 从 MANAGED_KINDS 取能力（单一源）', adaptersSrc.includes('capsOf(') && adaptersSrc.includes("require('./registry')"), 'ok');
   }
 
   console.log('== P2 C1/A5 前端接线 ==');

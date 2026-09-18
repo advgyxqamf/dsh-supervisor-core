@@ -10,7 +10,7 @@
 // 在 Linux 上即可穷举 `linux-x64 / darwin-arm64 / darwin-x64 / win-x64`
 // 的**全部平台分派结果** —— 只要该逻辑是**参数化**的。
 //
-// 这依赖上一提交的结构性收益：`src/platform/matrix.js` 与
+// 这依赖上一提交的结构性收益：`src/platform/contract/matrix.js` 与
 // `platform/os/index.js#capabilityProfile()` 都接受**显式 platform/arch 参数**。
 //
 // ## 诚实边界（不夸大）
@@ -35,7 +35,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const ROOT = path.join(__dirname, '..');
-const matrix = require(path.join(ROOT, 'src', 'platform', 'matrix.js'));
+const matrix = require(path.join(ROOT, 'src', 'platform', 'contract', 'matrix.js'));
 const osLayer = require(path.join(ROOT, 'src', 'platform', 'os', 'index.js'));
 
 const results = [];
@@ -137,7 +137,7 @@ function underFake(platform, arch, body) {
 
 // ── P-6：运行时与矩阵一致（真实模块在伪造平台下的产出）──
 {
-  const distPath = path.join(ROOT, 'src', 'domains', 'dist', 'index.js');
+  const distPath = path.join(ROOT, 'src', 'platform', 'distribution', 'index.js');
   for (const [p, a, want] of [
     ['linux', 'x64', 'linux-x64'],
     ['linux', 'arm64', 'linux-arm64'],
@@ -164,7 +164,11 @@ function underFake(platform, arch, body) {
 
 // ── P-7：消费方契约 —— guardCorePkg 的 {os}/{arch} 替换 ──
 {
-  const svPath = path.join(ROOT, 'src', 'guard', 'supervisor', 'settings-view.js');
+  // ⚠ 步骤 7（2026-09-16）：app/settings/settings-view.js 已拆为多模块，guardCorePkg 落在
+  //   app/settings/versions.js（**不在** env.js）；且模块导出形态统一为 { methods } ——
+  //   desc.guardCorePkg 为 undefined，旧判据会以 "Property description must be an object"
+  //   在子进程中直接崩掉（3 个平台全 FAIL）。故读新模块 + 取 desc.methods.guardCorePkg。
+  const svPath = path.join(ROOT, 'src', 'app', 'settings', 'versions.js');
   for (const [p, a, want] of [
     ['linux', 'x64', '@dsh-sup/dsh-core-linux-x64'],
     ['darwin', 'arm64', '@dsh-sup/dsh-core-darwin-arm64'],
@@ -173,7 +177,7 @@ function underFake(platform, arch, body) {
     const out = underFake(p, a, [
       "const desc = require(" + JSON.stringify(svPath) + ");",
       "const o = { config: { corePackageName: '@dsh-sup/dsh-core-{os}-{arch}' } };",
-      "Object.defineProperty(o, 'guardCorePkg', desc.guardCorePkg);",
+      "Object.defineProperty(o, 'guardCorePkg', { value: desc.methods.guardCorePkg });",
       "process.stdout.write(String(o.guardCorePkg()));",
     ].join(String.fromCharCode(10)));
     check('P-7 ' + p + '/' + a + ' guardCorePkg 模板替换正确', out === want, out + ' vs ' + want);

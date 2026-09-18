@@ -22,7 +22,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-const rc = require(path.join(ROOT, 'src', 'platform', 'runtime-contract.js'));
+const rc = require(path.join(ROOT, 'src', 'platform', 'contract', 'runtime.js'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : '')); };
@@ -72,11 +72,18 @@ check('R-1 损坏 JSON → null（不抛）', rc.read() === null);
 check('R-6 契约 schema 版本 = 2（与壳 handshake）', rc.SUPPORTED_SCHEMA === 2, String(rc.SUPPORTED_SCHEMA));
 
 // R-4 消费点接入（静态）。
-const dist = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+// ⚠ 2026-09-17（域结构第三轮）：distribution 已拆为 release/policies/registry/install + index 门面；
+//   断言对象是「分发能力」而非单文件，故按目录聚合读取（读取面随文件搬移同步，判据语义不变）。
+const distDir = path.join(ROOT, 'src', 'platform', 'distribution');
+const dist = fs.readdirSync(distDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(distDir, f), 'utf8')).join(String.fromCharCode(10));
 check('R-4 dist/index.js 用契约解析 npm', /runtimeContract\.npmBin\(/.test(dist), 'ok');
 check('R-4 dist/index.js 用契约注入 PATH', /runtimeContract\.withPath\(/.test(dist), 'ok');
-const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'env-catalog.js'), 'utf8');
-check('R-4 env-catalog 用契约读 minNode', /runtime-contract/.test(ec), 'ok');
+const ec = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'env-catalog.js'), 'utf8');
+// ⚠ 步骤 1 结构迁移（2026-09-16）：模块改名 platform/runtime-contract.js → platform/contract/runtime.js；
+//   env-catalog 已改为 require('../contract/runtime').read()。旧判据匹配字面量 'runtime-contract'
+//   恒假（改名≠实现丢失）——改为断言"确实经契约模块读取"（两种写法都接受，避免又绑死单一路径）。
+check('R-4 env-catalog 用契约读 minNode',
+  /require\(\s*['"][^'"]*contract\/runtime['"]\s*\)/.test(ec) || /contract\/runtime/.test(ec), 'ok');
 
 process.env.HOME = savedHome; process.env.USERPROFILE = savedUp;
 delete process.env.DSH_SUPERVISOR_HOME;

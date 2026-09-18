@@ -145,7 +145,6 @@ export const supervisorApi = {
     }>("/router/providers/keys/set", { id, ...p }),
   providerKeyUse: (id: string, fingerprint: string) =>
     post<GenericOk & { active?: string }>("/router/providers/key/use", { id, fingerprint }),
-  providerAccountConfirm: (id: string, keyId: string) => post<GenericOk>("/router/providers/account/confirm", { id, keyId }),
   providerAccountDiscard: (id: string, keyId: string) => post<GenericOk>("/router/providers/account/discard", { id, keyId }),
   proxyAddKey: (id: string, key: string) => post<GenericOk>("/router/providers/proxy/key", { id, key }),
   proxyRemoveKey: (id: string, keyId: string) => post<GenericOk>("/router/providers/proxy/key/remove", { id, keyId }),

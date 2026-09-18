@@ -82,14 +82,16 @@ const { InstanceManager } = require(instancePath);
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'inst-systemd-aside-'));
 
-function makeMgr(systemdDir) {
-  const mgr = new InstanceManager({
+function makeMgr(systemdDir, events) {
+  // ⚠ 域拆分后 systemdDir/events 必须在**构造期**注入（组装根持有 ctx，单实例字段后置赋值不再生效）。
+  //   否则会落回真实 ~/.config/systemd/user —— 本测试绝不允许触碰开发机 systemd 配置。
+  return new InstanceManager({
     dir: path.join(tmpRoot, 'sup-' + Math.random().toString(36).slice(2)),
     logger: { info() {}, warn() {}, error() {} },
+    systemdDir,
+    systemdTemplatePath: path.join(systemdDir, 'dsh-web@.service'),
+    events,
   });
-  mgr.systemdDir = systemdDir;
-  mgr.systemdTemplatePath = path.join(systemdDir, 'dsh-web@.service');
-  return mgr;
 }
 
 function scenario() {
@@ -111,9 +113,8 @@ function cleanup() {
 
 try {
   const s = scenario();
-  const mgr = makeMgr(s.systemdDir);
   const events = [];
-  mgr.events = { append: (k, d) => events.push({ k, d }) };
+  const mgr = makeMgr(s.systemdDir, { append: (k, d) => events.push({ k, d }) });
 
   const ok = mgr._prepareSystemd();
   check('让位动作返回 true（未抛错）', ok === true, String(ok));

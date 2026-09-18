@@ -9,7 +9,7 @@
 // 审计 P2-3 发现全仓 62 处 `execFileSync` 无 timeout —— systemctl/dbus 挂起、
 // lsof 卡顿等即**无限期阻塞守卫事件循环**（API/探测/监督全部冻结，无超时自愈）。
 //
-// 于是建立了 `platform/exec.js` 并自称「同步 exec 的**唯一入口**」……
+// 于是建立了 `platform/util/exec.js` 并自称「同步 exec 的**唯一入口**」……
 // **但它从未被接入**。2026-09-11 复核实测：
 //   · 被引用次数 = 0；
 //   · 仍有 22 处 `execFileSync` 没有 timeout。
@@ -21,7 +21,7 @@
 //
 // ## 断言
 //   G9-a 源码中不得存在**无 timeout** 的 execFileSync/-spawnSync 调用
-//   G9-b platform/exec.js 必须被实际引用（防再次变成死代码）
+//   G9-b platform/util/exec.js 必须被实际引用（防再次变成死代码）
 //   G9-c 统一执行器必须设 killSignal=SIGKILL（SIGTERM 对挂起进程可能无效）
 //   G9-d 统一执行器必须设 windowsHide（GUI 进程不弹黑框，对齐壳的 CREATE_NO_WINDOW）
 //
@@ -36,45 +36,12 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const EXEC_MODULE = path.join('src', 'platform', 'exec.js');
+const EXEC_MODULE = path.join('src', 'platform', 'util', 'exec.js');
 
 /** 剥离注释（行注释 + 块注释），保留换行以维持行号。 */
-function stripComments(src) {
-  // 逐字符扫描：正确跳过字符串字面量内的 // 与 /* */
-  let out = '';
-  let i = 0;
-  let state = 'code'; // code | line | block | sq | dq | tpl
-  while (i < src.length) {
-    const c = src[i];
-    const n2 = src[i + 1];
-    if (state === 'code') {
-      if (c === '/' && n2 === '/') { state = 'line'; out += '  '; i += 2; continue; }
-      if (c === '/' && n2 === '*') { state = 'block'; out += '  '; i += 2; continue; }
-      if (c === "'") { state = 'sq'; out += c; i++; continue; }
-      if (c === '"') { state = 'dq'; out += c; i++; continue; }
-      if (c === '`') { state = 'tpl'; out += c; i++; continue; }
-      out += c; i++; continue;
-    }
-    if (state === 'line') {
-      if (c === '\n') { state = 'code'; out += c; } else { out += ' '; }
-      i++; continue;
-    }
-    if (state === 'block') {
-      if (c === '*' && n2 === '/') { state = 'code'; out += '  '; i += 2; continue; }
-      out += (c === '\n') ? c : ' ';
-      i++; continue;
-    }
-    // 字符串内部：原样保留（但换行在单/双引号里非法，模板里合法）
-    if (state === 'sq' || state === 'dq' || state === 'tpl') {
-      if (c === '\\') { out += c + (n2 || ''); i += 2; continue; }
-      if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) {
-        state = 'code';
-      }
-      out += c; i++; continue;
-    }
-  }
-  return out;
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（空格占位，保长度/行号）。
+const { blankComments } = require('./_strip');
+function stripComments(src) { return blankComments(src); }
 
 /** 收集 `src/` 下的 .js **以及 `bin/` 下的入口脚本**（排除测试与构建产物）。
  *
@@ -130,7 +97,7 @@ console.log('== G9-a 子进程调用只允许出现在执行器内 ==');
   // 2026-09-11 收紧：原先只断言「必须有 timeout」，于是 18 处调用虽然带 timeout
   // 却**绕过**统一执行器 —— 执行器头注释自称「唯一入口」，而实际不是。
   // 现全部调用点已迁入执行器，故可断言这条**绝对不变量**：
-  //   `src/` 内除 `platform/exec.js` 外，不得出现 execFileSync / spawnSync。
+  //   `src/` 内除 `platform/util/exec.js` 外，不得出现 execFileSync / spawnSync。
   //
   // 为什么这比「有 timeout」强：timeout 只是**逐个调用点**的约定（容易漏、容易退化），
   // 而「只有一处能调用」把 killSignal / windowsHide / maxBuffer / 超时默认值
@@ -145,7 +112,7 @@ console.log('== G9-a 子进程调用只允许出现在执行器内 ==');
       offenders.push(rel + ':' + line + ' ' + c.fn);
     }
   }
-  check('G9-a 仅 platform/exec.js 调用 execFileSync/spawnSync', offenders.length === 0,
+  check('G9-a 仅 platform/util/exec.js 调用 execFileSync/spawnSync', offenders.length === 0,
     offenders.length ? (offenders.length + ' 处绕过执行器: ' + offenders.slice(0, 4).join(', ')) : 'ok');
 }
 // ── G9-b 统一执行器必须被实际引用 ──
@@ -156,10 +123,10 @@ console.log('== G9-b 统一执行器被实际引用 ==');
     const rel = path.relative(ROOT, f);
     if (rel === EXEC_MODULE) continue;
     const code = stripComments(fs.readFileSync(f, 'utf8'));
-    // 匹配 require('...exec') 形式（platform/exec 或 ../exec）
+    // 匹配 require('...exec') 形式（platform/util/exec 或 ../exec）
     if (/require\([^)]*[\/'"]exec['"]\s*\)/.test(code)) refs.push(rel);
   }
-  check('G9-b platform/exec.js 被引用（不得再成死代码）', refs.length > 0,
+  check('G9-b platform/util/exec.js 被引用（不得再成死代码）', refs.length > 0,
     refs.length ? (refs.length + ' 个文件: ' + refs.slice(0, 3).join(', ')) : '❌ 0 引用（同 2026-09-11 发现的问题）');
 }
 

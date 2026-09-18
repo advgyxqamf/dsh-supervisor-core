@@ -28,7 +28,7 @@ fs.writeFileSync(mockApp, "const http = require('node:http');\nconst argv = proc
 
   const providerFile = path.join(TMP, 'providers.json');
   // 端口注册表隔离：RouterService 不触发 Supervisor 的 configureFile，直接构造会污染生产 ports.json
-  const ports = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports')).shared;
+  const ports = require(path.join(ROOT, 'src', 'platform', 'service', 'ports')).shared;
   ports.configureFile(path.join(TMP, 'ports-router.json'));
   const svc = new RouterService({ config: {}, providerFile, port: 19180, usageTotalsFile: path.join(TMP, 't.json'), logger: { info() {}, warn() {}, error() {} }, events: null });
   const app = PROXY_APPS['vermock'];
@@ -52,12 +52,14 @@ fs.writeFileSync(mockApp, "const http = require('node:http');\nconst argv = proc
   if (!pp2) { console.log('ERR pp2 not found'); process.exit(1); }
   const inst2 = pp2.instances[0];
   if (!inst2) { console.log('ERR inst2 not found; providers=' + JSON.stringify(svc2.providers.map((p) => ({ kind: p.kind, insts: (p.instances || []).length })))); process.exit(1); }
-  check('B1 重启后实例 registered（进程态不落盘）', inst2.status === 'registered' && !inst2.pid, JSON.stringify({ status: inst2.status, pid: inst2.pid }));
+  // ⚠ 四态词表（PROVIDER-GATEWAY-ARCHITECTURE §4.1 / PG-3）：无进程 = COLD（原 registered）。
+  check('B1 重启后实例 COLD（进程态不落盘）', inst2.status === 'COLD' && !inst2.pid, JSON.stringify({ status: inst2.status, pid: inst2.pid }));
   check('B2 重启后 version 保留（供 UI 展示，探活后刷新）', inst2.version === '1.2.3', String(inst2.version));
 
   // 调用 _ensureProxyInstances → 应拉起并探活拿 version
   await svc2._ensureProxyInstances();
-  check('C1 ensure 后实例已拉起', inst2.pid && (inst2.status === 'running' || inst2.status === 'starting'), JSON.stringify({ pid: inst2.pid, status: inst2.status }));
+  // 四态：有进程且就绪 = HOT（原 running）；启动中 = WARM（原 starting）。
+  check('C1 ensure 后实例已拉起', inst2.pid && (inst2.status === 'HOT' || inst2.status === 'WARM'), JSON.stringify({ pid: inst2.pid, status: inst2.status }));
   await new Promise((r) => setTimeout(r, 1500));
   check('C2 ensure 后 version 恢复', inst2.version === '1.2.3', String(inst2.version));
   check('C3 ensure 后 healthy', inst2.healthy === true, String(inst2.healthy));

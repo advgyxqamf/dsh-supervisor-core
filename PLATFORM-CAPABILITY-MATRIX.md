@@ -49,15 +49,15 @@ macOS 的**壳自启 / 壳自愈从项目奠基提交（`8867942`, 2026-09-01）
 | C2 | 可执行解析（PATH/标准目录/扩展名）| ✅ | ✅ | ✅ | `platform/os/exec-path.js` | A2 · cross-platform P0 |
 | C3 | 敏感文件保护 | ✅ `chmod` | ✅ `chmod` | ✅ `icacls` | `platform/os/file-protect.js` | A2 · cross-platform P1 |
 | C4 | 进程信号 / 进程树终止 | ✅ 进程组 `kill(-pid)` | ✅ 进程组 | ✅ `taskkill /T` | `platform/os/process.js` | A2 |
-| C5 | 端口 → PID 反查 | ✅ `/proc` + `ss` 兜底 | ✅ `lsof` | ✅ `netstat -ano` | `platform/os/pidlookup.js` | A2 |
-| C6 | 进程列表 / 命令行读取 | ✅ `pgrep -af` | ✅ `pgrep` + `ps` | ✅ CIM | `platform/os/pidlookup.js` | A2 |
+| C5 | 端口 → PID 反查 | ✅ `/proc` + `ss` 兜底 | ✅ `lsof` | ✅ `netstat -ano` | `platform/os/pidlookup/index.js` | A2 |
+| C6 | 进程列表 / 命令行读取 | ✅ `pgrep -af` | ✅ `pgrep` + `ps` | ✅ CIM | `platform/os/pidlookup/index.js` | A2 |
 | C7 | 桌面通知 | ✅ `notify-send` | ✅ `osascript` | ✅ PowerShell 气泡 | `platform/os/notify.js` | A2 |
 | C8 | 打开浏览器（含隔离 profile） | ✅ `xdg-open` | ✅ `open -na` | ✅ `cmd start` | `platform/os/browser.js` | A2 |
 | C9 | 服务单元管理 | ✅ systemd | ❌ **显式** | ❌ **显式** | `platform/os/service.js` | A3 |
 | C10 | 沙箱多实例（transient） | ✅ `systemd-run` | ❌ **显式** | ❌ **显式** | `platform/os/service.js` | A3 |
-| C11 | **守卫**开机自启 | ✅ systemd + linger | ✅ LaunchAgent | ✅ schtasks | `platform/os/autostart.js` | A2 |
-| C12 | **守卫**崩溃自愈 | ✅ `Restart=always` | ✅ `KeepAlive` | ✅ Watchdog 每 5 min | `platform/os/autostart.js` | A5 |
-| C13 | **壳**开机自启（原生机制） | ✅ XDG `.desktop` | ✅ LaunchAgent `com.dsh.supervisor.gui` | ✅ schtasks `DSH-Supervisor-GUI` | `platform/os/autostart.js` | A4 · A8 · P1–P5 |
+| C11 | **守卫**开机自启 | ✅ systemd + linger | ✅ LaunchAgent | ✅ schtasks | `platform/os/autostart/index.js` | A2 |
+| C12 | **守卫**崩溃自愈 | ✅ `Restart=always` | ✅ `KeepAlive` | ✅ 保活归**桌面壳**（2026-09-15 起内核不再创建 watchdog 任务）| `platform/os/autostart/index.js` | A5 |
+| C13 | **壳**开机自启（原生机制） | ✅ XDG `.desktop` | ✅ LaunchAgent `com.dsh.supervisor.gui` | ✅ schtasks `DSH-Supervisor-GUI` | `platform/os/autostart/index.js` | A4 · A8 · P1–P5 |
 | C14 | **壳**崩溃自愈 | ✅ 守卫看护 | ✅ 守卫看护 | ✅ 守卫看护 | `domains/shell/watchdog.js` | A7 · W1–W5 · E2E |
 
 **运行时声明**：`capabilityProfile()` 输出 `guardAutostart` / `guardSelfHeal` / `shellAutostart` / `shellSelfHeal`
@@ -92,8 +92,8 @@ macOS 的**壳自启 / 壳自愈从项目奠基提交（`8867942`, 2026-09-01）
 | F3 | Windows watchdog 的**壳检查嵌套在 `if (-not $up)` 内** | 移出守卫块 —— 使「壳崩、守卫活」时可自愈 | A5 |
 | F4 | Linux `.desktop` 的 `Exec` **硬编码 `~/.local/bin`** | 按实际安装解析（deb/rpm 实为 `/usr/bin`）| A6 |
 | F5 | 能力字段**缺失**（无 `shellAutostart`/`shellSelfHeal`）| `capabilityProfile()` 补 4 个字段 | A1 |
-| F6 | 假声明注释 / 悬空路径（`src/infra/platform/…`）| 更正注释，标注真实能力来源 | A6 |
-| F7 | `guard-update-test.js` S8 **依赖开发者 `$HOME`** | 隔离 HOME（跑过真实壳后不再误报）| 该套测试 |
+| F6 | 假声明注释 / 悬空路径（如已被重构掉的 `infra/platform/…` 引用）| 更正注释，标注真实能力来源 | A6 |
+| F7 | `guard-update-test.js` S8 **依赖开发者 `$HOME`**（该测试文件已于 2026-09-15 `83228d1` 随内核更新单写入者改造删除）| 隔离 HOME（跑过真实壳后不再误报）| 该套测试 |
 
 ### F3 详解（用户直接指出的缺陷）
 

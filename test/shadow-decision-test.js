@@ -24,8 +24,10 @@
 
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const desc = require(path.join(ROOT, 'src', 'guard', 'supervisor', 'converge-view.js'));
-const decide = desc._decideMainAction.value;
+// ⚠ 2026-09-16 步骤7：converge-view.js 拆为 app/main/{decide,controller,shadow}.js，
+//   导出形态从「属性描述符」改为 `{ methods }`（STEP7-INTERFACE-CONTRACT §2）。
+const decideMod = require(path.join(ROOT, 'src', 'app', 'main', 'decide.js'));
+const decide = decideMod.methods._decideMainAction;
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };

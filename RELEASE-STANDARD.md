@@ -33,8 +33,7 @@
 | glibc 基座 | 内核 **5** + 壳 3 |
 | 凭据/令牌 | 内核 **8** + 壳 1 |
 
-多处副本必然漂移 —— 2026-09-13 的清理就修掉了 **4 处过时声明**（旧仓库名、「Linux 本地生产已废弃」、
-「三平台矩阵」、「待决策」）。故本文件确立两件事：
+多处副本必然漂移，故本文件确立两件事：
 **① 流程只在这里写一遍；② 用门禁把「规范 = 现实」钉死。**
 
 ## 各文档的分工（不再重复，只指向）
@@ -48,7 +47,7 @@
 | `release/README.md` | 发布工程**目录结构**与脚本索引 | 流程细节（指向本文件）|
 | `RELEASE-AND-UPDATE-MECHANISM.md` | 机制**原理**（为何这样设计） | 操作步骤 |
 | `CROSS-PLATFORM-BUILD-AND-UPDATE.md` | 跨平台**方案论证** | 操作步骤 |
-| `release/runbooks/*.md` | 专项操作（签名密钥/桌面验证） | 通用流程 |
+| `release/runbooks/publish-and-verify.md` | 发布与验收全流程（runbooks/ 下唯一一份）| 通用流程 |
 | 壳仓 `docs/RELEASE-AND-BUILD-DECISION.md` | **壳仓**发布（安装程序） | 内核流程 |
 
 ---
@@ -62,13 +61,13 @@
 | S1 | 版本提升 | `bash release/scripts/bump.sh --core <ver>` | ✅ | 只允许递增 |
 | S2 | 版本一致性预检 | `npm run verify:versions` | ✅ | 修派生处 |
 | S3 | 前端产物 | `bash release/scripts/build-ui.sh` | ✅ | 修 UI 构建 |
-| S4 | 全量回归 | `npm test` | ✅ | 修缺陷（含注入验证）|
+| S4 | 全量回归（**由 CI 执行**）| `xvfb-run -a npm test`（本机不得执行）| ✅ | 修缺陷（含注入验证）|
 | S5 | **推向 CI**（commit + tag + push）| `git push origin HEAD --tags` | ✅ | **此后一切构建/发布都在 CI 内完成** |
 | S6 | CI 四平台构建 | 自动（`build` job，4 runner 矩阵）| ✅ | 看该平台日志 |
 | S7 | CI 四平台发布 | 自动（`build` job 内 `ci-core.sh --publish`）| ✅ | npm 同版本不可重发 → 提版本重来 |
 | S8 | 发布后验证 | 见 §5 | ✅ | 立即处置（见 §6）|
 
-> **本地只做到 S4**（门禁 + 前端产物）；**S5 起全部在 CI 内完成**。
+> **本地只完成 S0–S3**（凭据 / 版本 / 前端产物）；**S4（全量回归）由推送后的 CI test job 执行**，**S5 起全部在 CI 内完成**（见 ACCEPTANCE-STANDARD：本机不得执行任何测试）。
 > 本地可用 `npm run build:launcher:all` 仅在 **CI 内**生效（有 `GITHUB_ACTIONS` 守卫，本地一律 exit 2）。
 
 ## 2. 平台矩阵（单一事实源）
@@ -110,7 +109,7 @@
 | job | 何时跑 | 作用 |
 |---|---|---|
 | `precheck` | 总是 | 探测「该版本是否已在 npm 全平台发布」→ 输出 `need_build` |
-| `test` | 总是 | 前端产物 + Xvfb + 壳仓检出 + `npm test`（全部门禁）|
+| `test` | 总是 | 前端产物 + Xvfb + `npm test`（全部门禁；**不检出壳仓**，见 §0 跨仓隔离）|
 | `build` | **总是**（**不受** need_build 门控）| 四平台矩阵各自 `ci-core.sh`：**完整构建 + 验证**（上传制品）；**发布**仅当 tag + NPM_TOKEN + need_build 才执行 |
 | `release` | tag `v*` **且** `need_build` | 挂 GitHub Release 附件 |
 
@@ -129,7 +128,9 @@
 | `advgyxqamf/dsh-supervisor-core` | `master` | `precheck`、`test`（strict + enforce_admins）|
 | `wasi7mglns/dsh-supervisor-launcher` | `main` | `version` + 4 条 `build (...)`（strict + enforce_admins）|
 
-> required 只能设**每次都会跑**的 job。把条件 job（`build`/`release`）设为 required 会让 PR **永久阻塞**。
+> required 只能设**每次都会跑**的 job。`build` 矩阵如今**每次 push / PR 都跑**（不再是条件 job），
+> 故它可作为 required；**唯一仍受 `need_build` 影响的是 `release` job**（见 §4 上文），
+> 把它设为 required 会让 PR **永久阻塞**。
 
 ## 5. 发布后验证（S8）
 
@@ -211,7 +212,7 @@
     },
     {
       "id": "S4",
-      "cmd": "npm test"
+      "cmd": "CI: xvfb-run -a npm test"
     },
     {
       "id": "S5",

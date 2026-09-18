@@ -42,12 +42,6 @@ export INDEX STORE
 
 [ -f "$INDEX" ] || { echo "凭据清单缺失: $INDEX" >&2; exit 1; }
 
-# 用 node 读清单（无 jq 依赖；内核对运行时依赖为 0 的纪律一致）
-idx() { node -e "
-  const j=require(process.env.INDEX);
-  $1
-"; }
-
 entry_field() { # <name> <field>
   # ⚠ 字段名必须用**单引号**写 e['$2']：
   #   · e[$2]  → node 当成变量名（file is not defined）

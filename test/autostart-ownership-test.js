@@ -26,8 +26,12 @@ const ROOT = path.join(__dirname, '..');
 const POS = path.join(ROOT, 'src', 'platform', 'os');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
-const asSrc = fs.readFileSync(path.join(POS, 'autostart.js'), 'utf8');
-const autostart = require(path.join(POS, 'autostart.js'));
+// ⚠ 2026-09-17 域结构改造：autostart 已拆为 autostart/{index,win32,darwin,linux}.js ——
+//   按目录聚合读取，P1/P3/P6 判据的覆盖面不因切分而静默失效。
+const AUTO = path.join(POS, 'autostart');
+const asSrc = fs.readdirSync(AUTO).filter((f) => f.endsWith('.js')).sort()
+  .map((f) => fs.readFileSync(path.join(AUTO, f), 'utf8')).join(String.fromCharCode(10));
+const autostart = require(AUTO);
 
 // ── P1 标签分离 ──
 console.log('== P1 LaunchAgent 标签分离 ==');
@@ -42,17 +46,13 @@ console.log('== P1 LaunchAgent 标签分离 ==');
 // ── P2 所有权：内核不越权 ──
 console.log('== P2 内核不写/不删守卫 plist ==');
 {
-  // ⚠ 切片必须在 **setAutostart 函数内**定位 macOS 分支：
-  //   若从文件首个 `if (isMac) {`（在 status()）起切，会跨过整个 Windows 分支
-  //   （其中确有 writeFileSync/unlinkSync 操作 watchdog.ps1）→ 误报。
-  const fnStart = asSrc.indexOf('function setAutostart(');
-  const macStart = asSrc.indexOf('if (isMac) {', fnStart);
-  const macEnd = asSrc.indexOf('// Linux（systemd', macStart);
-  const mac = asSrc.slice(macStart, macEnd > macStart ? macEnd : asSrc.length);
-  check('P2-0 已正确切出 setAutostart 的 macOS 分支', macStart > fnStart && macEnd > macStart,
-    'fnStart=' + fnStart + ' macStart=' + macStart + ' macEnd=' + macEnd);
-  check('P2-a macOS 分支不写守卫 plist', !/writeFileSync\([^)]*GUARD_LABEL/.test(mac) && !/renameSync/.test(mac), 'ok');
-  check('P2-b macOS 分支不删除守卫 plist', !/unlinkSync/.test(mac), 'ok');
+  // ⚠ 2026-09-17 域结构改造：macOS setAutostart 落 autostart/darwin.js —— 切出该实现函数体，
+  //   避免跨过 Windows 分支（其中确有 writeFileSync 操作）造成误报。
+  const mac = (fs.readFileSync(path.join(AUTO, 'darwin.js'), 'utf8').match(/function setAutostart\([\s\S]*?\n\}/) || [''])[0];
+  check('P2-0 已正确切出 setAutostart 的 macOS 实现', !!mac && mac.includes('守卫服务定义缺失'),
+    mac ? 'ok' : '未找到 darwin setAutostart');
+  check('P2-a macOS 实现不写守卫 plist', !/writeFileSync\([^)]*GUARD_LABEL/.test(mac) && !/renameSync/.test(mac), 'ok');
+  check('P2-b macOS 实现不删除守卫 plist', !/unlinkSync/.test(mac), 'ok');
   check('P2-c 守卫定义缺失时**显式报错**（不静默、不越权创建）',
     /守卫服务定义缺失/.test(mac), 'ok');
   check('P2-d 用 launchctl enable/disable 持久化开关', /on \? 'enable' : 'disable'/.test(asSrc), 'ok');
@@ -116,6 +116,24 @@ console.log('== P4/P5 边界行为 ==');
     'kind=' + st.kind + ' on=' + st.on);
   check('P5b status() 不再产出已删除的死字段 guiSupported',
     st.guiSupported === undefined, String(st.guiSupported));
+}
+
+// ── P6 XDG 自启模板必须内嵌（2026-09-16 清理）──
+//   缺陷：模板原从 `<pkg>/desktop/*.desktop` 读盘，而 launcher 发行态**不携带**该目录
+//     → Linux 壳自启 `fs.readFileSync` ENOENT → 静默失败，且无任何门禁覆盖。
+//   修法：模板内嵌为常量；本门禁锁定「内嵌」且「不再读外置 desktop/ 目录」。
+console.log('== P6 XDG 自启模板内嵌 ==');
+{
+  check('P6-a 存在内嵌的 GUI_AUTOSTART_TEMPLATE 常量',
+    /const GUI_AUTOSTART_TEMPLATE\s*=/.test(asSrc), 'ok');
+  check('P6-b 不再从外置 desktop/ 目录读模板',
+    !/readFileSync\([^)]*desktop[^)]*\)/.test(asSrc), 'ok');
+  check('P6-c 模板含 Desktop Entry 必需键',
+    /\[Desktop Entry\]/.test(asSrc) && /Type=Application/.test(asSrc), 'ok');
+  const tpl = asSrc.match(/const GUI_AUTOSTART_TEMPLATE = \[([\s\S]*?)\]\.join/);
+  check('P6-d 模板含 Exec/Icon/Name（写入前会被重写）',
+    !!tpl && /Exec=@HOME@/.test(tpl[1]) && /Icon=@HOME@/.test(tpl[1]) && /Name=/.test(tpl[1]),
+    tpl ? 'ok' : '未匹配到模板数组');
 }
 
 const failed = results.filter((r) => !r);

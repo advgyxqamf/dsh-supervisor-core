@@ -33,7 +33,8 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 const proxy = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'proxy.js'), 'utf8');
-const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward-core.js'), 'utf8');
+const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'handlers', 'forward.js'), 'utf8');
+const inflight = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'model', 'inflight.js'), 'utf8');
 
 // ── R-a：清零时机 ──
 {
@@ -45,22 +46,84 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
   // ⚠ 断言「调用了 markRequestOk」而不绑定具体实参名 ——
   //   P2 双事实源修复后实参已改为 instOf(...) 的结果（okInst），
   //   写死 `acc.instance` 会让「纯重构」误报（我第一版就踩了这个）。
-  check('R-a forward-core 在 2xx 成功路径调用 markRequestOk',
+  check('R-a handlers/forward 在 2xx 成功路径调用 markRequestOk',
     /markRequestOk\(\w+\)/.test(fwd), '已接入');
 }
 
 // ── R-b：markNetFail 死调用 ──
 // 剥离注释后不得再有 markNetFail 的**调用**（形如 .markNetFail( ）
 {
-  const strip = (s) => s.split(String.fromCharCode(10))
-    .filter((l) => { const t = l.trim(); return !t.startsWith('//'); })
-    .join(String.fromCharCode(10));
-  check('R-b forward-core 不再调用不存在的 markNetFail',
+  // 注释剥离统一走 test/_strip.js（阶段六）。原实现只丢「// 开头的整行」——语义等价且字符串/正则感知，
+  // 并额外丢掉「整行都是块注释」的行（原先会被当代码）。glob 用拼接构造，避免源码出现危险序列。
+  const { dropCommentLines } = require('./_strip');
+  const strip = dropCommentLines;
+  {
+    const G = 'src/' + String.fromCharCode(42, 42);
+    check('R-b 剥离：// 行注释里的 glob 不吞后续代码',
+      strip('// ' + G + '\nconst K = 1;').indexOf('K = 1') >= 0, 'ok');
+    check('R-b 剥离：字符串里的 glob 不吞代码',
+      strip("const P = '" + G + "';\nconst K = 2;").indexOf('K = 2') >= 0, 'ok');
+  }
+  check('R-b handlers/forward 不再调用不存在的 markNetFail',
     !/\.markNetFail\s*\(/.test(strip(fwd)), '已改');
   check('R-b 改用真实存在的 markInstanceNetFail',
     /markInstanceNetFail/.test(strip(fwd)), '已改');
   check('R-b 该方法确实定义在 proxy.js',
     /markInstanceNetFail\s*\(instOrAcc\)/.test(proxy), '有定义');
+
+  // ── R-b 升级（P3-B）：从「字符串出现过」升级为「实参正确 + 确实计数」的行为断言 ──
+  //   旧断言只查 markInstanceNetFail 字符串存在，故 forward.js 传错实参也绿。
+  //   真实缺陷：markInstanceProblem 以 instOrAcc.pid 判定实参是否为实例；传累加器 acc
+  //   （无 pid）会**静默早退、完全不计数** —— 流式中断不进熔断（forward.js:132 与 :229）。
+  //   ⚠ 本断言为硬判据，必须与修复 forward.js 两处实参的改动**同批提交**。
+  const fwdCode = strip(fwd);
+  const callArgs = [];
+  for (const line of fwdCode.split(String.fromCharCode(10))) {
+    const mm = line.match(/(?:markInstanceNetFail|markInstanceProblem)\s*\(([^)]*)/);
+    if (mm) callArgs.push(mm[1].trim());
+  }
+  check('R-b 定位到熔断调用点（forward.js）', callArgs.length >= 1, '共 ' + callArgs.length + ' 处');
+  const BARE_ACC = /^(?:acc|okAcc|activeAcc|rt\.acc)$/;
+  const bare = callArgs.filter((a) => BARE_ACC.test(a));
+  check('R-b 熔断调用点不得传无 pid 的累加器实参（缺陷形态 markInstanceNetFail(acc)）',
+    bare.length === 0, bare.length ? ('缺陷实参: ' + bare.join(', ')) : 'ok');
+  const INST_SHAPED = /instOf\s*\(|\.instance\b|\binst\b|\w*[Ii]nst\b/;
+  const unshaped = callArgs.filter((a) => !INST_SHAPED.test(a));
+  check('R-b 熔断调用点实参须为实例形态（instOf()/inst/ .instance）',
+    unshaped.length === 0, unshaped.length ? ('可疑实参: ' + unshaped.join(', ')) : 'ok');
+  check('R-b 反向：缺陷样本 (acc) 被检出', BARE_ACC.test('acc') === true, 'hit');
+  check('R-b 反向：正确样本 parse.instOf(prov, acc) 不误报',
+    BARE_ACC.test('parse.instOf(prov, acc)') === false, 'miss');
+  check('R-b 反向：正确样本 inst 不误报', BARE_ACC.test('inst') === false, 'miss');
+
+  // ── 行为面：沙箱内执行真实的 markInstanceProblem 本体，证明「计数」语义与实参形状要求 ──
+  const mBody = proxy.match(/markInstanceProblem\(instOrAcc, reason\) \{[\s\S]*?\n  \}/);
+  check('R-b 定位到 markInstanceProblem 实现', !!mBody, mBody ? 'ok' : '未找到');
+  let impl = null;
+  if (mBody) {
+    try {
+      const inner = mBody[0].replace(/^markInstanceProblem\(instOrAcc, reason\)\s*\{/, '');
+      impl = new Function('instOrAcc', 'reason', inner.slice(0, inner.lastIndexOf(String.fromCharCode(10) + '  }')));
+    } catch { impl = null; }
+  }
+  check('R-b 行为断言前提：本体可在沙箱求值（不 require 产品状态根）', typeof impl === 'function', typeof impl);
+  if (typeof impl === 'function') {
+    const restarts = [];
+    const stub = { restartInstance: (inst, why) => { restarts.push(why); } };
+    const inst = { pid: 4242 };
+    impl.call(stub, inst, 'net-error');
+    check('R-b 行为：实例实参被计数（_unhealthyCount 1 / healthy=false）',
+      inst._unhealthyCount === 1 && inst.healthy === false, JSON.stringify({ n: inst._unhealthyCount, healthy: inst.healthy }));
+    const acc = { key: 'k', instance: inst };
+    impl.call(stub, acc, 'net-error');
+    check('R-b 行为：累加器实参（无 pid）静默不计数 —— 即缺陷形态',
+      acc._unhealthyCount === undefined, JSON.stringify({ accN: acc._unhealthyCount }));
+    const inst2 = { pid: 7 };
+    impl.call(stub, inst2, 'net-error');
+    impl.call(stub, inst2, 'net-error');
+    check('R-b 行为：连续 2 次计入 -> 触发重启一次并清零点',
+      restarts.length === 1 && inst2._unhealthyCount === 0, JSON.stringify({ restarts: restarts.length, n: inst2._unhealthyCount }));
+  }
 }
 
 // ── R-c：_restartPending 必须有读取点 ──
@@ -71,8 +134,14 @@ const fwd = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'router', 'forward
     || /const\s+\w+\s*=\s*inst\._restartPending/.test(proxy);
   check('R-c _restartPending 存在读取点（不再只写不读）', hasRead, '有');
   check('R-c 存在 flushRestartPending 消费方法', /flushRestartPending\(inst\)/.test(proxy), '有');
-  check('R-c forward-core 在 inflight 归零时调用它',
-    /prov\.flushRestartPending\(\w+\)/.test(fwd), '已接入');
+  check('R-c handlers/forward 在 inflight 归零时执行 flushRestartPending',
+    /prov\.flushRestartPending\([^)]+\)/.test(fwd), '已接入');
+  // ★ 行为修复锁（PG-D3-4）：单一 end() 产生 flushRestartPending effect，
+  //   且流式成功/中断两条路径共用 endInflight（旧缺陷：成功路径漏补重启）。
+  check('R-c 单一 end() 生成 flushRestartPending effect',
+    /kind:\s*'flushRestartPending'/.test(inflight), '有');
+  check('R-e 流式成功与中断路径共用 endInflight（修复漏补重启）',
+    (fwd.match(/endInflight\(acc,\s*prov\)/g) || []).length >= 2, '共用');
 }
 
 // ── R-d：退避置位时机 ──

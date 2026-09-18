@@ -16,7 +16,7 @@
 //
 //   CP-1  `process.platform` / `process.arch` / `os.platform()` / `os.arch()`
 //         **只允许出现在 `src/platform/**`**（平台知识的唯一合法位置）。
-//         业务域必须经 `src/platform/matrix.js` 或平台层能力取平台事实。
+//         业务域必须经 `src/platform/contract/matrix.js` 或平台层能力取平台事实。
 //   CP-2  业务域不得出现 os/arch 映射对象字面量（与 M-c 呼应，此处再锁一层）
 //   CP-3  平台实现必须覆盖全部受支持平台（linux/darwin/win32 三份实现文件都在）
 //   CP-4  `package.json#engines.node` 必须存在（跨平台运行时下限的单一声明）
@@ -34,11 +34,17 @@ const check = (n, c, x) => {
   console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : ''));
 };
 
-/** 去掉整行注释（// 与块注释续行 *）——本仓多次被自己的说明文字骗过。 */
-function stripComments(src) {
-  return src.split(String.fromCharCode(10))
-    .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
-    .join(String.fromCharCode(10));
+/** 去掉整行注释——本仓多次被自己的说明文字骗过。
+ *  统一走 test/_strip.js（阶段六）：语义等价且**字符串/正则感知**；并只丢「整行都是注释」的行，
+ *  故『块开符 + 注释 + 代码』这类开头的代码行不再被整行丢掉（原实现会丢代码）。 */
+const { dropCommentLines } = require('./_strip');
+function stripComments(src) { return dropCommentLines(src); }
+{
+  const G = 'src/' + String.fromCharCode(42, 42);
+  check('S-4 剥离：// 行注释里的 glob 不吞后续代码',
+    stripComments('// ' + G + '\nconst K = 1;').indexOf('K = 1') >= 0, 'ok');
+  check('S-4 剥离：块注释开头的代码行不再被整行丢掉',
+    stripComments('/* c */ const K = 2;').indexOf('K = 2') >= 0, 'ok');
 }
 
 function collectJs(dir) {
@@ -84,20 +90,20 @@ const PLATFORM_RE = /\bprocess\.(platform|arch)\b|\bos\.(platform|arch)\s*\(/;
   const offenders = [];
   for (const f of files) {
     const rel = path.relative(ROOT, f).replace(/\\/g, '/');
-    if (rel === 'src/platform/matrix.js') continue;   // 唯一合法位置
+    if (rel === 'src/platform/contract/matrix.js') continue;   // 唯一合法位置
     if (mapRe.test(stripComments(fs.readFileSync(f, 'utf8')))) offenders.push(rel);
   }
-  check('CP-2 业务域无 os/arch 映射对象字面量（映射表只在 platform/matrix.js）',
+  check('CP-2 业务域无 os/arch 映射对象字面量（映射表只在 platform/contract/matrix.js）',
     offenders.length === 0, offenders.length ? offenders.join(', ') : '未发现');
 }
 
 // ── CP-3：平台层结构齐备（新增平台必须同步加分支，否则平台层会缺档位）──
 //
 //   ⚠ 内核是 JS：平台分派在 src/platform/os/index.js（capabilityProfile 的 if/else 档位）
-//     + src/platform/matrix.js（矩阵与标签）。壳仓才是 Rust 的 #[cfg(target_os)]。
+//     + src/platform/contract/matrix.js（矩阵与标签）。壳仓才是 Rust 的 #[cfg(target_os)]。
 {
   const osDir = path.join(ROOT, 'src', 'platform', 'os');
-  const needFiles = ['index.js', 'service.js', 'autostart.js', 'desktop.js', 'pidlookup.js', 'exec-path.js'];
+  const needFiles = ['index.js', 'service.js', 'autostart/index.js', 'desktop.js', 'pidlookup/index.js', 'exec-path.js'];
   const missing = needFiles.filter((n) => !fs.existsSync(path.join(osDir, n)));
   check('CP-3 平台层文件齐备（index/service/autostart/desktop/pidlookup/exec-path）',
     missing.length === 0, missing.length ? ('缺 ' + missing.join(', ')) : needFiles.length + ' 个');
@@ -109,7 +115,7 @@ const PLATFORM_RE = /\bprocess\.(platform|arch)\b|\bos\.(platform|arch)\s*\(/;
   check('CP-3 capabilityProfile 对三平台各有显式档位',
     branches.length === 3, branches.join(', ') + '（应 3 个）');
   // 而矩阵必须与这些档位同集合
-  const matrix = require(path.join(ROOT, 'src', 'platform', 'matrix.js'));
+  const matrix = require(path.join(ROOT, 'src', 'platform', 'contract', 'matrix.js'));
   const matrixPlats = [...new Set(matrix.SUPPORTED.map((x) => x.platform))].sort();
   check('CP-3 矩阵平台集合 = capabilityProfile 档位集合',
     JSON.stringify(matrixPlats) === JSON.stringify(['darwin', 'linux', 'win32']),

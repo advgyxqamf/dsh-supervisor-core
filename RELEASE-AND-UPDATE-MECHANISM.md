@@ -4,7 +4,7 @@
 > 本文件只讲机制**原理**（为何这样设计），**不再重复流程细节**（此前同一事实散落 5–8 处 → 已多次漂移）。
 
 
-> 本文是**唯一权威**：把「内核」与「桌面壳」的**推送（发布）**与**更新**机制完整梳理清楚。
+> 本文梳理「内核」与「桌面壳」的**推送（发布）**与**更新**机制（原理说明，流程见 `RELEASE-STANDARD.md`）。
 > 判据：**稳定与可靠优先**，工业级标准，有舍有得。
 
 ---
@@ -49,13 +49,13 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 | | 内核（dsh-supervisor） | 桌面壳（dsh-supervisor-gui） |
 |---|---|---|
 | 语言/形态 | Node.js（bundled core.cjs） | Rust / Tauri 2 |
-| 仓库 | `dsh-supervisor-core`（**私有**） | `dsh-supervisor-launcher`（**公开**） |
+| 仓库 | `dsh-supervisor-core`（**2026-09-13 起转为公开**） | `dsh-supervisor-launcher`（**公开**） |
 | 分发单位 | **npm 平台子包** | **系统安装包** |
 | 安装位置 | 用户级（`~/.npm-global` 等运行时前缀） | 系统级（Linux `/usr/bin`） |
 | 版本示例 | `0.1.2-BETA.7` | `0.1.0` |
 | 更新入口 | 壳引导 `core_plan/core_apply`；面板「检查更新」 | 壳启动 **门 0** |
 | 监督 | **systemd `Restart=always`**（受监督） | 无（不受监督） |
-| 日志 | `~/.dsh/supervisor/log/` | `~/.dsh/shell/shell.log`（**待建**） |
+| 日志 | `<产品状态根>/supervisor/log/`（Linux `~/.local/state/dsh-supervisor/supervisor/log/`）| `<产品状态根>/shell/shell.log` |
 
 > **关键**：两条链**互不干扰**。壳的更新失败**不得**影响内核，反之亦然（D6）。
 
@@ -78,8 +78,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 | 平台 | 生产位置 | 入口 | 命令 |
 |---|---|---|---|
-| **linux-x64** | **本地 Linux 机器**（省 CI 额度） | `CI（tag 触发）` | 完整门禁 → tag/push → 本地直推 npm |
-| win-x64 / darwin-arm64 / darwin-x64 | GitHub CI | tag `v<ver>` 触发 `build.yml` | mac/win 三平台矩阵 → `ci-core.sh --publish` |
+| **linux-x64 / win-x64 / darwin-arm64 / darwin-x64** | **GitHub CI**（2026-09-13 硬标准：四平台全由 CI 产出） | tag `v<ver>` 触发 `build.yml` | 四平台矩阵各自 `ci-core.sh --publish`（本地无构建/发布路径）|
 
 **认证**：`NPM_TOKEN`（经临时 userconfig 注入，不落盘）或既有 `~/.npmrc` 登录态；解析单源在 `release/scripts/_npm-auth.sh`。
 
@@ -87,7 +86,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 ```
 壳引导门 2：core_plan（查最新） → core_apply（npm i -g --prefix <真实前缀>）
-面板：guardSelfUpdateStatus → guardSelfUpdateApply（全更新强制语义）
+面板：guardSelfUpdateStatus（**只读**）；安装/重启由壳 core_apply 与 `kernel_update_apply` 桥执行（`guardSelfUpdateApply`/`guardSelfUpdateRestart` 已删除，协议 §A 方案）
 镜像：registry_origins() 四源回退（npmmirror 优先，官方源兜底）
 ```
 
@@ -176,7 +175,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 | 安装到系统目录 | `/usr/bin/dsh-supervisor-gui`（deb 标准），root 所有 |
 | 更新需提权 | `pkexec` 图形密码框；用户拒绝 = 正常失败路径 → 选择页 |
 | **依赖由 dpkg 校验** | deb 声明 `Depends`；因当前版本已在运行，依赖已满足；若新版本**新增**依赖，`dpkg -i` 可能报未满足 → 归入失败路径 |
-| 内核 `desktop/` 模板须修正 | 现指向 `~/.local/bin`，与 deb 的 `/usr/bin` **不一致**（P5.4） |
+| 内核 XDG 自启 .desktop | **已修（2026-09-16）**：模板改为**内嵌**（`autostart.js`），Exec/Icon 按实际安装路径重写，不再依赖外置 `desktop/` 目录 |
 
 ---
 
@@ -186,13 +185,12 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 
 ```
 【内核发布】
-  本地 Linux:  CI（tag 触发）
-                 → 干净树+CHANGELOG 预检 → ci-core 全套门禁 → tag/push → 本地发 linux 子包
-  CI mac/win:  tag v<ver> 触发 build.yml → 三平台各自 ci-core.sh --publish
+  CI（四平台）: git push origin HEAD --tags → 干净树+CHANGELOG 预检 → ci-core 全套门禁
+                 → build.yml 四平台矩阵各自 ci-core.sh --publish（本地不参与）
 
 【壳发布】
   壳仓:        git push origin main && git tag v<ver> && git push origin v<ver>   # 同样必须先推分支
-                 → 三平台构建 + 签名 → npm publish @dsh-sup/shell-<os>-<arch>
+                 → 四平台构建 + 签名 → npm publish @dsh-sup/shell-<os>-<arch>
                  → 用户下次启动自动看到更新（清单经 unpkg 直达）
 ```
 
@@ -209,17 +207,18 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
  ├─[门 2] 内核（core_plan → core_apply；npm 镜像四源回退）
  ├─[门 3] 守卫就绪（systemd 拉起 + TCP/HTTP 双确认）→ 面板
  └─[确认] finish_boot → 上报健康（= 更新确认信号）
-          内核据此清 journal / 打 .ok；未确认且 attempts>2 → 回退
+          内核据此清 journal / 打 .ok（自动回退已移除：仅 pending→confirmed）
 ```
 
 ### 5.3 健康确认与回退（安全网闭环）
 
 ```
 内核（受 systemd 监督）:
-  · 预取：提前下载 + 验签 + 缓存到 ~/.dsh/shell/cache/  （门 0 从本地取 → 秒级）
-  · 观察：读 ~/.dsh/shell/identity.json（version / phase / attempt 自增）
+  · 观察：读 <产品状态根>/shell/identity.json（version / phase）
   · 确认：收到 phase=ready 且 version==journal.to → confirmed=true，清 journal
-  · 回退：未确认且 attempts>2 → 判坏 → 加 pinnedVersions → 用缓存重装 previous → 事件+通知
+  · **无预取、无自动回退**：预取缓存、attempts 自增、pinnedVersions 拉黑与「重装 previous」
+    等机制均已整体移除（`domains/shell/index.js` 现只有 pending→confirmed；紧急回退改由发布通道
+    契约的 `rollback` dist-tag 显式触发，见 `RELEASE-CHANNEL-CONTRACT.md` §3/§4）
 ```
 
 ---
@@ -253,7 +252,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
    **不调用**内核 `dist.runNpmInstall`。
 
 **隔离证明**：壳状态 `~/.dsh/shell/` vs 内核状态 `~/.dsh/supervisor/`（物理隔离）；
-壳账本 `update-journal.json` vs 内核事件流（不同命名空间）；壳 `pinnedVersions` **只针对壳版本**。
+壳账本 `update-journal.json` vs 内核事件流（不同命名空间）。（历史注：`pinnedVersions` 拉黑机制已整体移除——壳现在只有 pending→confirmed；紧急回退改由 `rollback` dist-tag 显式触发。）
 内核 npm 包是**共享产物**，故以「单一写入者」而非物理隔离来保证一致性。
 
 ---
@@ -263,10 +262,10 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 | 维度 | 规则 |
 |---|---|
 | 内核版本 | `package.json` 单源；`X.Y.Z(-BETA.n/-RC.n)` |
-| 壳版本 | `Cargo.toml` = `tauri.conf.json`（两处互锁，`verify-versions.js --shell`） |
+| 壳版本 | 壳仓**三处互锁**：`Cargo.toml` = `tauri.conf.json` = `Cargo.lock`（`scripts/verify-shell-versions.js`，壳仓自持）|
 | 两者关系 | **独立版本线**；通过元数据声明兼容区间协商（`kernelMin` / `shellMin`） |
 | 不兼容时 | **唯一允许动作：先升级壳**（禁止降级内核） |
-| npm dist-tag | `-BETA.*`→`beta`；`-RC.*`→`rc`；无后缀→`latest` |
+| npm dist-tag | `-BETA.*`→`beta`；`-RC.*`→`latest`（rc 为发布后补打的附加别名）；无后缀→`latest`；`rollback`/`canary` 人工运维（见 `RELEASE-CHANNEL-CONTRACT.md` §4）|
 
 ---
 
@@ -279,7 +278,7 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 | K13 | npm CDN（unpkg/jsdelivr）为第三方 | 多 CDN 回退 + **内核本地缓存**兜底 + 失败进选择页 |
 | K14 | deb 自更新需 pkexec，用户可拒绝 | 视为正常失败路径 → 选择页【重试】【继续】 |
 | K15 | deb 新版本新增依赖 → `dpkg -i` 报未满足 | 归入失败路径并**如实显示原因**；文档说明可用 `apt install ./x.deb` 手动补依赖 |
-| K16 | 壳仓 CI 推 main 即三平台构建（配额） | **改为仅 tag + workflow_dispatch**（P4.3） |
+| K16 | 壳仓 CI 推 main 即四平台完整构建（耗时；2026-09-13 按明确要求改为 push main 也跑完整矩阵）| 公开仓 Actions 免额度；**发布**仍仅 tag 触发（`publish` job）|
 
 ---
 
@@ -297,9 +296,9 @@ dsh-supervisor: /usr/bin/dsh-supervisor-gui      # 当前生产就是 deb 安装
 ## 10. 一句话总览
 
 ```
-内核：私有仓 → npm 平台子包（本地发 linux / CI 发 mac+win）→ 用户经壳引导或面板更新（镜像四源）
+内核：公开仓 → npm 平台子包（**四平台全由 CI 产出**）→ 用户经壳引导或面板更新（镜像四源）
 壳  ：公开仓 → CI 构建 deb/dmg/msi + 签名 → npm 包 @dsh-sup/shell-* → unpkg 清单
-        → 壳启动门 0 自更新（Linux 走 pkexec 标准包）→ 健康确认 → 失败回退
+        → 壳启动门 0 自更新（Linux 走 pkexec 标准包）→ 健康确认（无常驻回退；紧急回退走 rollback dist-tag）
 边界：壳管壳、内核管内核；兼容靠声明协商；绝不互相降级
 ```
 

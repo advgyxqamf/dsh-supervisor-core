@@ -5,6 +5,14 @@
 #   release/scripts/publish-core.sh --publish        # 真发布（**仅 GitHub CI 内**；本地 exit 2）
 #   release/scripts/publish-core.sh --all-platforms  # 一律拒绝（已废弃；四平台由 CI 各 runner 各自发布）
 #   release/scripts/publish-core.sh --scope @acme    # 指定 scope（不传则读 npmPublish.scope / DSH_CORE_SCOPE）
+#
+# ── 防误发保护（默认 dry-run；须两道显式条件才真发）──
+#   ① 默认 PUBLISH=0：不传 --publish 即 npm publish --dry-run —— 本地跑一遍只做组装/校验，
+#      绝不触网写 registry。这是**默认值**，不是靠调用方记得加 --dry-run。
+#   ② 传 --publish 后还有第二道门：GITHUB_ACTIONS 必须为 true（下面的硬标准，本地 exit 2）。
+#   两道都满足才会执行真发布（且发布后按版本补打通道标签，见文件末尾）。
+#   tag 策略见下方「dist-tag 规范」；rollback/canary **不由本脚本设置**（人工运维，契约 §4）。
+#
 # 硬标准（2026-09-13）：所有平台构建与发布必须经 GitHub CI 完成；本地不得产生发布产物。
 # 版本规范：version 从仓库根 package.json 注入（禁手写）；发布前强制校验 launcher self-check 自报版本
 #  === 单源版本（防产物错配发布）；产物命名 dsh-supervisor-<ver>-<plat>-<arch>。
@@ -100,7 +108,7 @@ SRC_DIR="dist/launcher/dsh-supervisor-$VER-$PLAT-$ARCH"
 }
 [ -f "$SRC_DIR/bin/dsh-supervisor" ] || { echo "产物缺 bin/dsh-supervisor: $SRC_DIR"; exit 1; }
 [ -f "$SRC_DIR/core.cjs" ] || { echo "产物缺 core.cjs: $SRC_DIR"; exit 1; }
-BIN_NAME="dsh-supervisor"   # launcher 形态：node 启动脚本（win 亦无 .exe——由 npm bin shim 生成）
+# launcher 形态：node 启动脚本（win 亦无 .exe——由 npm bin shim 生成）
 
 # ---- 冒烟 + 版本核对（防产物错配） ----
 GV="$(node "$SRC_DIR/bin/dsh-supervisor" self-check | sed -n 's/^guardVersion=//p' | tr -d '\r')"
@@ -127,21 +135,47 @@ DSH lifecycle guard core — Node launcher 形态（esbuild bundle + node 启动
 本包仅面向 $OS_TAG-$ARCH （npm os/cpu 平台过滤）。
 
 \`\`\`bash
+# 正式版（latest 跟随 RC）
 npm i -g $PKG_NAME
+# 测试版（BETA）
+npm i -g $PKG_NAME@beta
+# 显式指定版本（推荐：与桌面壳的安装语义一致，避免依赖标签状态）
+npm i -g $PKG_NAME@<version>
+
 dsh-supervisor self-check   # guardVersion / node / platform 三段自检
 \`\`\`
+
+> 本包由桌面壳（Dsh Supervisor GUI）自动安装与升级：壳按 registry 的**全量最高版本**选版，
+> 并显式安装 \`$PKG_NAME@<version>\`，不依赖 dist-tag。手工安装仅供排障。
 EOF
 echo "== 子包已组装: $STAGE/"
 ls -lh "$STAGE/bin/" | tail -1
 
 # ---- 发布（默认 dry-run 保护） ----
 cd "$STAGE"
-# dist-tag 规范（2026-09 定稿，与内核版本两档预览后缀对应）：
-#   -BETA.n → tag beta；-RC.n → tag rc；无后缀（正式）→ tag latest（npm 默认，不显式传）
+# dist-tag 规范（2026-09-16 修正）——产品只有两档：BETA（测试版）/ RC（正式版）。
+#
+#   -BETA.n  → tag beta              测试版：用户须显式 @beta 才装到
+#   -RC.n    → tag latest（主）+ rc  正式版：latest 必须跟随；rc 作为附加标签在发布后补
+#
+#   ⚠ npm publish **只接受一个 --tag**（默认 latest）——多标签必须发布后用
+#     `npm dist-tag add` 补（见本脚本末尾的 RC 附加标签步骤）。
+#
+#   ⚠ 以下两个 tag **刻意不由本脚本设置**（它们是人工运维操作，见契约 §4）：
+#     · rollback —— 紧急回退开关，全量最高优先级；仅回退时人工
+#                   `npm dist-tag add <pkg>@<ver> rollback`，解除用 `npm dist-tag rm <pkg> rollback`。
+#                   发布脚本若自动写它，等于把「发布」和「回退」两种意图混在一起。
+#     · canary   —— 灰度通道，仅灰度名单内机器可见；由灰度发布时人工设置（脚本无从得知名单）。
+#
+# ⚠ 2026-09-16 修正的背景（公开发行审计发现）：
+#   原策略把 RC 只标 rc、**从不更新 latest**，于是 latest 永久停留在历史 SEA 形态
+#   （实证：四平台 latest 分别停在 0.1.1/0.1.2/0.1.2/0.1.2，且描述仍是已废弃的 SEA）
+#   ——「我们发布什么，latest 就该是什么」被打破，且四平台版本不一致。
+#   现按产品模型修正：RC 即正式版 —— 发布时占 latest（主标签），并补打 rc 别名。
 DIST_TAG=""
 case "$VER" in
   *-BETA.*) DIST_TAG="--tag beta" ;;
-  *-RC.*)   DIST_TAG="--tag rc" ;;
+  *-RC.*)   DIST_TAG="--tag latest" ;;   # 正式版占 latest（rc 标签发布后补）
 esac
 # 发布到官方 npm registry（发布必须官方源；本机默认 npmmirror 只读消费不适配发布认证）
 #
@@ -191,6 +225,14 @@ if [ "$PUBLISH" = 1 ]; then
   fi
   echo "== 发布 $PKG_NAME@$VER ${DIST_TAG:-（tag=latest）} → $REGISTRY =="
   npm publish --access public --registry="$REGISTRY" $DIST_TAG
+  # RC（正式版）的**附加** rc 标签：npm publish 只接受一个 --tag，故发布后补打。
+  #   语义：latest=正式版（用户不写标签装到它）；rc=同一版本的显式别名，便于按通道安装/回滚。
+  case "$VER" in
+    *-RC.*)
+      echo "== 补打 rc 标签：$PKG_NAME@$VER =="
+      npm dist-tag add "$PKG_NAME@$VER" rc --registry="$REGISTRY" 2>&1 | tail -1
+      ;;
+  esac
 else
   echo "== npm publish --dry-run（确认无误后加 --publish 真发）${DIST_TAG:+ → 将打 tag=${DIST_TAG#--tag }} → $REGISTRY =="
   npm publish --dry-run --registry="$REGISTRY" $DIST_TAG

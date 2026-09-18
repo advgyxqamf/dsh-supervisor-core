@@ -1,17 +1,17 @@
-# 发布与验收：内核操作指南（2026-09-11 重写）
+# 发布与验收：内核操作指南
 
-> **本文件已于 2026-09-11 重写**。原版基于「SEA 二进制 + export-shell.sh 导出壳仓」的旧架构，
-> 该架构已废：SEA 全平台弃用（macOS 上游缺陷）、壳已彻底独立成仓、`export-shell.sh` 已删。
+> 本指南基于现行架构（Node launcher + 壳独立成仓）。旧架构（SEA 二进制 + `export-shell.sh` 导出壳仓）已废止：
+> SEA 全平台弃用（macOS 上游缺陷）、壳已彻底独立成仓、`export-shell.sh` 已删。
 
 ## 仓库位置（两仓完全独立，不同账号）
 
 | 仓 | 地址 | 可见性 | 内容 |
 |---|---|---|---|
-| **内核** | `advgyxqamf/dsh-supervisor-core` | 🔒 私有 | `bin/` `src/` `ui/` `test/` `release/` + 内核文档 |
-| **桌面壳** | `wasi7mglns/dsh-supervisor-launcher` | 🌐 公开 | `src-tauri/`（Tauri 引导器，MIT）+ 壳文档与脚本 |
+| **内核** | `advgyxqamf/dsh-supervisor-core` | 公开 | `bin/` `src/` `ui/` `test/` `release/` + 内核文档 |
+| **桌面壳** | `wasi7mglns/dsh-supervisor-launcher` | 公开 | `src-tauri/`（Tauri 引导器，MIT）+ 壳文档与脚本 |
 
 两仓**不共享目录**：壳的构建、签名、发布、测试全部由壳仓自持；
-内核仓只保留对接代码（`src/domains/shell/`、`src/api/shell.js`）。
+内核仓只保留对接代码（`src/domains/shell/`、`src/api/domains/shell.js`）。
 
 ## 内核发布：四平台全由 CI 产出（2026-09-13 硬标准）
 
@@ -35,9 +35,8 @@ git push origin HEAD --tags   # 触发 CI 四平台构建+发布
 bash release/scripts/bump.sh --core 0.1.5-BETA.1
 #    然后整理 CHANGELOG.md：[未发布] → [0.1.5-BETA.1]
 
-# 2) 本地：门禁 + dry-run（不产生发布产物）
-npm test
-bash release/scripts/ci-core.sh          # verify → 前端 verify → npm test → build:launcher → 子包 dry-run
+# 2) 本机不得执行 npm test；全量回归由 CI 的 test job 经 xvfb-run -a npm test 执行
+#    （ci-core.sh 内含 npm test 与构建，同样只在 CI 内运行）
 
 # 3) 推 tag：此后构建与发布全部在 CI 内
 git push origin HEAD --tags
@@ -71,7 +70,7 @@ git commit && git tag v1.0.5 && git push origin main && git push origin v1.0.5
 
 ## 桌面真机验收
 
-按 `release/runbooks/verify-desktop.md` 清单执行。核心链路（对应壳 1.0.4 的服务定义修复）：
+按**壳仓** `docs/DESKTOP-ACCEPTANCE.md` 清单执行（该清单属壳资产，不在本仓）。核心链路：
 
 | 场景 | 通过标志 |
 |---|---|
@@ -95,7 +94,7 @@ dsh-supervisor-gui --service-plan --service-apply # 实际建立服务定义
 | 壳 | 四平台可构建；无 Node 环境引导闭环；服务定义能建立（P0） |
 | Node | 多镜像并行测速选最快，SHA256 校验，最低门槛 v22.12 生效 |
 | 自更新 | 壳自更新：检测 → 下载 → minisign 验签 → 安装 → 重启 |
-| 稳定性 | `npm test` 全绿；零端口泄漏；测试端口不落在 OS 动态范围 |
+| 稳定性 | CI 的 `npm test`（`test` job 经 `xvfb-run -a npm test`）全绿；零端口泄漏；测试端口不落在 OS 动态范围 |
 
 ## 状态追踪（2026-09-11）
 

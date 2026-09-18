@@ -5,33 +5,23 @@
 // - macOS：osascript display notification；
 // - Windows：PowerShell System.Windows.Forms.NotifyIcon 气泡（无需第三方模块）。
 
-const { spawn } = require('node:child_process');
+// SSOT §3：异步 spawn 统一封装（固定 windowsHide:true）。
+const spawnOS = require('./spawn');
 
-/** AppleScript 字符串字面量转义。
- *  AppleScript 与 JSON 都用反斜杠转义，故 JSON.stringify 恰好等价。 */
+/** AppleScript 字符串字面量转义（与 JSON 同用反斜杠，JSON.stringify 恰好等价）。 */
 function appleScriptString(s) {
   return JSON.stringify(String(s));
 }
 
-/** PowerShell **双引号字符串**字面量转义。
- *
- *  2026-09-13 修复（失效模式 b：同一事实两处实现且已分叉）：
- *    PowerShell 的转义**不是**反斜杠 —— 双引号要**双写**（" → ""），
- *    反斜杠在 PowerShell 里是字面字符。而原实现直接复用 JSON.stringify
- *    （产出 "a\"b"）→ PowerShell 在反斜杠处**终止字符串** → 语法错误 →
- *    notify 静默失败（best-effort 的 catch 吞掉）。
- *    即「把 JSON 的转义规则套到 PowerShell 上」——两者**不是同一规则**。
- *    注：反向也成立（AppleScript 确实用反斜杠），故两者必须**分开实现**。 */
+/** PowerShell 双引号字符串字面量转义：双引号要双写（" 变 ""），反斜杠是字面字符。
+ *  与 JSON/AppleScript 规则不同，故必须分开实现；否则 notify 会因语法错误静默失败。 */
 function powerShellString(s) {
   return '"' + String(s).replace(/"/g, '""') + '"';
 }
 
-/** 平台 → 通知命令（**纯函数，可穷举**；不 spawn、无副作用）。
- *
- *  抽出来的理由与 pidlookup 的解析器同：原实现把「命令构造」与「spawn」揉在一起，
- *  只能在对应平台验证；而**命令构造/转义**恰是跨平台 bug 的藏身处（见上）。
- *  @returns {{cmd:string,args:string[]}|null} null = 该平台无通知机制
- */
+/** 平台到通知命令（纯函数，可穷举；不 spawn）。命令构造/转义是跨平台 bug 的藏身处，
+ *  故从 spawn 中抽出以便在任意宿主验证。
+ *  @returns {{cmd:string,args:string[]}|null} null = 该平台无通知机制 */
 function notifyCommand(platform, title, body) {
   const pl = platform || process.platform;
   const t = String(title == null ? '' : title);
@@ -66,7 +56,7 @@ function notify(title, body, onError) {
   try {
     const plan = notifyCommand(process.platform, title, body);
     if (!plan) return false;
-    const c = spawn(plan.cmd, plan.args, { stdio: 'ignore', detached: process.platform === 'linux' });
+    const c = spawnOS.detachedIgnored(plan.cmd, plan.args);
     c.on('error', () => { if (onError) onError(); });
     c.unref();
     return true;

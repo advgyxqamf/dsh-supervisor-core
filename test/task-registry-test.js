@@ -10,7 +10,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { TaskRegistry } = require(path.join(__dirname, '..', 'src', 'platform', 'tasks'));
+const { TaskRegistry } = require(path.join(__dirname, '..', 'src', 'platform', 'service', 'tasks'));
 
 let failures = 0;
 function check(name, ok, extra) {

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-// ⛔ 卸载类测试（项目政策，2026-08-31）：本脚本含插件卸载（PluginManager.uninstall）场景，涉及卸载类操作，
-// 已从 npm test 自动测试链排除，仅允许作为独立脚本显式单独调用（node test/plugin-change-restart-test.js 或 npm run test:plugin-change-restart）；
-// 除非用户明确指令，禁止擅自运行。
+// 卸载类测试（项目政策，2026-08-31）：本脚本含插件卸载（PluginManager.uninstall）场景，涉及卸载类操作，
+// 已纳入 npm test（CI）自动测试链执行；测试结论只能由 CI 裁决，本地不单独复跑
+// （如需排查，可显式执行 node test/plugin-change-restart-test.js 或 npm run test:plugin-change-restart）。
 
 // 插件管理双机制（原生宿主 × 沙箱实例）核心行为测试：
 //  - 卸载：官方 CLI + bundles 清理 + 跨层残留（home 补丁层/原生 overlay/profile 补丁层）清理
@@ -17,7 +17,9 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const ROOT = path.join(__dirname, '..');
-const { PluginManager } = require(path.join(ROOT, 'src', 'domains', 'plugin', 'plugins'));
+// 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：plugin 域补 index.js，
+// 原 plugins.js 拆为 index/ops/jobs/store（market.js 由 pluginmarket.js 改名）。
+const { PluginManager } = require(path.join(ROOT, 'src', 'domains', 'plugin'));
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x ? '  ← ' + x : '')); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

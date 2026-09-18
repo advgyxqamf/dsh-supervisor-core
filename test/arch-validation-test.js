@@ -6,7 +6,7 @@
 //
 // ## 缺陷
 //
-// `domains/dist/index.js::_platformTag()` 原实现：
+// `platform/distribution/index.js::_platformTag()` 原实现（步骤3 前为 domains/dist）：
 //     const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 //   即**非 arm64 一律当 x64** —— ppc64le / s390x / ia32 会按 x64 取产物：
 //   轻则 404，重则**下载到架构不符的包**（比明确报错更糟）。
@@ -28,7 +28,9 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+// ⚠ 2026-09-17（域结构第三轮）：distribution 已拆分，按目录聚合读取（平台标签委托落在 registry.js）。
+const distDir = path.join(ROOT, 'src', 'platform', 'distribution');
+const src = fs.readdirSync(distDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(distDir, f), 'utf8')).join(String.fromCharCode(10));
 
 // ── A-b/A-c：静态断言「不得有静默回落」──
 check('A-b 不再有「非 arm64 即 x64」的静默回落',
@@ -37,12 +39,12 @@ check('A-b 不再有「非 arm64 即 x64」的静默回落',
 check('A-c 平台判定也不得静默回落 linux',
   !/process\.platform === 'darwin' \? 'darwin' : \(process\.platform === 'win32' \? 'win' : 'linux'\)/.test(src),
   '已移除');
-// 2026-09-13（跨平台架构规范化）：平台映射表已收口到 src/platform/matrix.js，
+// 2026-09-13（跨平台架构规范化）：平台映射表已收口到 src/platform/contract/matrix.js，
 //   故此处**不再断言 dist/index.js 里存在映射表**（那是实现细节，且正是被消除的重复），
 //   改为断言两条**结构性不变量**：
 //     ① dist 的 _platformTag 必须委托平台层（不得自己持平台知识）；
 //     ② 平台层矩阵确实存在白名单映射与「未知组合抛错」。
-const matrixSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'matrix.js'), 'utf8');
+const matrixSrc = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'contract', 'matrix.js'), 'utf8');
 check('A-b _platformTag 委托平台层矩阵（不再自持 os/arch 映射表）',
   /return matrix\.npmTag\(\)/.test(src), '已委托');
 check('A-b 平台矩阵存在白名单映射表', /const OS_TAG\s*=\s*\{/.test(matrixSrc), '有');
@@ -67,7 +69,7 @@ function tag(platform, arch) {
   const code = [
     "Object.defineProperty(process, 'platform', { value: " + JSON.stringify(platform) + " });",
     "Object.defineProperty(process, 'arch', { value: " + JSON.stringify(arch) + " });",
-    "const { DistributionManager } = require(" + JSON.stringify(path.join(ROOT, 'src', 'domains', 'dist', 'index.js')) + ");",
+    "const { DistributionManager } = require(" + JSON.stringify(path.join(ROOT, 'src', 'platform', 'distribution', 'index.js')) + ");",
     "const d = Object.create(DistributionManager.prototype);",
     "try { process.stdout.write(d._platformTag()); } catch (e) { process.stdout.write('ERR:' + e.message); }",
   ].join(String.fromCharCode(10));

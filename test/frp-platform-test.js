@@ -6,7 +6,8 @@
 
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const { frpPlatformTag, downloadUrls } = require(path.join(ROOT, 'src', 'domains', 'relay', 'frpmgr'));
+// ⚠ 结构改造：平台标签/镜像 URL 迁至 frp-install.js（frpmgr.js 已按副作用二分）。
+const { frpPlatformTag, downloadUrls } = require(path.join(ROOT, 'src', 'domains', 'relay', 'frp-install'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x ? '  ← ' + x : '')); };

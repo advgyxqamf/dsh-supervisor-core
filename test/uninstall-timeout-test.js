@@ -16,7 +16,7 @@
 //   → `install`/`uninstall`/`startUninstall` **全部被拒**
 //   → 任务永久 running，用户只能重启守卫。
 //
-// 对照：同仓**安装**路径（`domains/dist.runNpmInstall`）本就有 timeout + killTree，唯独卸载漏了。
+// 对照：同仓**安装**路径（`platform/distribution.runNpmInstall`）本就有 timeout + killTree，唯独卸载漏了。
 //
 // ## 锁定不变量
 //   F-a  卸载 spawn 有超时常量与看门狗（clearTimeout/setTimeout 成对）
@@ -28,13 +28,13 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const ROOT = path.join(__dirname, '..');
-const SRC = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'native', 'manager.js'), 'utf8');
+const SRC = fs.readFileSync(path.join(ROOT, 'src', 'app', 'native', 'ops.js'), 'utf8');
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
 // 取卸载函数体（从 uninstall 的锁置位到函数结束），避免断言命中别处
-const start = SRC.indexOf('this.uninstalling = true;');
+const start = SRC.indexOf('host.uninstalling = true;');
 const end = SRC.indexOf('module.exports');
 const region = (start >= 0 && end > start) ? SRC.slice(start, end) : '';
 check('前置：定位到卸载函数体', region.length > 500, region.length + ' 字符');
@@ -47,13 +47,13 @@ check('F-a 有 done 幂等位（防超时与 exit 竞态双 resolve）', /if \(d
 
 // ── F-b：超时要杀进程树 ──
 check('F-b 超时路径终止进程树（killTree）', /killTree\(/.test(region), '有');
-check('F-b 引用了平台进程树的统一实现', /platform\/os\/process/.test(region), '有');
+check('F-b 引用了平台进程树的统一实现', /platform\/os\/process/.test(SRC), '有');
 
 // ── F-c：锁在 finally 中释放 ──
 check('F-c 存在 try/finally 结构', /\} finally \{/.test(region), '有');
 {
   const fin = region.slice(region.indexOf('} finally {'), region.indexOf('} finally {') + 220);
-  check('F-c finally 中释放卸载锁', /this\.uninstalling = null/.test(fin), (fin.match(/this\.uninstalling[^;]*/) || [''])[0]);
+  check('F-c finally 中释放卸载锁', /host\.uninstalling = null/.test(fin), (fin.match(/host\.uninstalling[^;]*/) || [''])[0]);
 }
 
 // ── F-d：超时事实可见 ──
@@ -61,7 +61,7 @@ check('F-d 结果带 timedOut 字段', /timedOut:\s*uninstallTimedOut/.test(regi
 check('F-d 超时文案说明「可重试」', /可重试/.test(region), '有');
 
 // ── 反向：不能因为加了超时就丢掉 K10 的「失败保留 manifest」语义 ──
-check('反向：失败仍保留 manifest（K10 未回退）', /if \(exitCode === 0\) \{\s*[\s\S]{0,40}rm\(this\.manifestFile\)/.test(region), '保留');
+check('反向：失败仍保留 manifest（K10 未回退）', /if \(exitCode === 0\) \{\s*[\s\S]{0,40}rm\(host\.manifestFile\)/.test(region), '保留');
 
 const failed = results.filter((r) => !r);
 console.log(String.fromCharCode(10) + '结果: ' + (results.length - failed.length) + ' passed, ' + failed.length + ' failed');

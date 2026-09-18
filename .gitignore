@@ -6,7 +6,6 @@ screenshots/
 # 注：src-tauri/* 与 dist/export-shell 条目已于 2026-09-11 清理 —— 前者属壳仓（本仓不得存在
 #     src-tauri 目录），后者的 export-shell.sh 脚本已随双仓隔离删除。
 dist/release
-dist/sea
 dist/npm
 **/dist/
 # React UI 构建产物（release.sh 从 ui/dist 构建后镜像，不入库）
@@ -31,6 +30,9 @@ node_modules/
 
 # 产品源码仓不含文档/审计/过程物（本地保留，不入库）
 # 注意：release/runbooks/ 操作手册随发布工程入库（2026-09 定案），不在忽略之列
+# HANDOFF.md 是会话过程物（每轮由接手会话重写，含本机路径）——本地保留，不入库。
+HANDOFF.md
+**/HANDOFF.md
 DESIGN.md
 **/DESIGN.md
 CODE_REVIEW.md

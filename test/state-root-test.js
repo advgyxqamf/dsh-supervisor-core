@@ -5,7 +5,7 @@
 // 产品状态根门禁（SR-1..SR-6；2026-09-15 架构纠偏）
 //
 // 本产品**管控 DSH**，状态不得寄在被管控对象的 ~/.dsh 下。内核侧单一事实源 =
-//   src/platform/state-root.js（XDG + DSH_SUPERVISOR_HOME 覆盖 + 前向自愈迁移）。
+//   src/platform/service/state-root.js（XDG + DSH_SUPERVISOR_HOME 覆盖 + 前向自愈迁移）。
 //   · SR-1 schema=1（与壳 env.rs 的 STATE_ROOT_SCHEMA 握手）
 //   · SR-2 DSH_SUPERVISOR_HOME 覆盖优先
 //   · SR-3 默认根**不在** ~/.dsh 之下（独立于 DSH）
@@ -22,7 +22,7 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  <- ' + x : '')); };
 
-const sr = require(path.join(ROOT, 'src', 'platform', 'state-root.js'));
+const sr = require(path.join(ROOT, 'src', 'platform', 'service', 'state-root.js'));
 
 // ── SR-1：schema 握手 ──
 check('SR-1 schema = 1（与壳 STATE_ROOT_SCHEMA 握手）', sr.SCHEMA === 1, String(sr.SCHEMA));
@@ -44,7 +44,7 @@ check('SR-3 默认根不在 ~/.dsh 之下', !def.startsWith(path.join(realHome, 
 check('SR-3 默认根不是 ~/.dsh 本身', def !== path.join(realHome, '.dsh'), def);
 
 // ── SR-4：source 断言（默认值也走 state-root 单一入口）──
-const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'config.js'), 'utf8');
+const cfg = fs.readFileSync(path.join(ROOT, 'src', 'platform', 'service', 'config.js'), 'utf8');
 check('SR-4 config 默认路径经 state-root', /require\('\.\/state-root'\)\.supervisorDir\(\)/.test(cfg), 'ok');
 check('SR-4 config 不再硬编码 ~/.dsh/supervisor', !/stateFile:\s*'~\.dsh\/supervisor/.test(cfg), 'ok');
 
@@ -109,8 +109,12 @@ check('SR-4 config 不再硬编码 ~/.dsh/supervisor', !/stateFile:\s*'~\.dsh\/s
 {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const chain = pkg.scripts.test || '';
+  // ⚠ 2026-09-17：接受 `-r`（--require 的短形式）—— 二者语义相同。
+  //   改用短形式是为压 scripts.test 长度以适配 **Windows cmd.exe 8191 命令行上限**
+  //   （CI 实测 windows-latest 报 "The command line is too long."，Linux/macOS 不受限）；
+  //   本判据的意图（链经 _preload 注入隔离、不依赖 shell 语法）不变。
   check('SR-7 测试链经 _preload 注入隔离（跨平台，不依赖 shell 语法）',
-    /--require .*_preload\.js/.test(chain), 'ok');
+    /(?:-r|--require) .*_preload\.js/.test(chain), 'ok');
   check('SR-7 _preload 设置为 DSH_SUPERVISOR_HOME',
     /DSH_SUPERVISOR_HOME/.test(fs.readFileSync(path.join(ROOT, 'test', '_preload.js'), 'utf8')), 'ok');
   // 测试文件不得硬编码产品状态旧位置（注释除外）

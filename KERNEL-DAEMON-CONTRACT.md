@@ -4,7 +4,7 @@
 > 壳侧对应规范见壳仓 `docs/KERNEL-LAUNCH-STANDARD.md`（壳如何把内核拉起来）。
 > 两文件互锁：内核不满足其中任何一条，壳的启动即失败并如实报 stage。
 >
-> 适用四平台：linux-x64 / darwin-arm64 / darwin-x64 / win-x64（见 `src/platform/matrix.js` SUPPORTED）。
+> 适用四平台：linux-x64 / darwin-arm64 / darwin-x64 / win-x64（见 `src/platform/contract/matrix.js` SUPPORTED）。
 
 ---
 
@@ -55,7 +55,7 @@ P6 healthz  ── GET /healthz ────────────►  2xx
 | # | 缺口 | 证据 | 规范要求 |
 |---|---|---|---|
 | C1 | `install` 仍部署 systemd/launchd/schtasks 定义 | `bin/dsh-supervisor` 的 `cmdInstall` 写 `UNIT_PATH`/`DESKTOP_*` | D6：定义只由壳写 |
-| C2 | Windows watchdog 是第二个启动器 | `src/platform/os/autostart.js` 建 watchdog 任务并拉起 daemon | D6：保活归壳 |
+| C2 | Windows watchdog 是第二个启动器 | `src/platform/os/autostart/` 建 watchdog 任务并拉起 daemon | D6：保活归壳 |
 | C3 | 端口声明晚于绑定 | `supervisor.js` 绑定后才 `ports.register('supervisor-api')` | D3：壳读 `ports.json`；需保证壳在等待时能发现 |
 | C4 | 状态路径仍有 `os.homedir()` 直写 | `domains/router/providers/proxy.js` 拼 `~/.dsh/supervisor/logs` | D7：统一经 `stateDir` |
 
@@ -65,8 +65,11 @@ P6 healthz  ── GET /healthz ────────────►  2xx
 
 | 门禁 | 断言 |
 |---|---|
-| D-1 | `daemon` 在仅注入 node+PATH、无外置 config 的 fresh-HOME 下能起来并写 `ports.json` |
-| D-2 | `ports.json` 含 `supervisor-api` 且端口 == 实际监听端口 |
-| D-3 | `/healthz` 2xx |
-| D-4 | 反向：`bin/dsh-supervisor` 的 `install` 不再写任何 systemd/launchd/schtasks 定义 |
+| D-1 | `daemon` 自足：配置缺失时以内嵌 `DEFAULT_CONFIG` 自建（不依赖外置模板） |
+| D-2 | 对外声明端口：`supervisor-api` 写入 `ports.json` |
+| D-3 | `/healthz` 2xx（壳的唯一就绪判据） |
+| D-4 | 反向：`bin/dsh-supervisor` 的 `install` 不再写任何 systemd/launchd/schtasks 定义，并注明服务定义归桌面壳 |
 | D-5 | 单实例：第二个 daemon 因 `guard.lock` 退出非零 |
+| D-6 | `ports.json` 的 `supervisor-api` 端口 == 实际监听端口：绑定后登记实际值，顺延时以同一 owner 释放旧登记 |
+| D-7 | 数据/日志路径经注入的 `stateDir`：proxy 不直拼 `os.homedir()`，router 向 provider 注入自 `config.stateFile` 派生的 `stateDir` |
+| D-8 | Windows 看护（watchdog）所有者 = 桌面壳：内核不再创建 watchdog 任务、不再写 `watchdog.ps1` |

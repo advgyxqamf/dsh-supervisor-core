@@ -20,7 +20,7 @@
 //
 // ## 锁定的不变量
 //   X-1 代码/脚本/workflow 无操作者绝对路径（注释里举例不算；剥离注释后判）
-//   X-2 现行文档（.md）无操作者绝对路径（CHANGELOG 与 archive/ 属历史，排除）
+//   X-2 现行文档（.md）无操作者绝对路径（CHANGELOG 属历史，排除）
 //   X-3 反向：判据能识别 POSIX/Windows 真实账号路径，且放行通用占位
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -51,20 +51,28 @@ function realHits(text) {
 
 const CODE_DIRS = ['src', 'test', 'release', 'bin', '.github', 'ui/src'];
 const CODE_EXT = new Set(['.js', '.cjs', '.mjs', '.ts', '.tsx', '.sh', '.yml', '.yaml', '.json']);
-const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react', 'archive']);
+const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react']);
 const SKIP_FILE = new Set([SELF, 'CHANGELOG.md']);
 
-/** 剥离注释：只对代码用。注释里举例（如 `/home/john smith`）不构成机器绑定。 */
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(String.fromCharCode(10))
-    .map((l) => {
-      const t = l.trim();
-      if (t.startsWith('//') || t.startsWith('#') || t.startsWith('*')) return '';
-      return l;
-    })
-    .join(String.fromCharCode(10));
+/** 剥离注释：只对代码用。注释里举例（如 `/home/john smith`）不构成机器绑定。
+ *  ⚠ 顺序：**先行注释 → 再块注释 → 最后清 JSDoc 续行**。
+ *  原为「先块后行」：行注释里出现的 glob 形态（斜杠+两个星号）会构成一个**假块注释开符**，
+ *  块注释正则于是把其后直到下一个结束符的**代码**一并吞掉 —— 已实测 `test/acceptance-standard-gate-test.js`
+ *  第 17 行会吞掉 17–36 行（含 `const STD` 与 readFileSync 调用），使本门禁对那段区间**失明**（假阴性）。
+ *  第 3 步必须在块正则**之后**：多行块注释的结束行以星号开头，若提前清空，块正则就找不到结束符而漏剥。 */
+// 阶段六 P6-A：统一走 test/_strip.js 的 stripLineAndBlocks（多语言安全口径，逐字等价）。
+const { stripLineAndBlocks: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
+
+// ─ X-4：剥离顺序自检（门禁自身完整性，合成样本，不依赖真实数据）──
+{
+  const LF = String.fromCharCode(10);
+  // 以拼接构造 glob 形态：避免源码里出现「斜杠+星号」相邻，给别的门禁制造假开符（本类缺陷的成因）
+  const GLOB = 'src/' + String.fromCharCode(42, 42);
+  const kept = stripComments('// 见 ' + GLOB + LF + 'const KEEP_MARKER_9f3 = 1;').indexOf('KEEP_MARKER_9f3') >= 0;
+  check('X-4 剥离顺序：行注释里的 glob 不吞后续代码', kept, kept ? 'ok' : '被吞（假阴性）');
+  const gone = stripComments('/* SECRET_9f3 */ const Y = 1;').indexOf('SECRET_9f3') < 0;
+  check('X-4 反向：真块注释仍被剥离（修复未漏剥）', gone, gone ? 'ok' : '漏剥');
 }
 
 function walk(dir, out) {
@@ -96,7 +104,7 @@ console.log('== X-1 代码/脚本无操作者绝对路径 ==');
     offenders.length === 0, offenders.slice(0, 6).join(' | ') || ('扫描 ' + scanned + ' 个文件，零命中'));
 }
 
-// ── X-2 现行文档（.md；排除 CHANGELOG 与 archive/）──
+// ── X-2 现行文档（.md；排除 CHANGELOG 等历史记录文件）──
 console.log('== X-2 现行文档无操作者绝对路径 ==');
 {
   const files = [];
@@ -106,7 +114,6 @@ console.log('== X-2 现行文档无操作者绝对路径 ==');
     if (path.extname(f) !== '.md') continue;
     if (SKIP_FILE.has(path.basename(f))) continue;
     const rel = path.relative(ROOT, f);
-    if (rel.split(path.sep)[0] === 'archive') continue;
     const hits = realHits(fs.readFileSync(f, 'utf8'));
     if (hits.length) offenders.push(rel + ' :: ' + hits[0]);
   }

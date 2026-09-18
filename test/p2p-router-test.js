@@ -144,11 +144,11 @@ const upstream = http.createServer((q, s) => {
 
   check('B8 反代配额已检测', pinst.quota && pinst.quota.rolling && Number.isFinite(Number(pinst.quota.rolling.percent)), JSON.stringify(pinst.quota));
 
-  // 冻结状态机（沙箱内不触发进程组 kill；真实 kill 链路由宿主验证）
-  pinst.freeze(new Date(Date.now() + 3600000).toISOString());
-  check('B9 冻结状态机 → frozen + resetAt', pinst.status === 'frozen' && pinst.quota.resetsAt, pinst.status + ' ' + (pinst.quota && pinst.quota.resetsAt));
-  pinst.unfreeze();
-  check('B10 解冻 → registered', pinst.status === 'registered', pinst.status);
+  // B9/B10：实例四态词表（PROVIDER-GATEWAY-ARCHITECTURE §4.1 / PG-3）。
+  //   ⚠ 实例级 freeze/unfreeze 已删除（未接线的死代码）；"冻结"是账号级语义。
+  check('B9 实例态为四态词表之一', ['COLD', 'WARM', 'HOT', 'DEAD'].includes(pinst.status), pinst.status);
+  check('B9b 有进程 → occupiesSlot=true', pinst.occupiesSlot() === true, String(pinst.occupiesSlot()));
+  check('B10 就绪 → isServable（HOT+pid）', typeof pinst.isServable() === 'boolean', String(pinst.isServable()));
 
   // 重新拉起（startInstance 复用同一实例，端口重新分配）
   const rr = await pp.startInstance(pinst);

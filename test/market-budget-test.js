@@ -35,7 +35,8 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const SRC = path.join(ROOT, 'src', 'domains', 'plugin', 'pluginmarket.js');
+// 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：pluginmarket.js 改名归位为 market.js
+const SRC = path.join(ROOT, 'src', 'domains', 'plugin', 'market.js');
 const src = fs.readFileSync(SRC, 'utf8');
 const { PluginMarket } = require(SRC);
 

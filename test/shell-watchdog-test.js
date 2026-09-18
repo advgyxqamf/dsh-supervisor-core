@@ -14,8 +14,11 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const ROOT = path.join(__dirname, '..');
-const { createShellWatchdog, decide, isShellProcess, DEFAULTS } =
-  require(path.join(ROOT, 'src', 'domains', 'shell', 'watchdog'));
+// 纯决策/谓词已下沉 core.js（域结构改造）；看护状态机仍在 watchdog.js。
+//   ⚠ 读取面必须随文件搬移同步更新，否则判据静默失去覆盖面（本仓已多次踩坑）。
+const { createShellWatchdog } = require(path.join(ROOT, 'src', 'domains', 'shell', 'watchdog'));
+const { decide, isShellProcess, DEFAULTS } =
+  require(path.join(ROOT, 'src', 'domains', 'shell', 'core'));
 
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
@@ -69,6 +72,8 @@ const mk = (opts) => {
     config: Object.assign({ shellWatchdogGraceMs: 1000, shellWatchdogUpdateGraceMs: 5000 }, o.config || {}),
     now: () => t,
   };
+  if (o.halted) deps.halted = o.halted;
+  if (o.onShellAlive) deps.onShellAlive = o.onShellAlive;
   const w = createShellWatchdog(deps);
   return { w, calls, adv: (ms) => { t += ms; } };
 };
@@ -125,17 +130,40 @@ const mk = (opts) => {
     const st = m.w.status();
     check('W3-i status() 暴露可观测字段', st.enabled === true && typeof st.intervalMs === 'number' && st.session && typeof st.session.available === 'boolean', JSON.stringify(st).slice(0, 90));
   }
+  {
+    // 2026-09-18：退出门下沉看护域 —— 退出中/已退出恒不拉起（退出管家后不再自愈）。
+    const m = mk({ alive: false, halted: () => true });
+    await m.w.tick();
+    m.adv(5000);
+    const r = await m.w.tick();
+    check('W3-j 退出中/已退出 → 恒不拉起（skipped=halted）',
+      m.calls.restarts.length === 0 && r.skipped === 'halted', JSON.stringify(r));
+  }
+  {
+    // 壳在线 -> 回调清除持久退出标记（用户重开壳后自愈恢复，不会被永久抑制）。
+    let seen = 0;
+    const m = mk({ alive: true, onShellAlive: () => { seen++; } });
+    await m.w.tick();
+    check('W3-k 观测到壳在线 → 回调 onShellAlive（清除退出标记）', seen === 1, 'seen=' + seen);
+  }
 
   // ── W4 接线 ──
   console.log('== W4 接线与声明 ==');
   {
-    const sup = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
-    check('W4-a supervisor 引入看护模块', /domains\/shell\/watchdog/.test(sup));
-    check('W4-b supervisor 在看护中注入 pidlookup + desktop', /pidlookup:\s*pidlook/.test(sup) && /desktop:\s*platform\.desktop/.test(sup));
+    // ⚠ 2026-09-16 步骤7（薄壳化）：看护的装配/接线已从 src/supervisor.js 下沉到
+    //   app/assembly/bootstrap.js（启动装配 :27,159-189）与 app/session/shutdown.js（关闭清理）。
+    //   判据改读真实接线点，否则文件一搬就静默失去覆盖面。
+    const boot = fs.readFileSync(path.join(ROOT, 'src', 'app', 'assembly', 'bootstrap.js'), 'utf8');
+    const shutdown = fs.readFileSync(path.join(ROOT, 'src', 'app', 'session', 'shutdown.js'), 'utf8');
+    check('W4-a 装配引入看护模块', /domains\/shell\/watchdog/.test(boot));
+    check('W4-b 看护中注入 pidlookup + desktop', /pidlookup:\s*pidlook/.test(boot) && /desktop:\s*platform\.desktop/.test(boot));
     check('W4-c 看护随守卫启停（启动装配 + 关闭清理）',
-      /_startShellWatchdog\(\)/.test(sup) && /clearInterval\(this\._shellWatchdogTimer\)/.test(sup));
-    check('W4-d 看护异常不影响守卫主循环（catch 包裹）', /初始化失败（不影响守卫）/.test(sup));
-    check('W4-e 可按配置禁用（shellWatchdog=false）', /shellWatchdog === false/.test(sup));
+      /_startShellWatchdog\(\)/.test(boot) && /clearInterval\(host\._shellWatchdogTimer\)/.test(shutdown));
+    check('W4-d 看护异常不影响守卫主循环（catch 包裹）', /初始化失败（不影响守卫）/.test(boot));
+    check('W4-e 可按配置禁用（shellWatchdog=false）', /shellWatchdog === false/.test(boot));
+    check('W4-h 退出门下沉看护域：装配注入 halted + onShellAlive',
+      /halted:\s*\(\)\s*=>/.test(boot) && /onShellAlive:/.test(boot));
+    check('W4-i shutdownAll 落盘持久退出标记（host._shellHalted = true）', /host\._shellHalted = true/.test(shutdown));
 
     const { capabilityProfile } = require(path.join(ROOT, 'src', 'platform', 'os'));
     for (const pl of ['linux', 'darwin', 'win32']) {

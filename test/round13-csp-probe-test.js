@@ -9,7 +9,7 @@
 // 设置页的「测试」按钮由**浏览器直连**用户填写的任意镜像源
 // （RegistryCard.tsx::testLatency → fetch(url + "/-/ping")）。
 // 而该页面由**内核 HTTP 服务**下发，并附带 CSP：
-//     connect-src 'self'        （src/api/index.js）
+//     connect-src 'self'        （src/api/static.js，步骤9 由 index.js 拆出）
 // → 浏览器**在发起请求之前**就按 CSP 拦截，fetch 立刻 reject，
 //   被 catch 统一吞成 toast「探测失败」。
 //
@@ -28,7 +28,7 @@
 //   A UI 源码中**不再**出现跨源裸 fetch（唯一允许在 client.ts 内）
 //   B 后端存在同源探活端点，且用**同一探测规格**（复用 _probeRegistry）
 //   C 前端经 supervisorApi 包装调用（不再直接 fetch）
-//   D 端点已登记到 api/surface.js（可发现性）
+//   D 端点已登记到 api/contract.js（可发现性；步骤9 由 surface.js 改名）
 //   E 反向：判据能识别跨源裸 fetch 形态（门禁非空转）
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -69,16 +69,18 @@ const check = (n, c, x) => {
 
   console.log('== B 后端同源探活端点复用同一探测规格 ==');
   {
-    const api = fs.readFileSync(path.join(ROOT, 'src', 'api', 'dist.js'), 'utf8');
+    const api = fs.readFileSync(path.join(ROOT, 'src', 'api', 'domains', 'dist.js'), 'utf8');
     check('B 存在 /dist/registry/probe 端点', api.indexOf("'/dist/registry/probe'") >= 0, '有');
     check('B 校验 origin 必须以 http(s) 开头（防 SSRF 到任意协议）',
       /\^https\?:/.test(api), '有');
-    const dist = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
-    const i = dist.indexOf('async probeOrigin(');
+    // ⚠ 2026-09-17（域结构第三轮）：probeOrigin 落在 registry.js，按目录聚合读取。
+    const distDir = path.join(ROOT, 'src', 'platform', 'distribution');
+    const dist = fs.readdirSync(distDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(distDir, f), 'utf8')).join(String.fromCharCode(10));
+    const i = dist.indexOf('async function probeOrigin(');
     check('B 存在 probeOrigin 实现', i > 0, i > 0 ? '有' : '缺');
     const body = dist.slice(i, i + 700);
-    check('B 复用 _probeRegistry（与内核选源同一探测规格）',
-      body.indexOf('this._probeRegistry(') >= 0, '有');
+    check('B 复用 probeRegistry（与内核选源同一探测规格）',
+      body.indexOf('probeRegistry(') >= 0, '有');
   }
 
   console.log('== C 前端经 supervisorApi 包装调用 ==');
@@ -91,7 +93,7 @@ const check = (n, c, x) => {
 
   console.log('== D 端点已登记 surface ==');
   {
-    const surface = fs.readFileSync(path.join(ROOT, 'src', 'api', 'surface.js'), 'utf8');
+    const surface = fs.readFileSync(path.join(ROOT, 'src', 'api', 'contract.js'), 'utf8');
     check('D surface 登记 /dist/registry/probe', surface.indexOf("'/dist/registry/probe'") >= 0, '有');
   }
 

@@ -35,9 +35,18 @@ const codeOnly = (src) => src.split('\n')
   .filter((l) => { const t = l.trim(); return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*'); })
   .join('\n');
 
-const guard = read('src/api/guard.js');
-const settings = read('src/guard/supervisor/settings-view.js');
-const surface = read('src/api/surface.js');
+const guard = read('src/api/domains/guard.js');
+// ⚠ 步骤 7（2026-09-16）：原 settings-view.js 已拆为 app/settings/{env,node-lts,versions,access,lan-panel}.js。
+//   自更新只读状态 guardSelfUpdateStatus 现落在 versions.js（**不在** env.js）——故读**整组**，
+//   否则「拆分即静默失去 SW-2 覆盖面」（只读 status 保留 / 无写实现两条判据会双双空转）。
+const settings = [
+  'src/app/settings/env.js',
+  'src/app/settings/versions.js',
+  'src/app/settings/node-lts.js',
+  'src/app/settings/access.js',
+  'src/app/settings/lan-panel.js',
+].map(read).join(String.fromCharCode(10));
+const surface = read('src/api/contract.js');
 const cli = read('bin/dsh-supervisor');
 const about = read('ui/src/features/supervisor/settings/AboutCard.tsx');
 const client = read('ui/src/services/supervisor/client.ts');
@@ -63,10 +72,10 @@ check('SW-3 restart-guard 标 deprecated 且有替代说明',
   /path: '\/self-update\/restart-guard'[^\n]*category: 'deprecated'[^\n]*(替代|下架)/.test(surface), 'ok');
 
 // ── SW-4：manifest 死代码已删 ──
-check('SW-4 dist/self-update.js 已删除', !fs.existsSync(path.join(ROOT, 'src', 'domains', 'dist', 'self-update.js')), 'ok');
-const cfg = codeOnly(read('src/platform/config.js'));
+check('SW-4 dist/self-update.js 已删除', !fs.existsSync(path.join(ROOT, 'src', 'platform', 'distribution', 'self-update.js')), 'ok');
+const cfg = codeOnly(read('src/platform/service/config.js'));
 check('SW-4 config 无 selfUpdateManifestUrl/Dir 残留键', !/selfUpdateManifestUrl|selfUpdateDir:/.test(cfg), 'ok');
-const fsu = read('src/platform/fs-utils.js');
+const fsu = read('src/platform/util/fs.js');
 check('SW-4 extractTarGz 死代码已删', !/function extractTarGz/.test(fsu) && !/extractTarGz/.test(fsu), 'ok');
 
 // ── SW-5：CLI 不再安装 ──

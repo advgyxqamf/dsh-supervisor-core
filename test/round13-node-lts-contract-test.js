@@ -51,8 +51,10 @@ function ifaceFields(src, name) {
   check('A 解析到 NodeLtsStatus 字段', fields.length > 0, fields.join(','));
 
   // 真实调用后端
-  const desc = require(path.join(ROOT, 'src', 'guard', 'supervisor', 'settings-view.js'));
-  const svc = Object.create({}, desc);
+  // ⚠ 2026-09-16 步骤7：nodeLtsStatus 已从 settings-view.js 拆到 app/settings/node-lts.js；
+  //   导出形态从属性描述符改为 { methods }。
+  const mod = require(path.join(ROOT, 'src', 'app', 'settings', 'node-lts.js'));
+  const svc = Object.assign({}, mod.methods);
   svc.config = { stateFile: path.join(TMP, 'state.json') };
   const ret = await svc.nodeLtsStatus();
   const realKeys = Object.keys(ret || {});
@@ -67,7 +69,7 @@ function ifaceFields(src, name) {
   // 先证明豁免项本身是合理的（失败路径确实产出 error），避免豁免变成藏污纳垢
   {
     // 直接构造失败路径：用一个会抛的 config（访问 stateFile 时抛）
-    const failing = Object.create({}, desc);
+    const failing = Object.assign({}, mod.methods); // 步骤7：导出形态 { methods }
     Object.defineProperty(failing, 'config', { get() { throw new Error('boom-config'); } });
     const er = await failing.nodeLtsStatus();
     check('A 豁免项 error 确为失败路径产出', Object.prototype.hasOwnProperty.call(er, 'error'), JSON.stringify(er).slice(0, 60));

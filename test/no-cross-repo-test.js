@@ -43,7 +43,7 @@ const COUPLING = [
 
 const CODE_DIRS = ['src', 'test', 'release', 'bin', '.github'];
 const CODE_EXT = new Set(['.js', '.cjs', '.mjs', '.sh', '.yml', '.yaml', '.json']);
-const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react', 'archive']);
+const SKIP_DIR = new Set(['node_modules', 'target', 'dist', '.git', 'ui-react']);
 const SKIP_FILE = new Set([SELF]);
 
 function walk(dir, out) {

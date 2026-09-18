@@ -22,7 +22,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
 (async () => {
   const { ProxyProvider } = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'proxy'));
   const { keyFingerprint } = require(path.join(ROOT, 'src', 'domains', 'router', 'providers', 'base'));
-  const ports = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'ports')).shared;
+  const ports = require(path.join(ROOT, 'src', 'platform', 'service', 'ports')).shared;
   ports.configureFile(path.join(TMP, 'ports-router.json'));
   const log = { info(){}, warn(){}, error(){}, debug(){} };
 
@@ -97,7 +97,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
     const hitsBefore = billingHits;
     // 冻结（走 markQuotaExhausted 覆写 → 触发 _probeAfterResponseFreeze 的 300ms 定时补探测）
     p.markQuotaExhausted(acc, 5 * 3600 * 1000);
-    check('B1 冻结后 300ms 定时补探测已排定（等 800ms）', true);
+    // 等 300ms 定时补探测完成（其效果由 B2/B3 断言，此处不设恒真标记）
     await new Promise((r) => setTimeout(r, 800));
     // 补探测应命中 billing server（detectInstanceQuota 直连 mock）
     check('B2 补探测已访问 billing server（冻结后 quota 不再 stale）', billingHits > hitsBefore, 'hits ' + hitsBefore + '→' + billingHits);

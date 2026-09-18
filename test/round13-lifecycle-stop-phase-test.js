@@ -23,7 +23,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
-const { ManagedLifecycle } = require(path.join(ROOT, 'src', 'guard', 'lifecycle', 'managed.js'));
+const { ManagedLifecycle } = require(path.join(ROOT, 'src', 'app', 'control', 'entry.js'));
 
 const results = [];
 const check = (n, c, x) => {
@@ -65,7 +65,7 @@ const check = (n, c, x) => {
   }
   // T-d：反向判据
   {
-    const code = fs.readFileSync(path.join(ROOT, 'src', 'guard', 'lifecycle', 'managed.js'), 'utf8')
+    const code = fs.readFileSync(path.join(ROOT, 'src', 'app', 'control', 'entry.js'), 'utf8')
       .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
     const iStop = code.indexOf('async stop(reason)');
     const body = code.slice(iStop, iStop + 1600);

@@ -6,7 +6,7 @@
 //
 // ## 缺陷
 //
-// `platform/config.js` 的注释写着：
+// `platform/service/config.js` 的注释写着：
 //     「不配置 = 维持现状（LAN 受 RFC1918 白名单约束，FRP 暴露仍强制 remoteToken）」
 // 但全仓**从未实现**该 RFC1918 判定（grep 零命中）。
 //
@@ -42,19 +42,43 @@ const ROOT = path.join(__dirname, '..');
 const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 
-const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'index.js'), 'utf8');
+// ⚠ 域改造后来源闸从 index.js 迁到服务本体（SSOT §5.2：proxy.js 承载来源闸/令牌闸/
+//   HTTP/WS/热更新面）——单文件读取会静默失去覆盖面，故按**整域聚合**读取。
+//   S-a 原判据断言的是**注释串** api/identity（注释一精简即失败）——改为语义判据：
+//   闸所在文件必须以 require 引入共享 IP 实现，且该实现与 src/shared/ip.js **同一对象**。
+const relayDir = path.join(ROOT, 'src', 'domains', 'relay');
+const relayFiles = fs.readdirSync(relayDir).filter((f) => f.endsWith('.js')).sort();
+/** 去注释：源码级判据必须区分「代码」与「说明代码的文字」。 */
+const stripAll = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+const src = relayFiles.map((f) => fs.readFileSync(path.join(relayDir, f), 'utf8')).join(String.fromCharCode(10));
+const srcCode = relayFiles.map((f) => stripAll(fs.readFileSync(path.join(relayDir, f), 'utf8'))).join(String.fromCharCode(10));
 
-// ── S-a：存在闸 + 复用同一份判定 ──
-check('S-a 存在 isTrustedSource 来源闸', /function isTrustedSource\(/.test(src), '有');
-check('S-a 复用 api/identity 的判定（不重写第二份 RFC1918）',
-  src.includes("api/identity") && src.includes('isPrivateIpv4'), '复用');
-// 反向：本文件不得自己定义 isPrivateIpv4（那才是「两处实现」）
-check('S-a 本文件未定义第二份 isPrivateIpv4',
-  !/function\s+isPrivateIpv4\s*\(/.test(src), '未重写');
+// ── S-a：存在闸 + 复用**同一份**判定（不重写第二份 RFC1918）──
+check('S-a 存在 isTrustedSource 来源闸', /function\s+isTrustedSource\s*\(/.test(srcCode), '有');
+{
+  const sharedIp = require(path.join(ROOT, 'src', 'shared', 'ip.js'));
+  let reuse = false;
+  for (const f of relayFiles) {
+    const code = stripAll(fs.readFileSync(path.join(relayDir, f), 'utf8'));
+    if (!/isPrivateIpv4\s*\(/.test(code)) continue;
+    for (const m of code.matchAll(/require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+      let mod;
+      try { mod = require(path.resolve(relayDir, m[1])); } catch { continue; }
+      if (mod && mod.isPrivateIpv4 === sharedIp.isPrivateIpv4
+        && mod.isLoopbackAddress === sharedIp.isLoopbackAddress) { reuse = true; break; }
+    }
+    if (reuse) break;
+  }
+  check('S-a 来源闸复用共享 IP 判定（与 shared/ip 同一实现，不重写第二份）',
+    reuse, reuse ? '复用' : '未复用共享实现');
+}
+// 反向：域内不得自己定义第二份 isPrivateIpv4（那才是「两处实现」）
+check('S-a 域内未定义第二份 isPrivateIpv4',
+  !/function\s+isPrivateIpv4\s*\(/.test(srcCode), '未重写');
 
 // ── S-b：两条路径都接入 ──
-const httpHas = /if \(!isTrustedSource\(req\)\)/.test(src);
-const wsHas = /if \(!isTrustedSource\(req, socket\)\)/.test(src);
+const httpHas = /if \(!isTrustedSource\(req\)\)/.test(srcCode);
+const wsHas = /if \(!isTrustedSource\(req, socket\)\)/.test(srcCode);
 check('S-b HTTP 路径接入来源闸', httpHas, '有');
 check('S-b WS 升级路径接入来源闸（只挡 HTTP 会留绕过）', wsHas, '有');
 
@@ -82,9 +106,10 @@ check('S-c 空地址拒绝', trusted('') === false);
 
 // ── S-d：FRP 路径不被误杀（frpc 以回环身份转发）──
 {
-  const frp = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'relay', 'frpmgr.js'), 'utf8');
+  // frp 配置随域改造可能从 frpmgr.js 改名/搬移（SSOT §5.2：frp.js / frp-install.js）——
+  //   按整域聚合读取。
   check('S-d frpc 的 localIP 是 127.0.0.1（故来源闸会放行 FRP 流量）',
-    /localIP = "127\.0\.0\.1"/.test(frp), '确认');
+    /localIP = "127\.0\.0\.1"/.test(src), '确认');
   check('S-d 因此回环判定必须放行（否则 FRP 会被误杀）', trusted('127.0.0.1') === true, '放行');
 }
 

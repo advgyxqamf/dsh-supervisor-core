@@ -33,28 +33,20 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined && x !== '' ? '  ← ' + x : '')); };
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const readOs = (f) => fs.readFileSync(path.join(POS, f), 'utf8');
+/** 按平台层子目录聚合读取（2026-09-17 域结构改造：文件拆分后判据仍覆盖整个模块）。 */
+const readOsDir = (d) => fs.readdirSync(path.join(POS, d)).filter((f) => f.endsWith('.js')).sort()
+  .map((f) => fs.readFileSync(path.join(POS, d, f), 'utf8')).join(String.fromCharCode(10));
 
 /** 剥离注释：A6「历史错误声明不得重现」必须只看**代码**。
  *  ⚠ 修复过程会在注释里**引用旧声明的原文**（用于解释病因），
  *    不剥离就会把解释文字误判为实际代码（首版即因此 3 项误报）。 */
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')   // 块注释
-    .split('\n')
-    .map((l) => {
-      // 行注释：需避开字符串内的 //（本仓该场景罕见，此处保守处理：仅剥离行首注释）
-      const i = l.indexOf('//');
-      if (i < 0) return l;
-      // 引号内的 // 不视为注释
-      const before = l.slice(0, i);
-      const quotes = (before.match(/['"`]/g) || []).length;
-      return quotes % 2 === 1 ? l : before;
-    })
-    .join('\n');
-}
+// 阶段六 P6-A：剥离统一走 test/_strip.js 的**字符级单一实现**（去掉引号奇偶启发式 ——
+//   该启发式对多层/转义引号不可靠）。语义等价或更强：字符串/正则字面量感知，只多删注释。
+const { stripComments: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
 
 const { capabilityProfile } = require(POS);
-const autostart = require(path.join(POS, 'autostart.js'));
+const autostart = require(path.join(POS, 'autostart'));
 const service = require(path.join(POS, 'service.js'));
 
 const PLATFORMS = ['linux', 'darwin', 'win32'];
@@ -116,7 +108,7 @@ console.log('== A3 不支持的能力必须显式报告 ==');
 // ── A2 声明=true 必须有实现产物 ──
 console.log('== A2 声明能力必须有实现产物 ==');
 {
-  const pidSrc = readOs('pidlookup.js');
+  const pidSrc = readOsDir('pidlookup');
   check('A2 pidlookup 三平台分支齐全',
     /isLinux/.test(pidSrc) && /isMac/.test(pidSrc) && /isWindows/.test(pidSrc), 'ok');
   const procSrc = readOs('process.js');
@@ -129,7 +121,7 @@ console.log('== A2 声明能力必须有实现产物 ==');
   check('A2 fileProtect Unix 分支（chmod）', /chmodSync/.test(fpSrc), 'ok');
   check('A2 fileProtect Windows 分支（icacls）', /icacls/.test(fpSrc), 'ok');
   // 守卫自启三平台
-  const asSrc = readOs('autostart.js');
+  const asSrc = readOsDir('autostart');
   check('A2 守卫自启 Linux（systemctl enable）', /systemctl/.test(asSrc) && /enable/.test(asSrc), 'ok');
   check('A2 守卫自启 macOS（launchctl bootstrap）', /launchctl/.test(asSrc) && /bootstrap/.test(asSrc), 'ok');
   check('A2 守卫自启 Windows（schtasks /Create）', /schtasks/.test(asSrc) && /\/Create/.test(asSrc), 'ok');
@@ -142,12 +134,17 @@ console.log('== A2 声明能力必须有实现产物 ==');
     const exists = fs.existsSync(wdPath);
     check('A2 壳自愈有实现产物（domains/shell/watchdog.js）', exists, exists ? 'ok' : '缺失');
     if (exists) {
-      const wd = fs.readFileSync(wdPath, 'utf8');
+      // ⚠ 2026-09-17 域结构改造：纯决策 decide() 已下沉 core.js —— 读取面必须纳入 core.js，
+      //   否则「决策为纯函数」断言会静默失去覆盖面（假绿）。沿用按域聚合读取范式。
+      const wd = fs.readFileSync(wdPath, 'utf8') + String.fromCharCode(10) +
+        read('src/domains/shell/core.js');
       check('A2 看护决策为纯函数（可穷举单测）', /function decide\(/.test(wd), 'ok');
       check('A2 看护要求图形会话（防无显示重启风暴）', /sessionAvailable/.test(wd), 'ok');
       check('A2 看护有界重试（防风暴）', /maxRestarts/.test(wd), 'ok');
-      const supSrc = read('src/supervisor.js');
-      check('A2 看护已接线进守卫生命周期', /_startShellWatchdog/.test(supSrc), 'ok');
+      // ⚠ 步骤 7（2026-09-16）：看护的装配/接线随启动序列下沉到 app/assembly/bootstrap.js
+      //   （src/supervisor.js 收敛为薄壳）——判据改读新模块，否则文件一搬就静默失去覆盖面。
+      const bootSrc = read('src/app/assembly/bootstrap.js');
+      check('A2 看护已接线进守卫生命周期', /_startShellWatchdog/.test(bootSrc), 'ok');
     }
   }
 }
@@ -155,7 +152,7 @@ console.log('== A2 声明能力必须有实现产物 ==');
 // ── A5 自愈机制真伪 ──
 console.log('== A5 自愈机制真实性 ==');
 {
-  const asSrc = readOs('autostart.js');
+  const asSrc = readOsDir('autostart');
   // 守卫 plist 的**内容模板**归桌面壳（所有权矩阵）—— 由壳仓测试负责，
   //   内核**不读壳仓源码**。内核侧只保留所有权不变量：不得再持有该模板。
   check('A5 内核不再持有守卫 plist 模板（macPlist 已删）', !/function macPlist/.test(asSrc), 'ok');
@@ -174,13 +171,14 @@ console.log('== A5 自愈机制真实性 ==');
 // ── A6 无回归：历史错误声明不得重现 ──
 console.log('== A6 历史错误声明不得重现 ==');
 {
-  const asCode = stripComments(readOs('autostart.js'));  // ⚠ 只看代码，不看注释
+  const asCode = stripComments(readOsDir('autostart'));  // ⚠ 只看代码，不看注释
   check('A6 无「mac 由 LaunchAgent 一并代管」的假声明', !/mac 由 LaunchAgent 一并代管/.test(asCode), 'ok');
   check('A6 无「同 plist 附带」的假声明（GUI 从未在 plist 中）', !/同 plist 附带/.test(asCode), 'ok');
   check('A6 无 setGuiAutostart 的静默成功分支',
     !/if \(!isLinux\) return \{ ok: true/.test(asCode), 'ok');
   // macOS status().gui 不得再谎报
-  const macStatus = asCode.match(/if \(isMac\) \{[\s\S]*?return \{[^}]*\};/);
+  // ⚠ 2026-09-17 域结构改造：macOS status() 已落 autostart/darwin.js —— 直接读该实现文件。
+  const macStatus = stripComments(readOs('autostart/darwin.js')).match(/function status\(\) \{[\s\S]*?return \{[^}]*\};/);
   check('A6 macOS status() 不再把守卫自启当作壳自启（gui: on）',
     !!macStatus && !/gui:\s*on/.test(macStatus[0]), macStatus ? macStatus[0].replace(/\s+/g, ' ').slice(0, 80) : '未找到');
   // Linux .desktop 的 Exec 不得硬编码 ~/.local/bin
@@ -193,7 +191,8 @@ console.log('== A7 壳自愈：声明 ↔ 实现 ==');
 {
   const wdRel = 'src/domains/shell/watchdog.js';
   const hasWd = fs.existsSync(path.join(ROOT, wdRel));
-  const wd = hasWd ? read(wdRel) : '';
+  // 纯核心 core.js 承载 DEFAULTS/decide —— 一并读取，否则宽限期/纯决策判据静默失效。
+  const wd = hasWd ? read(wdRel) + String.fromCharCode(10) + read('src/domains/shell/core.js') : '';
   for (const pl of PLATFORMS) {
     const claimed = capabilityProfile(pl, 'x64').shellSelfHeal;
     check('A7 ' + pl + ' shellSelfHeal 声明为 true', claimed === true, String(claimed));
@@ -218,7 +217,7 @@ console.log('== A7 壳自愈：声明 ↔ 实现 ==');
 // ── A8 自启所有权：内核不越权 + GUI 产物与守卫分离 ──
 console.log('== A8 自启所有权不变量 ==');
 {
-  const asSrc = readOs('autostart.js');
+  const asSrc = readOsDir('autostart');
   // 1) 内核不得写/删守卫的 plist（macOS）—— 那条路径上只允许 enable/disable + bootstrap/bootout
   const guardLabelRe = /GUARD_LABEL\s*=\s*'([^']+)'/;
   const guardLabel = (asSrc.match(guardLabelRe) || [])[1];
@@ -228,7 +227,10 @@ console.log('== A8 自启所有权不变量 ==');
   check('A8 GUI 标签是守卫标签的子域（com.dsh.supervisor.gui）',
     guiLabel === guardLabel + '.gui', String(guiLabel));
   // 内核 macOS 分支不得出现写守卫 plist 或删除它的调用
-  const macBranch = asSrc.slice(asSrc.indexOf('if (isMac) {'), asSrc.indexOf('// Linux（systemd'));
+  // ⚠ 2026-09-17 域结构改造：macOS setAutostart 落 autostart/darwin.js —— 切出该实现函数体，
+  //   断言「内核只做 launchctl，不写/不删守卫 plist」仍然成立。
+  const macBranch = (readOs('autostart/darwin.js').match(/function setAutostart\([\s\S]*?\n\}/) || [''])[0];
+  check('A8 定位到 darwin setAutostart', macBranch.includes('守卫服务定义缺失'), macBranch ? 'ok' : '未找到');
   check('A8 内核 macOS 分支不写守卫 plist', !/writeFileSync\(atmp,\s*(plist|macPlist)/.test(macBranch), 'ok');
   check('A8 内核 macOS 分支不删除守卫 plist（否则关闭自启不生效）',
     !/unlinkSync\(file\)/.test(macBranch), 'ok');

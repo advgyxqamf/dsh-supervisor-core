@@ -50,7 +50,7 @@ function restore() {
 }
 
 const ep = require(path.join(ROOT, 'src', 'platform', 'os', 'exec-path'));
-const { NativeManager } = require(path.join(ROOT, 'src', 'guard', 'native', 'manager'));
+const { NativeManager } = require(path.join(ROOT, 'src', 'app', 'native', 'installer'));
 // macOS 下 /tmp、/var 是符号链接（realpath 得到 /private/...）——比较前统一规范化，跨平台稳定。
 const canon = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
 const mkNM = (command, npmRoot) => new NativeManager({
@@ -87,17 +87,39 @@ const adopted = mkNM(['node', 'dsh', 'web'], EMPTY_PREFIX);
 check('检测到真实安装 → installed=true（检测驱动）', adopted.status().installed === true, adopted.binPath());
 
 // 6) 结构不变量：绑定先于消费者；exec-path 导出解析器
+//
+// ⚠ 步骤 7 回归收敛（2026-09-16）：机械下沉把本段断言的三处路径全部改址，旧路径已不存在 ——
+//   ① _bindNativeDshCommand 从 src/supervisor.js 下沉到 src/app/assembly/bootstrap.js；
+//   ② 「绑定 → 消费者」的调用序从 supervisor.js 迁到 src/app/assembly/compose.js
+//      （构造期唯一 DI 点：先 host._bindNativeDshCommand() 再 new InstanceManager(...)）；
+//   ③ 插件 CLI 的 runtime 承载从 src/domains/plugin/plugins.js 迁到 plugins 拆分后的 ops.js。
+//   为什么不能继续断言 supervisor.js：它是薄壳（DS-G7 ≤200 行），只保留组装与启动，
+//   若仍按旧路径取文件将 ENOENT 崩溃（或恒 false）——断言的是「实现所在文件」而非契约本身。
+//   故改为断言**契约的不变量**：绑定方法存在、且调用序先于消费者（跨文件，仍可机器校验）。
+//   本测试不 spawn 任何子进程、不创建锁文件（纯 require + 读文件），隔离无风险。
 const sup = fs.readFileSync(path.join(ROOT, 'src', 'supervisor.js'), 'utf8');
-check('supervisor 定义 _bindNativeDshCommand', /_bindNativeDshCommand\(\)\s*\{/.test(sup), 'ok');
-const bindIdx = sup.indexOf('this._bindNativeDshCommand();');
-const instIdx = sup.indexOf('new InstanceManager(');
+const boot = fs.readFileSync(path.join(ROOT, 'src', 'app', 'assembly', 'bootstrap.js'), 'utf8');
+// R3 严值 DF-2：compose.js 拆为 compose/{core,domains,observers}.js；绑定→消费者的调用序在 domains 步。
+const compose = fs.readFileSync(path.join(ROOT, 'src', 'app', 'assembly', 'compose', 'domains.js'), 'utf8');
+check('bootstrap 定义 _bindNativeDshCommand', /_bindNativeDshCommand\(/.test(boot), 'ok');
+// 装配序不变量锁定在 compose.js：绑定调用必须早于 InstanceManager 构造（消费者）。
+// 注意：组装点是自由函数，用 host 而非 this 调用 —— 断言需匹配 `host._bindNativeDshCommand()`。
+const bindIdx = compose.indexOf('host._bindNativeDshCommand();');
+const instIdx = compose.indexOf('new InstanceManager(');
 check('检测→绑定先于 InstanceManager（消费者）', bindIdx > 0 && instIdx > 0 && bindIdx < instIdx, bindIdx + ' < ' + instIdx);
-const plug = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'plugin', 'plugins.js'), 'utf8');
+// 插件 CLI 的 JS 入口承载：plugins.js 已拆为 index/ops/jobs/store（步骤8a），
+// 域改造后 runtime 目标解析落在 targets.js（SSOT §5.4）——按整域聚合读取，
+// 避免文件一搬该断言静默失去覆盖面。
+const plugDir = path.join(ROOT, 'src', 'domains', 'plugin');
+const plug = fs.readdirSync(plugDir).filter((f) => f.endsWith('.js'))
+  .map((f) => fs.readFileSync(path.join(plugDir, f), 'utf8')).join('\n');
 check('插件 CLI 经 runtime 承载 JS 入口（跨平台）', /target\.runtime/.test(plug), 'ok');
+// 薄壳不变量：supervisor.js 不得再持有绑定实现（防止实现回流 root 破坏分层）。
+check('supervisor.js 不再持有 _bindNativeDshCommand 实现', !/_bindNativeDshCommand\(\)\s*\{/.test(sup), 'ok');
 check('exec-path 导出 resolveDsh/dshJsIn', typeof ep.resolveDsh === 'function' && typeof ep.dshJsIn === 'function', 'ok');
 
 // 7) 契约读回：npmArgs 透传（壳可只提供包内 JS；内核消费者必须带上 args）
-const rc = require(path.join(ROOT, 'src', 'platform', 'runtime-contract'));
+const rc = require(path.join(ROOT, 'src', 'platform', 'contract', 'runtime'));
 const rcFile = rc.file();
 fs.mkdirSync(path.dirname(rcFile), { recursive: true });
 fs.writeFileSync(rcFile, JSON.stringify({ schema: 2, nodePath: '/usr/bin/node', nodeBinDir: '/usr/bin', npmPath: '/usr/bin/node', npmArgs: ['/x/npm-cli.js'] }));

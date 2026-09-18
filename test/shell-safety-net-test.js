@@ -20,7 +20,19 @@ const results = [];
 const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL') + ' ' + n + (x !== undefined ? '  <- ' + x : '')); };
 const LF = String.fromCharCode(10);
 // 源码级断言必须区分「代码」与「说明代码的文字」：剥离整行注释后再匹配（本仓已多次踩坑）。
-const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join(LF);
+// 注释剥离统一走 test/_strip.js（阶段六）。原实现丢「// 或块注释续行（星号或块开符）开头的整行」——
+// 新实现语义等价且**字符串/正则感知**，并只丢「整行都是注释」的行：像『块注释开头的代码行』
+// （形如：块开符 + 注释 + 代码）原先会被**整行丢掉**（丢代码），现已修正为保留。
+const { dropCommentLines: stripCommentLines } = require('./_strip');
+{
+  const G = 'src/' + String.fromCharCode(42, 42);
+  check('S-3 剥离：// 行注释里的 glob 不吞后续代码',
+    stripCommentLines('// ' + G + LF + 'const K = 1;').indexOf('K = 1') >= 0, 'ok');
+  check('S-3 剥离：块注释开头的代码行不再被整行丢掉',
+    stripCommentLines('/* c */ const K = 2;').indexOf('K = 2') >= 0, 'ok');
+  check('S-3 剥离：纯块注释整行被丢掉',
+    stripCommentLines('/* only */' + LF + 'const K = 3;').indexOf('only') < 0, 'ok');
+}
 
 // 测试主体包进 async IIFE：本套测试自 2026-09-11 起含 await（checkUpdate/restartShell），
 // 而 CommonJS 顶层不允许 await —— 之前全同步掩盖了这一点。
@@ -105,11 +117,11 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
   // ── API 域：路由归属 ──
   console.log('== API 域归属 ==');
   {
-    const apiShell = require(path.join(ROOT, 'src', 'api', 'shell.js'));
+    const apiShell = require(path.join(ROOT, 'src', 'api', 'domains', 'shell.js'));
     check('R7-a owns /shell/status', apiShell.owns('/shell/status'));
     check('R7-b owns /shell/health', apiShell.owns('/shell/health'));
     check('R7-c 不 own 其它路径', !apiShell.owns('/status') && !apiShell.owns('/instances'));
-    const surface = require(path.join(ROOT, 'src', 'api', 'surface.js'));
+    const surface = require(path.join(ROOT, 'src', 'api', 'contract.js'));
     const paths = surface.SURFACE.filter((e) => e.domain === 'shell').map((e) => e.path).sort();
     // 5 条：status / health / update-pending / check-update / restart（rollback 已移除）
     check('R7-d surface 已登记 shell 域 5 条', paths.length === 5, JSON.stringify(paths));
@@ -173,13 +185,20 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
   //   由壳仓测试负责（src-tauri/src/update.rs::t5 与壳仓反回归测试）。
   //   内核**不读壳仓源码** —— 两仓按账号/仓库隔离（见 RELEASE-STANDARD.md §0）。
   //   本组锁定两件事：
-  //     R10-a 内核侧回退机构不得复活（shell 域 + api/shell.js + surface 登记）
+  //     R10-a 内核侧回退机构不得复活（shell 域 + api/domains/shell.js + contract 登记）
   //     R10-c identity.json 的护栏字段只由壳写（内核不得成为第二写入方）
   console.log('== R10 反回归：回退机构不得复活 ==');
   {
-    const shellSrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'shell', 'index.js'), 'utf8');
-    const apiShellSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'shell.js'), 'utf8');
-    const surfaceSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'surface.js'), 'utf8');
+    // ⚠ 2026-09-16 步骤8a（DIRECTORY-STRUCTURE-DESIGN §4.5）：shell 域已拆为
+    //   index/journal/restart 三文件，health()（写 phase/version/lastSeenAt）迁至
+    //   journal.js。本组断言的对象是**整个 shell 域源码**（R10-c 的意图 = 「内核不得
+    //   成为 identity.json 第二写入方」），与文件切分无关 —— 故按域聚合读取，
+    //   而不是把判据从 index.js 搬走（那会让断言静默失去覆盖面）。
+    const shellSrc = ['index', 'journal', 'restart']
+      .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'domains', 'shell', f + '.js'), 'utf8'))
+      .join(LF);
+    const apiShellSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'domains', 'shell.js'), 'utf8');
+    const surfaceSrc = fs.readFileSync(path.join(ROOT, 'src', 'api', 'contract.js'), 'utf8');
     const shellSrcCode = stripCommentLines(shellSrc);
     const apiShellCode = stripCommentLines(apiShellSrc);
     const surfaceCode = stripCommentLines(surfaceSrc);
@@ -188,14 +207,14 @@ const stripCommentLines = (s) => s.split(LF).filter((l) => !/^\s*(\/\/|\*|\/\*)/
     check('R10-a 内核 shell 域无 rollback 函数', !/function rollback/.test(shellSrcCode), '无');
     check('R10-a 内核 shell 域无 pinnedVersions', !/pinnedVersions/.test(shellSrcCode), '无');
     check('R10-a 内核 shell 域无 should-rollback', !/should-rollback/.test(shellSrcCode), '无');
-    check('R10-a api/shell.js 无 /shell/rollback 分支', !/\/shell\/rollback/.test(apiShellCode), '无');
-    check('R10-a api/shell.js 不调用 shell.rollback', !/shell\.rollback/.test(apiShellCode), '无');
+    check('R10-a api/domains/shell.js 无 /shell/rollback 分支', !/\/shell\/rollback/.test(apiShellCode), '无');
+    check('R10-a api/domains/shell.js 不调用 shell.rollback', !/shell\.rollback/.test(apiShellCode), '无');
     check('R10-a surface 无 /shell/rollback 登记', !/\/shell\/rollback/.test(surfaceCode), '无');
     check('R10-a surface 前缀清单不含 rollback', !/update-pending\|rollback/.test(surfaceCode), '无');
 
     // ── R10-c：identity.json 只由壳写（内核不得成为第二写入方）──
     //   背景：壳仓 update.rs::write_identity_for 是 identity.json 的唯一写入点；
-    //   内核 domains/shell/index.js::health() 只兜底写运行时字段。
+    //   内核 domains/shell/journal.js::health() 只兜底写运行时字段（原 index.js，步骤8a 拆分）。
     //   护栏/回退字段（attempt/pendingVersion）已随壳回退整体废除。
     {
       const codeOnly = stripCommentLines(shellSrc);

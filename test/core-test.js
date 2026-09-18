@@ -14,7 +14,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-core-test-'));
 
 // ---- Logger：级别过滤 + 轮转 + 行缓冲 ----
 function testLogger() {
-  const { createLogger, Rotator, LineBuffer } = require(path.join(ROOT, 'src', 'platform', 'log'));
+  const { createLogger, Rotator, LineBuffer } = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'log'));
   const file = path.join(TMP, 'supervisor-test.log');
   const log = createLogger({ file, level: 'info', maxBytes: 400 });
   log.debug('不应出现');
@@ -53,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- Events 轮转 ----
 function testEventsRotation() {
-  const Events = require(path.join(ROOT, 'src', 'platform', 'events'));
+  const Events = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'events'));
   const file = path.join(TMP, 'events-rotation.log');
   // 阈值取 2048：40 条（约 90B/条，共约 3.6KB）恰好触发一次轮转；
   // keep-1 代策略下多次小阈值轮转会合法丢弃更早的代。

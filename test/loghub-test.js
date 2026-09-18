@@ -14,10 +14,15 @@ const fs = require('node:fs');
 const http = require('node:http');
 const ROOT = path.join(__dirname, '..');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'loghub-test-'));
-const { EventHub, isInternalEvent } = require(path.join(ROOT, 'src', 'platform', 'loghub'));
-const LogCore = require(path.join(ROOT, 'src', 'platform', 'logcore'));
-const Events = require(path.join(ROOT, 'src', 'platform', 'events'));
-const { createRouterCtlServer } = require(path.join(ROOT, 'src', 'domains', 'router', 'ctl'));
+const { EventHub, isInternalEvent } = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'hub'));
+// DS-G4（§4.2 反转法）：源名/内部簿记类型已移出 platform —— 注入声明在 app/assembly/log-sources.js。
+// 平台门面（logcore）负责在装配落地前完成注入：**凡经 logcore 装配的路径（含本测试）行为不变**；
+// 生产路径另由 compose.js 在 LogCore.init 前无条件 require 同一模块（装配自明，不赖隐式副作用）。
+require(path.join(ROOT, 'src', 'app', 'assembly', 'log-sources'));
+const LogCore = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'logcore'));
+const Events = require(path.join(ROOT, 'src', 'platform', 'service', 'log', 'events'));
+// 步骤4：通用 dispatcher 上移 L0。白名单必填（fail-closed）——此处只测内置 eventsTail。
+const { createCtlServer } = require(path.join(ROOT, 'src', 'platform', 'ctl', 'server'));
 
 let passed = 0;
 let failed = 0;
@@ -33,7 +38,7 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.l
     const de = new Events(path.join(TMP, 'router.events.log'), 1 << 20, { process: 'router-daemon' });
     de.append('router_old', {}); // 存量（首拉不回溯）
     const ctlPort = await freePort();
-    const ctl = createRouterCtlServer({ events: de, logger: null });
+    const ctl = createCtlServer({ target: null, allowMethods: ['eventsTail'], events: de, logger: null });
     await new Promise((r) => ctl.listen(ctlPort, '127.0.0.1', r));
     const ge = new Events(path.join(TMP, 'guard.events.log'), 1 << 20, { process: 'guard' });
     const hub = new EventHub({ stateDir: path.join(TMP, 's1'), aggBase: 'state', guardEvents: ge, guardLogFile: '', dshLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: { router: ctlPort, lan: 0 }, eventsMaxBytes: 1 << 20, logger: { debug() {}, warn() {} } });
@@ -66,11 +71,16 @@ const freePort = () => new Promise((res) => { const s = http.createServer(); s.l
     const ge = new Events(path.join(TMP, 'guard2a.events.log'), 1 << 20, { process: 'guard' });
     const hub = new EventHub({ stateDir: path.join(TMP, 's2a'), aggBase: 'state', guardEvents: ge, guardLogFile: '', dshLogFile: '', upgradeLogFile: '', daemonLogs: {}, ctlPorts: {}, eventsMaxBytes: 1 << 20, logger: { debug() {} } });
     ge.attachHub(hub);
-    check('内部簿记名单: guardian_action/router_daemon_supervised/orphan_audit', isInternalEvent('guardian_action') && isInternalEvent('router_daemon_supervised') && isInternalEvent('orphan_audit') && !isInternalEvent('lan_dsh_token_updated'));
-    ge.append('guardian_action', { resource: 'lan' });
+    // ⚠ 2026-09-16 域模型收口：原样本 guardian_action 已从名单删除（其生产者 _guardianEvent 是死代码，
+    //   见 control-view.js / GUARD-DOMAIN-MODEL §2）。改用仍有真实生产者的 router_daemon_supervised 作样本，
+    //   并**反向断言** guardian_action 不再被登记为内部簿记（它不是内部簿记，且已无生产者）。
+    check('内部簿记名单: router_daemon_supervised/orphan_audit（guardian_action 已移除）',
+      isInternalEvent('router_daemon_supervised') && isInternalEvent('orphan_audit')
+      && !isInternalEvent('guardian_action') && !isInternalEvent('lan_dsh_token_updated'));
+    ge.append('router_daemon_supervised', { pid: 9 });
     ge.append('lan_cookie_exchanged', { id: 'main' });
     const all = hub.read(0, 20);
-    check('名单 internal 在聚合行打标', all.find((e) => e.type === 'guardian_action').internal === true, all.find((e) => e.type === 'guardian_action'));
+    check('名单 internal 在聚合行打标', all.find((e) => e.type === 'router_daemon_supervised').internal === true, all.find((e) => e.type === 'router_daemon_supervised'));
     // 直接经 writer 造"历史遗留行"（internal 字段缺失）→ readVisible 须按类型兜底过滤
     hub.writer.appendRaw({ ts: new Date().toISOString(), type: 'managed_object_updated', data: {}, source: 'guard', srcSeq: 1 });
     hub.writer.appendRaw({ ts: new Date().toISOString(), type: 'running', data: {}, source: 'guard', srcSeq: 2 });

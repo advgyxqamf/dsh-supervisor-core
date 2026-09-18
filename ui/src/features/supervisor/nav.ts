@@ -125,7 +125,6 @@ export const EVENT_LABELS: Record<string, string> = {
   // 守卫/远端/反代扩展类型（穿透审计后补齐，与后端发射全集对齐）
   access_key_changed: "访问密钥变更", adopt_token_reclaim_started: "令牌回收重建",
   autostart_changed: "自启变更", dist_registry_selected: "分发源选定",
-  guardian_action: "守护接管动作",
   lan_binding_lost: "远程绑定丢失", lan_cookie_exchanged: "远程会话刷新",
   lan_cookie_failed: "远程会话失败", lan_daemon_started: "远程守护启动",
   lan_daemon_stopped: "远程守护停止", lan_dsh_token_updated: "远程令牌更新",

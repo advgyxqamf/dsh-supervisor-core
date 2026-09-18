@@ -1,42 +1,29 @@
 'use strict';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// router-daemon —— 智能路由独立进程（L3 进程解耦，2026-09）。
-//
-// 定位：RouterService 从守卫进程解耦为独立生命周期。守卫只做监测与异常拉起，
-// 本进程独立承载：43011/43012 等供应商端点 + 反代实例（4100x）+ 账号/额度管理。
-//
-// 运行方式（独立 systemd 单元 dsh-router.service，或守卫 spawn detached）：
-//   node src/domains/router/daemon.js [-c <configPath>]
-//
-// 共享文件：config.json（读）、providers.json / router-usage-totals.json / ports.json（独占写）。
-// 守卫与 daemon 通过「探测 + 文件」松耦合：守卫探测 43011 判定 daemon 存活，异常时拉起。
-// ═══════════════════════════════════════════════════════════════════════════
+const { RouterService } = require('./index');
+const { DistributionManager } = require('../../platform/distribution/index');
+const { TaskRegistry } = require('../../platform/service/tasks');
+const stateRoot = require('../../platform/service/state-root');
+const hub = require('../../platform/service/log/hub');
+const logcore = require('../../platform/service/log/logcore');
+const { createCtlServer } = require('../../platform/ctl/server');
+
+// router-daemon —— 智能路由独立进程（L3 进程解耦）。仅装配 + 启动，零业务判断。
+// 运行：node src/domains/router/daemon.js [-c <configPath>]
+// 配置/ctl 白名单见 ./config；端口迁移/重建见 ./ports-bootstrap（域构造前显式调用）。
+// 共享文件：config.json（读）、providers.json / router-usage-totals.json / ports-router.json（独占写）。
 
 const path = require('node:path');
-const os = require('node:os');
-const fs = require('node:fs');
-
-const HOME = os.homedir();
-const CONFIG_PATH = process.env.DSH_SUPERVISOR_CONFIG || path.join(require('../../platform/state-root').supervisorDir(), 'config.json');
-
-function loadConfig() {
-  const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  // normalize 展开 ~ 路径等（与守卫同源处理，保证 providerFile/ports.json 等路径一致）
-  const { normalize } = require('../../platform/config');
-  return normalize(raw);
-}
+const { DEFAULT_CTL_PORT, ROUTER_CTL_METHODS, loadConfig } = require('./config');
+const { ensurePorts } = require('./ports-bootstrap');
 
 function main() {
-  const { RouterService } = require('./index');
-  const { DistributionManager } = require('../dist/index');
-  const { TaskRegistry } = require('../../platform/tasks');
 
   const config = loadConfig();
-  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : require('../../platform/state-root').supervisorDir();
-  // 系统日志框架（历史设计文档）：daemon 经每进程唯一 LogCore 取日志/事件
-  // （自有独立文件，不共享守卫文件；单例 init 幂等，异进程复用拒绝）。
-  const core = require('../../platform/logcore').init({
+  const swDir = config.stateFile ? path.dirname(path.resolve(config.stateFile)) : stateRoot.supervisorDir();
+  // 本进程自己声明日志汇聚源（域名词留在域内，不动 app 层，避免 domains 到 app 的上行依赖）。
+  hub.registerSource("router-daemon", { key: "router" });
+  const core = logcore.init({
     process: 'router-daemon',
     logFile: config.routerLogFile || path.join(swDir, 'log', 'router-daemon.log'),
     eventFile: config.routerEventsFile || path.join(swDir, 'events', 'router.events.log'),
@@ -54,41 +41,9 @@ function main() {
   });
   const tasks = new TaskRegistry({ stateDir: swDir, logger, events });
 
-  // 迁移S2+重建（2026-09）：router 自治端口段（proxy/providerApi）先迁出共享
-  // ports.json 到 ports-router.json，再按 providers.json 重建绑定（幂等合并）。必须在 RouterService 构造前执行，
-  // 使构造时 configureFile 加载完整文件（此前在构造后执行 -> RouterService 内存空表覆盖历史绑定，真实数据丢失教训）。
-  try {
-    const { shared: portsShared } = require('../../guard/lifecycle/ports');
-    const oldP = path.join(swDir, 'ports.json');
-    const newP = path.join(swDir, 'ports-router.json');
-    portsShared.migrateRouterSegment(oldP, newP);
-    // 从 providers.json 重建 proxy/providerApi 段绑定（覆盖迁移期因覆盖而丢失的记录；幂等合并）
-    const provFile = path.join(swDir, 'providers.json');
-    if (fs.existsSync(provFile)) {
-      const provs = JSON.parse(fs.readFileSync(provFile, 'utf8'));
-      let target = { records: [] };
-      try { if (fs.existsSync(newP)) target = JSON.parse(fs.readFileSync(newP, 'utf8')); } catch {}
-      const byOwner = {};
-      for (const rec of target.records || []) byOwner[rec.owner] = rec.port;
-      let changed = false;
-      const push = (owner, port, role) => { if (port && byOwner[owner] === undefined) { target.records.push({ port, role, owner, createdAt: Date.now() }); byOwner[owner] = port; changed = true; } };
-      for (const p of (provs.providers || [])) {
-        if (p.kind !== 'proxy') continue;
-        for (const inst of (p.instances || [])) push('proxy:' + (inst.keyId || inst.key), inst.port, 'proxyInstance');
-        push('providerApi:' + p.id, p.apiPort, 'providerApi');
-      }
-      if (changed) {
-        fs.mkdirSync(path.dirname(newP), { recursive: true });
-        const tmp = newP + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(target, null, 2), { mode: 0o600 });
-        fs.renameSync(tmp, newP);
-      }
-    }
-    const cnt = JSON.parse(fs.readFileSync(newP, 'utf8')).records || [];
-    logger.info('[router-daemon] 迁移S2+重建：ports-router.json 就绪 records=' + cnt.length);
-  } catch (err) {
-    logger.error('[router-daemon] 迁移S2 异常(保留旧文件): ' + ((err && err.message) || err));
-  }
+  // 端口迁移 + 按 providers 重建必须在 RouterService 构造之前（见 ports-bootstrap 说明）：
+  //   构造后执行会以内存空表覆盖历史绑定（真实数据丢失教训）。
+  ensurePorts({ swDir, logger });
 
   const router = new RouterService({
     config,
@@ -101,11 +56,10 @@ function main() {
     tasks,
   });
 
-  // 守卫控制通道（L3 监督模式状态一致性，2026-09）：守卫经 POST /ctl {method,args}
-  // 把 /router/* 读写转发到本 daemon（唯一事实源）——见 src/domains/router/ctl.js。
-  const { createRouterCtlServer, DEFAULT_CTL_PORT } = require('./ctl');
+  // 守卫控制通道（L3 监督模式状态一致性）：通用 dispatcher 见 platform/ctl/server.js，
+  // 白名单按域注入（PG-5），内部方法永不可达。
   const ctlPort = Number(config.routerCtlPort) || DEFAULT_CTL_PORT;
-  const ctl = createRouterCtlServer({ router, logger, events });
+  const ctl = createCtlServer({ target: router, allowMethods: ROUTER_CTL_METHODS, logger, events });
   ctl.listen(ctlPort, '127.0.0.1', () => {
     logger.info('[router-daemon] ctl listening on 127.0.0.1:' + ctlPort);
   });
@@ -127,9 +81,7 @@ function main() {
     process.exit(1);
   });
 
-  // 优雅退出：SIGTERM → 停 router 并【确认实例子进程已死】再退出（2026-09 根治停服孤儿化：
-  // 旧实现 stop() 只发 SIGTERM + unref SIGKILL 定时器，process.exit 令定时器随进程消亡 → 子进程孤儿化、
-  // stdio 死 → 重启 adopt 复用即 EPIPE 楔死；426880/677630 两次实锤）
+  // 优雅退出：SIGTERM 时停 router 并确认实例子进程已死再退出（根治停服孤儿化）。
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
@@ -149,4 +101,6 @@ function main() {
   });
 }
 
-main();
+// 不要裸调用 main()：此前裸调导致 require('.../router/daemon')（测试/工具/静态分析）
+// 会立即启动真实 daemon（危险隐式副作用）。标准入口守卫：直接运行才启动，被 require 时纯导出。
+if (require.main === module) main();

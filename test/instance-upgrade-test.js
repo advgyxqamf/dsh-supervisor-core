@@ -23,7 +23,7 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
 
 (async () => {
   const { InstanceManager } = require(path.join(ROOT, 'src', 'domains', 'instance', 'index'));
-  const { DistributionManager } = require(path.join(ROOT, 'src', 'domains', 'dist', 'index'));
+  const { DistributionManager } = require(path.join(ROOT, 'src', 'platform', 'distribution', 'index'));
 
   // ── R1：fromUpgrade 直通 ──
   console.log('== R1 升级作业不得挡住自己的重启（升级恒失败根因）==');
@@ -31,29 +31,56 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
     // 模拟「升级作业进行中」：tasks.isBusy('instance', id) 恒 true
     const id = 'u1';
     const tasksStub = { isBusy: () => true, current: () => ({ action: 'upgrade' }) };
-    const mgr = new InstanceManager({ dir: TMP, logger, tasks: tasksStub, dist: null });
+    // ⚠ 迁移硬前置（DIRECTORY-STRUCTURE-DESIGN / DOMAIN-STRUCTURE-DESIGN §8）：
+    //   旧用法是「实例 owner 打补丁」（mgr._prepareSystemd/_systemdStart/_ensureSandboxDirs = () => {}）。
+    //   域内拆分后这些方法成为组装根的闭包委托，**实例上的补丁不再拦截内部调用** →
+    //   会真跑 `systemctl --user daemon-reload`（platform/os/service.js:52）与真 mkdir。
+    //   故改为**构造期注入**假平台服务（本仓既有约定：显式注入而非 patch 模块导出），
+    //   并把 systemd 目录指向临时目录，绝不触碰开发机的 systemd 配置。
+    const systemdDir = path.join(TMP, 'systemd');
+    const started = [];
+    const fakeService = {
+      daemonReload() { return true; },
+      stopUnit() { return true; },
+      resetFailed() { return true; },
+      isUnitActive() { return false; },
+      transientUnitFile() { return null; },
+      cleanTransient() {},
+      startTransient(o) { started.push(o); return true; },
+    };
+    const mgr = new InstanceManager({
+      dir: TMP, logger, tasks: tasksStub, dist: null,
+      service: fakeService, systemdDir,
+    });
+    // 兼容旧构造器（暂不接收 systemdDir 选项）：字段覆盖到同一临时目录，仍不碰开发机。
+    mgr.systemdDir = systemdDir;
+    mgr.systemdTemplatePath = path.join(systemdDir, 'dsh-web@.service');
     mgr._setSandboxSupportedForTest(true);       // 绕过平台能力门（显式测试入口）
-    mgr._prepareSystemd = () => {};
-    let started = 0;
-    mgr._systemdStart = () => { started++; return { ok: true }; };
-    const inst = { id, name: '升级用例', domain: 'sandbox', port: 28090, state: { phase: 'STOPPED' } };
+    const inst = {
+      id, name: '升级用例', domain: 'sandbox', port: safePort('instance-upgrade', 0),
+      sandbox: { privateTmp: true, protectHome: false, memoryMax: '4G', cpuQuota: '150%' },
+      state: { phase: 'STOPPED' },
+    };
     mgr.instances = [inst];
-    mgr._ensureSandboxDirs = () => {};
-    // 预置 install 目录的 DSH 入口，使 startInstance 不走 _installSandbox
+    // 预置 install 目录的 DSH 入口，使 startInstance 不走沙箱安装
     const dshLib = path.join(mgr.sandboxInstallDir(inst), 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'lib');
     fs.mkdirSync(dshLib, { recursive: true });
     fs.writeFileSync(path.join(dshLib, 'bin.js'), '// stub');
 
     // A) 非升级路径：被并发作业挡住（幂等短路）——这是**正确**语义（防双开安装）
     const a = await mgr.startInstance(id);
-    check('R1-a 非升级调用：作业忙 → 幂等短路且不启动', a.installing === true && started === 0, JSON.stringify(a));
+    check('R1-a 非升级调用：作业忙 → 幂等短路且不启动', a.installing === true && started.length === 0, JSON.stringify(a) + ' started=' + started.length);
 
     // B) 升级路径：必须真正拉起（修复点）
     const b = await mgr.startInstance(id, { fromUpgrade: true });
-    check('R1-b 升级调用：fromUpgrade=true → 真正启动 systemd', started === 1 && b.ok === true, 'started=' + started + ' ' + JSON.stringify(b));
+    check('R1-b 升级调用：fromUpgrade=true → 真正启动 systemd', started.length === 1 && b.ok === true, 'started=' + started.length + ' ' + JSON.stringify(b));
 
     // C) 源码契约：升级与回滚两处调用均须带 fromUpgrade
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', 'index.js'), 'utf8');
+    // ⚠ 2026-09-16 步骤8a：instance 域已拆为 core/ops/upgrade + index 门面；
+    //   本断言的对象是「域」（升级/回滚两处调用都带 fromUpgrade），故按域聚合读取。
+    const src = fs.readdirSync(path.join(ROOT, 'src', 'domains', 'instance')).filter((f) => f.endsWith('.js')).sort()
+      .map((f) => fs.readFileSync(path.join(ROOT, 'src', 'domains', 'instance', f), 'utf8'))
+      .join(String.fromCharCode(10));
     const withFlag = (src.match(/fromUpgrade: true/g) || []).length;
     const plainCall = (src.match(/await this\.startInstance\(id\)\.catch/g) || []).length;
     check('R1-c 升级/回滚两处均传 fromUpgrade', withFlag >= 2 && plainCall === 0, 'withFlag=' + withFlag + ' plain=' + plainCall);
@@ -87,7 +114,8 @@ const logger = { info() {}, warn() {}, error() {}, debug() {} };
     check('R2-b 端口始终不就绪 → 判失败（不误报成功）', r2.ok === false, JSON.stringify(r2));
 
     // 源码契约：不应再有「剩余不足即 break」的硬失败分支
-    const dsrc = fs.readFileSync(path.join(ROOT, 'src', 'domains', 'dist', 'index.js'), 'utf8');
+    const distDir = path.join(ROOT, 'src', 'platform', 'distribution');
+    const dsrc = fs.readdirSync(distDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(distDir, f), 'utf8')).join(String.fromCharCode(10));
         check('R2-c 已移除 break-判失败 写法', !dsrc.includes('stabilityMs > deadline) break'), 'ok');
   }
 
