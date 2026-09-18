@@ -8,7 +8,9 @@
 // 2. 宽限期：连续缺失达阈值才拉起，避让壳自更新/自重启的瞬时空窗；
 // 3. 预期缺席（restarting / shell-update-* / 未确认更新账本）用更长宽限；
 // 4. 无图形会话则跳过（Linux 注销后经 linger 仍在运行，拉起 GUI 必失败成风暴）；
-// 5. 窗口内有界重试，防无限风暴；6. decide() 是纯函数，可脱离进程/时钟/fs 单测。
+// 5. 窗口内有界重试，防无限风暴；6. decide() 是纯函数，可脱离进程/时钟/fs 单测；
+// 7. **会话退出中/已退出（INV-S1）恒不动作**——退出的语义就是「不再拉起」（2026-09-18 修：
+//    原实现只判壳缺失、不看会话态，导致「退出管家」后守卫多活一拍即把壳拉回）。
 // 纯决策（DEFAULTS/decide/isShellProcess/isUpdatePhase）在 core.js；本文件只保留有状态看护。
 const { DEFAULTS, decide, isShellProcess, isUpdatePhase } = require('./core');
 
