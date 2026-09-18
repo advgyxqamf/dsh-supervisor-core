@@ -88,7 +88,8 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'r13d-'));
     ].map((f) => fs.readFileSync(f, 'utf8')).join(String.fromCharCode(10)).replace(/\/\*[\s\S]*?\*\//g, '');
     check('① 存在显式短超时常量', /ROUTER_SUMMARY_TIMEOUT_MS\s*=/.test(cv), '有');
     check('① 摘要经 _ctlCall 的 timeoutMs 形参（不是当方法参数传）',
-      /this\.ctl\.call\(this\.ctl\.routerPort\(\), 'domainSummary', \[\], ROUTER_SUMMARY_TIMEOUT_MS\)/.test(cv), '有');
+      // ⚠ 2026-09-17 阶段六 B-6：supervise.js 去 this 后为 d.ctl().call(d.ctl().routerPort(), …)。判据改**形态无关**。
+      /\.call\([\w.$()]*routerPort\(\), 'domainSummary', \[\], ROUTER_SUMMARY_TIMEOUT_MS\)/.test(cv), '有');
     check('① 反向：不得把 {timeoutMs} 当 domainSummary 的参数',
       !/domainSummary\(\{\s*timeoutMs/.test(cv), '没有');
     check('① 超时值远小于 ctl 默认 120s', /ROUTER_SUMMARY_TIMEOUT_MS = 5000/.test(cv), '5000ms');
