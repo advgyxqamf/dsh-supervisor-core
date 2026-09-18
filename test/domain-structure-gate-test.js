@@ -76,28 +76,9 @@ const short = (arr, n) => {
 };
 
 // ── 源码地基：strip / countLines / definedNames / thisCalls / requireEdges ──
-function strip(src) {
-  let out = '';
-  let i = 0; const n = src.length; let mode = null;
-  while (i < n) {
-    const c = src[i], d = src[i + 1];
-    if (mode) {
-      out += c;
-      if (c === '\\') { if (d !== undefined) out += d; i += 2; continue; }
-      if (c === mode) mode = null;
-      i++; continue;
-    }
-    if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
-    if (c === '/' && d === '*') {
-      i += 2;
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; }
-      i += 2; continue;
-    }
-    if (c === '"' || c === "'" || c === String.fromCharCode(96)) { mode = c; out += c; i++; continue; }
-    out += c; i++;
-  }
-  return out;
-}
+// 阶段六 P6-A：统一走 test/_strip.js 的字符级单一实现（语义等价且正则字面量感知）。
+const { stripComments } = require('./_strip');
+function strip(src) { return stripComments(src); }
 function countLines(s) { return s ? s.split('\n').length - (s.endsWith('\n') ? 1 : 0) : 0; }
 
 const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'constructor',

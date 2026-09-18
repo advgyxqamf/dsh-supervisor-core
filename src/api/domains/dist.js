@@ -21,8 +21,8 @@ function owns(pathname) {
  *
  *  保留 ^https?: 字面校验作为协议层第一道闸（且 test/round13-csp-probe-test.js:72 以源码形态钉住它）。
  *
- *  已知未覆盖（跨分区，属 platform/distribution）：probeRegistry 的 fetch 默认跟随重定向，
- *    公网主机可 302 到内网地址绕过本策略 —— 需在 platform 层改 redirect:'manual' 或校验跳转目标。
+ *  重定向（原「已知未覆盖」**已闭环**）：platform/distribution/registry.js 的 probeRegistry 已改为
+ *    `redirect: 'manual'` + 显式「非 2xx 即失败」，故公网主机 302 到内网地址不再绕回本策略。
  */
 function probeTargetError(origin, sup) {
   let u = null;

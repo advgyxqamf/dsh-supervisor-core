@@ -117,7 +117,18 @@ function dropCommentLines(src) {
   return out.join(LF);
 }
 
+/** 多语言安全的「丢整行 `//` 与 `#` 注释 + 去块注释 + 清星号续行」（**不套用 JS 字符级词法**）。
+ *  用于扫描面含 .sh/.yml/.bash 的门禁：那里 `//` 可能是 URL、`#` 才是注释，JS 词法会误伤。
+ *  行注释先丢整行 ⇒ 行注释里的 glob 不会开假块注释（本类缺陷的根因），与原手写实现逐字等价。 */
+function stripLineAndBlocks(src) {
+  const noLine = String(src).split(LF)
+    .map((l) => { const t = l.trim(); return (t.startsWith('//') || t.startsWith('#')) ? '' : l; })
+    .join(LF);
+  const noBlock = noLine.replace(/\/\*[\s\S]*?\*\//g, '');
+  return noBlock.split(LF).map((l) => (l.trim().startsWith('*') ? '' : l)).join(LF);
+}
+
 /** CP 门禁原用形态：{ stripped, regexes }。保留该名字以免改动其调用点语义。 */
 function scanText(src) { const r = scan(src); return { stripped: r.code, regexes: r.regexes }; }
 
-module.exports = { scan, scanText, stripComments, blankComments, dropCommentLines, isRegexStart, LF, BT };
+module.exports = { scan, scanText, stripComments, blankComments, dropCommentLines, stripLineAndBlocks, isRegexStart, LF, BT };

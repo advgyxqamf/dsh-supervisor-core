@@ -60,17 +60,9 @@ const SKIP_FILE = new Set([SELF, 'CHANGELOG.md']);
  *  块注释正则于是把其后直到下一个结束符的**代码**一并吞掉 —— 已实测 `test/acceptance-standard-gate-test.js`
  *  第 17 行会吞掉 17–36 行（含 `const STD` 与 readFileSync 调用），使本门禁对那段区间**失明**（假阴性）。
  *  第 3 步必须在块正则**之后**：多行块注释的结束行以星号开头，若提前清空，块正则就找不到结束符而漏剥。 */
-function stripComments(src) {
-  const LF = String.fromCharCode(10);
-  // 1) 整行行注释（// 或 #）——不含星号续行（见上）
-  const noLine = String(src).split(LF)
-    .map((l) => { const t = l.trim(); return (t.startsWith('//') || t.startsWith('#')) ? '' : l; })
-    .join(LF);
-  // 2) 块注释（此时行注释里的假开符已随整行消失）
-  const noBlock = noLine.replace(/\/\*[\s\S]*?\*\//g, '');
-  // 3) JSDoc 续行残留（原语义保留）
-  return noBlock.split(LF).map((l) => (l.trim().startsWith('*') ? '' : l)).join(LF);
-}
+// 阶段六 P6-A：统一走 test/_strip.js 的 stripLineAndBlocks（多语言安全口径，逐字等价）。
+const { stripLineAndBlocks: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
 
 // ─ X-4：剥离顺序自检（门禁自身完整性，合成样本，不依赖真实数据）──
 {

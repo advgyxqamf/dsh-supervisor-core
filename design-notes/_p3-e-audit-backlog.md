@@ -5,6 +5,17 @@
 > 抽取未修项后与 FIX-1..8、N1..N11、P2 各工作流（`_p2-ws*.md`）对账，并**逐条 grep/read 当前工作树**验证。
 > 行号以写入本报告时的当前工作树为准。全部路径为仓库相对路径。
 
+> ⚠ **本文件是「阶段三（P3-E-1）快照」，不是当前待办清单。** §2 的 36 项「未修」已在
+> **阶段四/五**修复（提交 `21e913e`/`ba4304d`/`b13d5fc`/`b887c9e`/`1ed28b5`/`28f01a3`/`1dde036` 等，
+> 逐项证据见 `_p4-*.md`/`_p5-*.md`）。保留本表仅作审计溯源；**当前待办以 `_workorder-phase6.md` 与上会话
+> `HANDOFF.md` 为准**。本会话抽验（逐条 grep/read 当前树）：`markInstanceNetFail` 已不存在；非流式已有
+> 180s `responseGuard`；`plugin/market.js` 有 `_startBuild()` 的 `.catch`；`instance/store.js` 有端口对账 +
+> `_quarantineCorrupt`；`settings/access.js` 已核验落盘；`control/registry.js` 已 merge ownership；
+> `control/projection.js` BACKOFF 已 `healthy=false`；`control/entry.js` stop 已落 desired；`instance/ops.js`
+> 已 `inst.sandbox || {}`；`apps-registry` 已按 keyId 重取；`api/domains/dist.js` SSRF 重定向已由
+> `platform/distribution/registry.js` 的 `redirect:'manual'` 闭环。**本表旧行号已随文件搬迁失效**
+> （例：`domains/router/forward.js` → `domains/router/handlers/forward.js`）。
+
 ---
 
 ## 0. 对账总览

@@ -43,14 +43,9 @@ const SKIP_FILE = new Set([SELF]);
  *  直到下一个结束符的**代码**一并吞掉（本仓实测：`src/domains/router/providers/base.js` 被吞 29 行、
  *  `test/domain-structure-gate-test.js` 被吞 174 行）→ 本门禁对那段区间**失明**（假阴性）。
  *  第 3 步必须在块正则**之后**：多行块注释的结束行以星号开头，提前清空会让块正则漏剥。 */
-function stripComments(src) {
-  const LF = String.fromCharCode(10);
-  const noLine = String(src).split(LF)
-    .map((l) => { const t = l.trim(); return (t.startsWith('//') || t.startsWith('#')) ? '' : l; })
-    .join(LF);
-  const noBlock = noLine.replace(/\/\*[\s\S]*?\*\//g, '');
-  return noBlock.split(LF).map((l) => (l.trim().startsWith('*') ? '' : l)).join(LF);
-}
+// 阶段六 P6-A：统一走 test/_strip.js 的 stripLineAndBlocks（多语言安全口径，逐字等价）。
+const { stripLineAndBlocks: stripCommentsLex } = require('./_strip');
+function stripComments(src) { return stripCommentsLex(src); }
 
 // ── R-G4：剥离顺序自检（门禁自身完整性，合成样本，不依赖真实数据）──
 {

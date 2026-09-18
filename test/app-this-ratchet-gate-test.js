@@ -66,29 +66,9 @@ function check(name, ok, evidence) {
 }
 
 // ── 剥注释（字符串保留，故 this.X( 出现在字符串里的计数与原文一致）──
-function stripComments(src) {
-  let out = ''; let i = 0; const n = String(src || '').length;
-  while (i < n) {
-    const c = src[i], d = src[i + 1];
-    if (c === '/' && d === '/') { while (i < n && src[i] !== '\n') i++; continue; }
-    if (c === '/' && d === '*') {
-      i += 2;
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; }
-      i += 2; continue;
-    }
-    if (c === '"' || c === "'" || c === String.fromCharCode(96)) {
-      const q = c; out += c; i++;
-      while (i < n) {
-        const e = src[i]; out += e; i++;
-        if (e === '\\') { if (i < n) { out += src[i]; i++; } continue; }
-        if (e === q) break;
-      }
-      continue;
-    }
-    out += c; i++;
-  }
-  return out;
-}
+// 阶段六 P6-A：统一走 test/_strip.js 的字符级单一实现（语义等价且正则字面量感知）。
+//   字符串内的 this.X( 仍被保留 —— 「计数含字符串」是本棘轮的刻意口径。
+const { stripComments } = require('./_strip');
 
 // ── 计数与棘轮裁决（纯函数：合成样本与实盘共用同一条路径）──
 /** 统计 this.X() 调用点；this.deps.foo() / obj.thisX() 不计（要求点号后即方法名与左括号）。
