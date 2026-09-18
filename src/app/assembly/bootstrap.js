@@ -165,6 +165,10 @@ function _startShellWatchdog(host) {
         config: host.config,
       });
       host._shellWatchdogTimer = setInterval(() => {
+        // ⚠ 2026-09-18 修（严重缺陷：退出管家后自动重启）：会话退出中/已退出（或本进程正在关停）
+        //   时**绝不再自愈拉起桌面壳**。看护只判「壳是否缺失」，原实现不看会话态 —— 于是
+        //   「退出管家」后只要守卫多活一拍，就会把刚退出的壳拉回来（内核侧主因）。
+        if (host._stopping || (host._sessionHalting && host._sessionHalting())) return;
         Promise.resolve(host.shellWatchdog.tick()).catch(() => {});
       }, host.shellWatchdog.intervalMs);
       if (host._shellWatchdogTimer.unref) host._shellWatchdogTimer.unref();

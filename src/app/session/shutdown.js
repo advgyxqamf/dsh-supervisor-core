@@ -56,6 +56,9 @@ async function shutdownAll(host) {
     // 幂等：已进入退出流程则直接回执当前态（壳可安全重试/轮询）
     if (host._sessionHalting()) return { ok: true, already: true, sessionState: host._sessionState };
     host._setSessionState('stopping'); // 抑制一切自动拉起（INV-S1）
+    // 同步停桌面壳看护（2026-09-18 修）：会话退出中不得再自愈拉起壳。
+    //   bootstrap 的 tick 门是运行期防线；此处清定时器是与完整 shutdown() 对齐的第二道。
+    if (host._shellWatchdogTimer) { clearInterval(host._shellWatchdogTimer); host._shellWatchdogTimer = null; }
     host.logger.info('[session] 退出流程开始：停止全部被管对象…');
     host.events && host.events.append('shutdown_all', {});
     // 1) 停 DSH 主实例（本守卫是被管对象的所有者，契约 §2）
