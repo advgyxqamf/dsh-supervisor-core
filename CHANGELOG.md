@@ -8,6 +8,60 @@
 
 （下一版本待记）
 
+## [0.1.5-BETA.8]（2026-09-18）
+
+本版为**结构收口 + 积压清零**预发布：无用户可见 API/事件契约变更，内核运行时依赖仍为 0。
+
+### 安全
+
+- `/dist/registry/probe` 盲 SSRF **双层闭环**：API 层公网 host 策略 + `platform/distribution/registry.js`
+  的 `redirect:'manual'`（禁止 302 绕回内网）；
+- 局域网无访问密钥时鉴权 **fail-closed**（401），并修正 frp expose 状态码、清密钥时回关 LAN；
+- frp 下载重定向协议校验：非 `http(s)` 跳转不再让守卫同步抛错崩溃；
+- 密钥/关闭行为持久化失败**如实上报**（200 → 500），不再「假成功」。
+
+### 修复
+
+- **AUDIT 积压收口**：instance/relay/router 侧（#2/#4/#5/#10/#11/#15-#20/#29/#30）与
+  platform/plugin/shell/app 侧（#3/#13/#14/#21-#28）逐项修复；门禁/制度债 #31-#36 收口
+  （EX 工具系统性假阴性修正、A-5 扩面到 `release/**`+`.github/**`、等）；
+- **存疑项确证为真缺陷后收口**：D9 try/finally、D10 停止路径改用 `DaemonLifecycle.classify()`
+  动态归属（防误杀异主 daemon）、D11 假死自愈声明化、D12 kill 失败不再只发成功事件
+  （新增 `stop_failed` + 2s 复核窗口 + timer 代际）；
+- FIX 同型未覆盖调用点收口（含 FIX-5 根因）；lan-daemon 实例快照补契约 `all()`（DG-11 回归）。
+
+### 结构（app 层「去 this」收口）
+
+- `src/app` 全部**宿主绑定切面**移除隐式 `this`：facade（router/lan/ports/main/status）、
+  daemons 切面（identity/runtime/probe/supervise）、main 全部 7 文件、control/scheduler、
+  control/instance-adapter、settings/versions、settings/lan-panel，以及 `domain-actions` 三个写动作。
+  实现体改经按 host 缓存的 **WeakMap 惰性 deps**，**方法名 / `{methods}` 外壳 / 逐字体一律保留**，
+  装配路径与对外面不变；类自身实例（`ManagedLifecycle`/`ManagedRegistry`/`DaemonLifecycle` 等）
+ 保持 OOP 语义不动；
+- ctl/audit 切面工厂化；删除 proxy-instance 过渡 shim 与 `releaseProviderPorts` 导出；
+- 门禁棘轮 AT 的 `this.X(` 由 267 降至 84（剩余全部为类自身方法与注释，非宿主债）。
+
+### 契约
+
+- instance `command` **运行时执行边界复校**（`EXECUTION-CONTRACT.md` §8.6 由「待决」改「定案」）：
+  api 写时闸与启动期 realpath 复校共用单一纯函数，ENOENT fail-closed，**适用范围仅 sandbox**；
+- `command` 契约成文为 SSOT（`EXECUTION-CONTRACT.md` §8）；N11 加码（node 族必须给 DSH 入口且绝对路径）；
+- 历史 `inst.state.version` 键在加载期做内存幂等清理。
+
+### 门禁（无用户可见影响）
+
+- test/ 下自带「注释剥离」统一到字符级单一实现 `test/_strip.js`（17/18；新增多语言安全的
+  `stripLineAndBlocks`）；
+- 修复多起门禁**假阴性**：剥离顺序错误（先块后行）致 4 道门禁对部分区间失明、U-1b 误报、
+  DG-14 抽取器依赖缩进形态；新增 docs-reference 门禁与四道结构性门禁；
+- 多处源码形态钉子改为**按符号名**（不再依赖 `this.` 前缀），判据本意不变。
+
+### 文档
+
+- 阶段二~六作业单与逐阶段报告（30+ 份）；`_p3-e-audit-backlog.md` 逐行回写现状（阶段四/五已全部处置）；
+- 验收口径收敛为「**只由 CI 裁决**，本机禁止运行任何测试」（`ACCEPTANCE-STANDARD.md`）；
+- 撤销过期 `TODO(P2)`、作废过期作业单、更正 release 文档漂移。
+
 ## [0.1.5-BETA.7]（2026-09-16）
 
 ### 修复：原生 DSH「检测 → 绑定 → 接管」——消除两套对立逻辑
