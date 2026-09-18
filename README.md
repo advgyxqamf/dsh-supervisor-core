@@ -31,6 +31,7 @@ DeepSeek Harness 生命周期监管工具：独立于 Harness 运行的系统级
 | [CROSS-PLATFORM-BUILD-AND-UPDATE.md](CROSS-PLATFORM-BUILD-AND-UPDATE.md) | 论证（方案） | 跨平台构建与自更新方案论证（流程见 RELEASE-STANDARD） |
 | [ARCHITECTURE-PLAN-session-lifecycle.md](ARCHITECTURE-PLAN-session-lifecycle.md) | 计划（历史） | 会话生命周期重构的根因级计划（已完成） |
 | [INCIDENT-2026-09-13-credential-overwrite.md](INCIDENT-2026-09-13-credential-overwrite.md) | 事故复盘 | 凭据被覆盖事故：时间线 / 根因四层 / 加固与重放验证 |
+| [INCIDENT-2026-09-18-exit-manager-relaunch.md](INCIDENT-2026-09-18-exit-manager-relaunch.md) | 事故复盘 | 退出管家后桌面壳被自动重新拉起：壳 /End 计划任务 + 内核看护门未持久化；修复与残留清单 |
 | [CHANGELOG.md](CHANGELOG.md) | 记录 | 版本变更 |
 
 > **文档可信度不变量**（2026-09-11 确立）：能力声明必须由**可执行断言**支撑；

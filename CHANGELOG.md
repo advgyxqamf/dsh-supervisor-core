@@ -6,7 +6,14 @@
 
 ## [未发布]
 
-（下一版本待记）
+### 修复
+
+- **退出管家后桌面壳被自动重新拉起（严重）**：会话退出意图持久化（新增 `status.shellHalted`，
+  跨守卫重启经 `loadState` 继承，看护观测到壳在线且非退出中时清除）；看护「退出中不自愈」门
+  从 bootstrap 定时器闭包**下沉到看护域**（`tick` 依赖 `halted/onShellAlive`）；`POST /shell/restart`
+  退出中/已退出返回 409；`restartShell` 在杀旧壳与 spawn 之间增加 `shouldAbort` 复判；
+  `shutdownAll` 与完整 `shutdown()` 对齐，清全部周期定时器。详见
+  `INCIDENT-2026-09-18-exit-manager-relaunch.md`。
 
 ## [0.1.5-BETA.8]（2026-09-18）
 
