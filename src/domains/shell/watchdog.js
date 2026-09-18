@@ -17,7 +17,8 @@ const { DEFAULTS, decide, isShellProcess, isUpdatePhase } = require('./core');
 /**
  * 创建壳看护实例。
  * deps: { shell(identity/readJournal/restartShell), pidlookup(pgrepList),
- *         desktop(sessionAvailable/describe), logger, events, config, now(注入时钟) }
+ *         desktop(sessionAvailable/describe), logger, events, config, now(注入时钟),
+ *         halted(退出中/已退出谓词), onShellAlive(观测到壳在线回调) }
  */
 function createShellWatchdog(deps) {
   const o = deps || {};
@@ -120,6 +121,15 @@ function createShellWatchdog(deps) {
       const t = now();
       const procs = shellProcs();
       const alive = procs.length;
+      // ⚠ 2026-09-18 修（严重缺陷：退出管家后自动重启）——门**下沉到看护域**：
+      //   任何 tick 调用者（bootstrap 定时器/诊断/未来接线）都受同一门约束。
+      //   ① 壳已在线 -> 先清除持久退出标记（用户重新打开了壳，自愈恢复）；
+      //   ② 退出中/已退出（INV-S1）-> 恒不动作。
+      if (alive > 0 && typeof o.onShellAlive === 'function') { try { o.onShellAlive(); } catch {} }
+      if (typeof o.halted === 'function' && o.halted()) {
+        lastSkipReason = '会话退出中/用户已退出（不拉起）';
+        return { skipped: 'halted', reason: lastSkipReason };
+      }
       if (alive > 0 && !everSawAlive) { everSawAlive = true; log('已观测到桌面壳在运行（pid=' + procs[0].pid + '）'); }
       const absentForMs = alive > 0 ? null : (missingSince === null ? null : (t - missingSince));
       // 每拍都跟踪相位（不只缺失时），否则陈旧判定要多等一轮，且存活期相位变化无法复位计时。
@@ -155,7 +165,11 @@ function createShellWatchdog(deps) {
 
       // action === 'restart'
       restarts.push(t);   // 记账在尝试前：失败同样计入上限，防失败风暴
-      const r = await shell.restartShell({ exePath: exe, procPattern });
+      const r = await shell.restartShell({
+        exePath: exe, procPattern,
+        // 在飞复判（K4）：杀旧壳与 spawn 之间有 ~8s 窗口，退出请求可能在窗口内到达。
+        shouldAbort: (typeof o.halted === 'function') ? () => o.halted() : undefined,
+      });
       if (r && r.ok) {
         if (events) events.append('shell_watchdog_restart', { pid: r.pid, exe: r.exe, absentMs: absentForMs });
         log('桌面壳缺失 ' + Math.round(absentForMs / 1000) + 's，已拉起 pid=' + r.pid + ' exe=' + r.exe);

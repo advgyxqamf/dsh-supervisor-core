@@ -80,6 +80,11 @@ function composeCore(host, rawConfig, configPath) {
     // 使「desired=running 无条件拉起」不违背守护语义（崩溃不自救）；任何显式启动/重启/进入运行清除。
     // 不持久化：守卫重启后按 desired 恢复运行（desired 是持久用户意图，契约 §5）。
     host._crashHalted = false;
+    // 用户「退出管家」的持久标记（2026-09-18 修）：退出后若守卫被外部/登录**重新拉起**，
+    //   内存会话态会遗忘退出意图 -> 看护 90s 后把刚退出的桌面壳拉回（"很久以后又启动"）。
+    //   退出时落盘本标记，boot 经 loadState 继承；看护**只在观测到壳已在线**时清除
+    //   （用户重新打开了壳）。只抑制看护，不影响 desired/main 恢复语义（契约 §5/§6）。
+    host._shellHalted = false;
     host._upgradeHold = false;      // 升级"先停后装"期间暂停自动拉起
     host._upgradeHoldSince = null;  // 兜底自愈：hold 卡死超时自动释放
     host._timer = null;

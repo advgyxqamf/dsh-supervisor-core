@@ -36,6 +36,8 @@ function statusSummary(host) {
       lastFailure: host._mLastFailure(),
       lastRestartAt: host._mLastRestartAt(),
       upgradeHold: host._upgradeHold,
+      // 用户退出标记（跨守卫重启持久）：退出后守卫重启不得凭看护把壳拉回。
+      shellHalted: host._shellHalted === true,
       commandMissing: !!(host._mSpawnBlockedUntil() && Date.now() < host._mSpawnBlockedUntil()),
       dshTokenCaptured: !!(host.tokenService && host.tokenService.get('main')),
       tasks: host.tasks ? host.tasks.running().map((t) => ({ id: t.id, kind: t.kind, action: t.action, target: t.target, state: t.state })) : [],

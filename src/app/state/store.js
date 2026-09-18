@@ -56,6 +56,8 @@ function createStore(deps) {
       if (typeof raw.lastRestartAt === 'string' || raw.lastRestartAt === null) record.procFieldOf('lastRestartAt', raw.lastRestartAt, true);
       // 升级 hold 跨守卫重启保持。
       if (raw.upgradeHold === true) upgradeHold.enter();
+      // 用户「退出管家」标记跨守卫重启继承（只读 true；清除由看护观测到壳在线时执行）。
+      if (raw.shellHalted === true && typeof g.setShellHalted === 'function') g.setShellHalted(true);
     } catch {}
     // boot 相位不继承：复位 STOPPED，让首拍按真实探测收敛。
     try { fields.setPhase('STOPPED'); } catch {}

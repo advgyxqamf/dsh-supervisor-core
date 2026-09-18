@@ -75,6 +75,8 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   check('shutdownAll 返回回执 { ok, sessionState:stopped }', r1 && r1.ok === true && r1.sessionState === 'stopped', JSON.stringify(r1));
   check('会话态 = stopped', sup.sessionState() === 'stopped', sup.sessionState());
   check('_sessionHalting() = true', sup._sessionHalting() === true);
+  check('退出后 _shellHalted=true（跨守卫重启抑制看护）', sup._shellHalted === true, String(sup._shellHalted));
+  check('statusSummary 暴露 shellHalted', sup.statusSummary().shellHalted === true, JSON.stringify(sup.statusSummary().shellHalted));
   const r2 = await sup.shutdownAll();
   check('shutdownAll 幂等（already 回执）', r2 && r2.ok === true && r2.already === true && r2.sessionState === 'stopped', JSON.stringify(r2));
 
@@ -147,6 +149,7 @@ const check = (n, c, x) => { results.push(!!c); console.log((c ? 'PASS' : 'FAIL'
   console.log('== 阶段 3 会话态贯通 ==');
   {
     const s3 = new Supervisor(cfg);
+    check('P3-G shellHalted 跨守卫重启继承（新守卫读回）', s3._shellHalted === true, String(s3._shellHalted));
     const snap = s3.statusSummary();
     check('P3-A statusSummary 暴露 sessionState', snap.sessionState === 'starting', JSON.stringify(snap.sessionState));
     s3._setSessionState('stopping');

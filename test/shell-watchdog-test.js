@@ -72,6 +72,8 @@ const mk = (opts) => {
     config: Object.assign({ shellWatchdogGraceMs: 1000, shellWatchdogUpdateGraceMs: 5000 }, o.config || {}),
     now: () => t,
   };
+  if (o.halted) deps.halted = o.halted;
+  if (o.onShellAlive) deps.onShellAlive = o.onShellAlive;
   const w = createShellWatchdog(deps);
   return { w, calls, adv: (ms) => { t += ms; } };
 };
@@ -128,6 +130,22 @@ const mk = (opts) => {
     const st = m.w.status();
     check('W3-i status() 暴露可观测字段', st.enabled === true && typeof st.intervalMs === 'number' && st.session && typeof st.session.available === 'boolean', JSON.stringify(st).slice(0, 90));
   }
+  {
+    // 2026-09-18：退出门下沉看护域 —— 退出中/已退出恒不拉起（退出管家后不再自愈）。
+    const m = mk({ alive: false, halted: () => true });
+    await m.w.tick();
+    m.adv(5000);
+    const r = await m.w.tick();
+    check('W3-j 退出中/已退出 → 恒不拉起（skipped=halted）',
+      m.calls.restarts.length === 0 && r.skipped === 'halted', JSON.stringify(r));
+  }
+  {
+    // 壳在线 -> 回调清除持久退出标记（用户重开壳后自愈恢复，不会被永久抑制）。
+    let seen = 0;
+    const m = mk({ alive: true, onShellAlive: () => { seen++; } });
+    await m.w.tick();
+    check('W3-k 观测到壳在线 → 回调 onShellAlive（清除退出标记）', seen === 1, 'seen=' + seen);
+  }
 
   // ── W4 接线 ──
   console.log('== W4 接线与声明 ==');
@@ -143,6 +161,9 @@ const mk = (opts) => {
       /_startShellWatchdog\(\)/.test(boot) && /clearInterval\(host\._shellWatchdogTimer\)/.test(shutdown));
     check('W4-d 看护异常不影响守卫主循环（catch 包裹）', /初始化失败（不影响守卫）/.test(boot));
     check('W4-e 可按配置禁用（shellWatchdog=false）', /shellWatchdog === false/.test(boot));
+    check('W4-h 退出门下沉看护域：装配注入 halted + onShellAlive',
+      /halted:\s*\(\)\s*=>/.test(boot) && /onShellAlive:/.test(boot));
+    check('W4-i shutdownAll 落盘持久退出标记（host._shellHalted = true）', /host\._shellHalted = true/.test(shutdown));
 
     const { capabilityProfile } = require(path.join(ROOT, 'src', 'platform', 'os'));
     for (const pl of ['linux', 'darwin', 'win32']) {

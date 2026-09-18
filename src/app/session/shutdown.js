@@ -56,9 +56,22 @@ async function shutdownAll(host) {
     // 幂等：已进入退出流程则直接回执当前态（壳可安全重试/轮询）
     if (host._sessionHalting()) return { ok: true, already: true, sessionState: host._sessionState };
     host._setSessionState('stopping'); // 抑制一切自动拉起（INV-S1）
+    // 持久化「用户已退出」（2026-09-18 修，K1）：会话态只活内存，守卫一旦被外部/登录
+    //   重新拉起就遗忘退出意图 —— 看护 90s 后把刚退出的桌面壳拉回。落盘后新守卫 boot
+    //   经 loadState 继承；看护观测到壳在线（用户重开）时自动清除。立即写盘，防中途被杀。
+    host._shellHalted = true;
+    try { host.writeState(true); } catch (e) { host.logger.warn && host.logger.warn('shutdownAll persist shellHalted: ' + e.message); }
     // 同步停桌面壳看护（2026-09-18 修）：会话退出中不得再自愈拉起壳。
     //   bootstrap 的 tick 门是运行期防线；此处清定时器是与完整 shutdown() 对齐的第二道。
     if (host._shellWatchdogTimer) { clearInterval(host._shellWatchdogTimer); host._shellWatchdogTimer = null; }
+    // 与完整 shutdown() 对齐（K5）：退出后不得再有任何周期收敛（心跳会重新监督/拉起被管对象）。
+    //   sessionState=stopping 已抑制；清定时器是第二道，防某适配器门遗漏时残留周期动作。
+    if (host._heartbeatTimer) { clearInterval(host._heartbeatTimer); host._heartbeatTimer = null; }
+    if (host._timer) { clearInterval(host._timer); host._timer = null; }
+    if (host._initialCheckTimer) { clearTimeout(host._initialCheckTimer); host._initialCheckTimer = null; }
+    if (host._upgradeTimer) { clearInterval(host._upgradeTimer); host._upgradeTimer = null; }
+    if (host._killTimer) { clearTimeout(host._killTimer); host._killTimer = null; }
+    if (host._adoptKillTimer) { clearTimeout(host._adoptKillTimer); host._adoptKillTimer = null; }
     host.logger.info('[session] 退出流程开始：停止全部被管对象…');
     host.events && host.events.append('shutdown_all', {});
     // 1) 停 DSH 主实例（本守卫是被管对象的所有者，契约 §2）

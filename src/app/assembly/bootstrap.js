@@ -163,12 +163,22 @@ function _startShellWatchdog(host) {
         logger: host.logger,
         events: host.events,
         config: host.config,
+        // 门**下沉到看护域**（2026-09-18 修，K3）：tick() 的一切调用者都受同一门约束。
+        halted: () => !!(host._stopping || host._shellHalted || (host._sessionHalting && host._sessionHalting())),
+        // 壳已在线 = 用户重新打开了壳 -> 清除持久退出标记（否则自愈被永久抑制）。
+        //   ⚠ 只在**非退出中**才清：退出握手期间壳还会存活数百 ms，若此时误清，
+        //   持久标记被写成 false，守卫重启后看护又把壳拉回（本修的核心场景）。
+        onShellAlive: () => {
+          if (!host._shellHalted) return;
+          if (host._stopping) return;
+          if (host._sessionHalting && host._sessionHalting()) return;
+          host._shellHalted = false;
+          try { host.writeState(true); } catch {}
+        },
       });
       host._shellWatchdogTimer = setInterval(() => {
-        // ⚠ 2026-09-18 修（严重缺陷：退出管家后自动重启）：会话退出中/已退出（或本进程正在关停）
-        //   时**绝不再自愈拉起桌面壳**。看护只判「壳是否缺失」，原实现不看会话态 —— 于是
-        //   「退出管家」后只要守卫多活一拍，就会把刚退出的壳拉回来（内核侧主因）。
-        if (host._stopping || (host._sessionHalting && host._sessionHalting())) return;
+        // 本拍不再在闭包内短路：否则「壳已在线 -> 清除持久退出标记」永不执行。
+        //   退出门由看护域统一裁决（见上 halted/onShellAlive）。
         Promise.resolve(host.shellWatchdog.tick()).catch(() => {});
       }, host.shellWatchdog.intervalMs);
       if (host._shellWatchdogTimer.unref) host._shellWatchdogTimer.unref();

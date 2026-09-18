@@ -28,6 +28,7 @@ function createStateStore(deps) {
     record, fields, mainStore, upgradeHold,
     getConfig: g.getConfig, getLogger: logger, getEvents: g.getEvents,
     getInstances: g.getInstances, getViews: g.getViews, getManagedObjects: g.getManagedObjects,
+    getShellHalted: g.getShellHalted, setShellHalted: g.setShellHalted,
   });
   holder.store = store;
 

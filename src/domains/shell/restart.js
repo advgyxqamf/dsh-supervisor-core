@@ -89,6 +89,14 @@ async function restartShell(opts) {
     return { ok: false, error: '旧壳进程未能在超时内退出，已放弃重启（避免双实例）', killed };
   }
 
+  // 在飞复判（2026-09-18，K4）：上面杀旧壳 + 等待最多 ~8s；若这期间用户发起「退出管家」，
+  //   spawn 前必须再判一次，否则退出请求会与重启赛跑，刚退出的壳被拉回（与看护门同源缺陷）。
+  if (typeof o.shouldAbort === 'function') {
+    try {
+      if (o.shouldAbort()) return { ok: false, aborted: true, error: '会话已退出/退出中，已放弃拉起桌面壳', killed };
+    } catch {}
+  }
+
   // 拉起新壳（门 0 在其启动时执行：检测 -> 下载 -> 验签 -> 安装 -> 重启进新版）
   //
   // 必须监听 'error' 且不能在 spawn 返回时就报成功：Node 的 spawn 对不存在的可执行

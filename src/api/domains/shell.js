@@ -67,8 +67,15 @@ function handle(ctx) {
   // 让壳用上新版本即让壳重新启动一次，门 0 在新进程里完成检测/下载/验签/安装。
   if (req.method === 'POST' && pathname === '/shell/restart') {
     if (!originAllowed(req, sup.config.apiPort)) { req.resume(); return send(403, {}); }
+    // 会话门（2026-09-18 修，K2）：退出中/已退出绝不允许重启桌面壳 —— 否则「退出」被推翻。
+    if (typeof sup._sessionHalting === 'function' && sup._sessionHalting()) {
+      req.resume();
+      return send(409, { ok: false, error: '会话已退出/退出中，拒绝重启桌面壳' });
+    }
     req.resume();
-    return Promise.resolve(shell.restartShell())
+    return Promise.resolve(shell.restartShell({
+      shouldAbort: () => (typeof sup._sessionHalting === 'function' && sup._sessionHalting()),
+    }))
       .then((r) => {
         if (sup.events) sup.events.append('shell_restart_requested', { ok: r.ok, killed: r.killed || [], pid: r.pid || null });
         return send(r.ok ? 200 : 500, r);

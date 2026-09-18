@@ -70,6 +70,8 @@ export interface SupervisorStatus {
   backoffUntil?: string | null;
   lastFailure?: string | null;
   upgradeHold?: boolean;
+  /** 用户「退出管家」持久标记：退出后守卫重启不得凭看护把壳拉回（2026-09-18）。 */
+  shellHalted?: boolean;
   commandMissing?: boolean;
   dshTokenCaptured?: boolean;
   native?: NativeDshStatus;

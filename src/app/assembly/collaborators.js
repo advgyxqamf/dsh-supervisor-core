@@ -87,6 +87,7 @@ function installState(host) {
     getManualRestart: () => host.manualRestart, setManualRestart: (v) => { host.manualRestart = v; },
     getHold: () => host._upgradeHold, setHold: (v) => { host._upgradeHold = v; },
     getSince: () => host._upgradeHoldSince, setSince: (v) => { host._upgradeHoldSince = v; },
+    getShellHalted: () => host._shellHalted, setShellHalted: (v) => { host._shellHalted = v; },
     stopProcess: (why) => host.stopProcess(why), tick: () => host.tick(),
   });
   host.state = state;
